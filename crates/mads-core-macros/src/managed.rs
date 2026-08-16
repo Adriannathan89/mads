@@ -2,7 +2,8 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Attribute, Error, Fields, ItemStruct, spanned::Spanned};
+use syn::visit_mut::{self, VisitMut};
+use syn::{Attribute, Error, Fields, Ident, ItemStruct, Type, TypePath, spanned::Spanned};
 
 use crate::path::core_path;
 
@@ -109,19 +110,28 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
 
     let (inner_fields, resolve_fields, dependencies) = match fields {
         Fields::Named(fields) => {
-            let declarations = fields.named.iter().map(|field| {
+            let normalized_fields: Vec<_> = fields
+                .named
+                .iter()
+                .cloned()
+                .map(|mut field| {
+                    normalize_self_type(&mut field.ty, &ident);
+                    field
+                })
+                .collect();
+            let declarations = normalized_fields.iter().map(|field| {
                 let attrs = &field.attrs;
                 let vis = &field.vis;
                 let ident = &field.ident;
                 let ty = &field.ty;
                 quote!(#(#attrs)* #vis #ident: #ty)
             });
-            let resolutions = fields.named.iter().map(|field| {
+            let resolutions = normalized_fields.iter().map(|field| {
                 let ident = field.ident.as_ref().expect("named fields have identifiers");
                 let ty = &field.ty;
                 quote!(#ident: context.resolve::<#ty>()?.as_ref().clone())
             });
-            let descriptors = fields.named.iter().map(|field| {
+            let descriptors = normalized_fields.iter().map(|field| {
                 let ty = &field.ty;
                 quote! {
                     #core::DependencyDescriptor::new(
@@ -198,4 +208,26 @@ fn is_repr(attribute: &&Attribute) -> bool {
 
 fn is_doc(attribute: &&Attribute) -> bool {
     attribute.path().is_ident("doc")
+}
+
+fn normalize_self_type(ty: &mut Type, handle: &Ident) {
+    SelfTypeNormalizer { handle }.visit_type_mut(ty);
+}
+
+struct SelfTypeNormalizer<'a> {
+    handle: &'a Ident,
+}
+
+impl VisitMut for SelfTypeNormalizer<'_> {
+    fn visit_type_path_mut(&mut self, type_path: &mut TypePath) {
+        if type_path.qself.is_none() {
+            if let Some(segment) = type_path.path.segments.first_mut() {
+                if segment.ident == "Self" {
+                    segment.ident = self.handle.clone();
+                }
+            }
+        }
+
+        visit_mut::visit_type_path_mut(self, type_path);
+    }
 }
