@@ -1,0 +1,5 @@
+error: `#[mads::main]` requires an asynchronous function
+ --> tests/ui/fail/main_sync.rs:4:1
+  |
+4 | fn main() {}
+  | ^^
