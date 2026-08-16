@@ -30,6 +30,10 @@ pub use diagnostic::{
 pub use lifecycle::{LifecycleFuture, LifecycleHook, LifecycleManager, LifecycleState};
 pub use registry::{ErasedProvider, ProviderRegistry};
 
-/// Re-exports the core procedural macros when they are implemented.
-#[allow(unused_imports)]
-pub use mads_core_macros::*;
+pub use mads_core_macros::{module, repository, service};
+
+/// Implementation details used by MADS.rs procedural macro expansions.
+#[doc(hidden)]
+pub mod __private {
+    pub use inventory;
+}

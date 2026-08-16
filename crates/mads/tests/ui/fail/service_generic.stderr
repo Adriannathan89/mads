@@ -1,0 +1,5 @@
+error: `#[mads::service]` supports only non-generic named-field or unit structs, such as `#[mads::service] struct Managed { dependency: Dependency }` or `#[mads::service] struct Managed;`
+ --> tests/ui/fail/service_generic.rs:4:22
+  |
+4 | struct GenericService<T> {
+  |                      ^

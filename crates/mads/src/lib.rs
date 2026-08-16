@@ -8,6 +8,7 @@
 
 /// Re-exports the framework-neutral MADS.rs core.
 pub use mads_core as core;
+pub use mads_core::{module, repository, service};
 
 /// Re-exports standard integrations when the `common` feature is enabled.
 #[cfg(feature = "common")]
@@ -18,4 +19,6 @@ pub use mads_common as common;
 pub use mads_extra as extra;
 
 /// Collects ergonomic public imports as MADS.rs APIs are introduced.
-pub mod prelude {}
+pub mod prelude {
+    pub use mads_core::{module, repository, service};
+}

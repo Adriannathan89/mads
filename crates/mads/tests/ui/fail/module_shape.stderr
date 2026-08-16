@@ -1,0 +1,8 @@
+error: `#[mads::module]` supports only `#[mads::module] struct AppModule;`
+ --> tests/ui/fail/module_shape.rs:4:22
+  |
+4 |   struct InvalidModule {
+  |  ______________________^
+5 | |     enabled: bool,
+6 | | }
+  | |_^
