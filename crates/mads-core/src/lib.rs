@@ -6,6 +6,13 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+mod diagnostic;
+
+pub use diagnostic::{
+    Diagnostic, DiagnosticCode, Error, MADS001, MADS003, MADS004, MADS010, MADS011, MADS020,
+    Result, SourceLocation,
+};
+
 /// Re-exports the core procedural macros when they are implemented.
 #[allow(unused_imports)]
 pub use mads_core_macros::*;
