@@ -3,7 +3,9 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::visit_mut::{self, VisitMut};
-use syn::{Attribute, Error, Fields, Ident, ItemStruct, Type, TypePath, spanned::Spanned};
+use syn::{
+    Attribute, Error, ExprPath, Fields, Ident, ItemStruct, Type, TypePath, spanned::Spanned,
+};
 
 use crate::path::core_path;
 
@@ -219,6 +221,18 @@ struct SelfTypeNormalizer<'a> {
 }
 
 impl VisitMut for SelfTypeNormalizer<'_> {
+    fn visit_expr_path_mut(&mut self, expression_path: &mut ExprPath) {
+        if expression_path.qself.is_none() {
+            if let Some(segment) = expression_path.path.segments.first_mut() {
+                if segment.ident == "Self" {
+                    segment.ident = self.handle.clone();
+                }
+            }
+        }
+
+        visit_mut::visit_expr_path_mut(self, expression_path);
+    }
+
     fn visit_type_path_mut(&mut self, type_path: &mut TypePath) {
         if type_path.qself.is_none() {
             if let Some(segment) = type_path.path.segments.first_mut() {
