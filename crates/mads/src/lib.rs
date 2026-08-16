@@ -5,10 +5,25 @@
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
+#![doc = include_str!("../../../README.md")]
 
 /// Re-exports the framework-neutral MADS.rs core.
 pub use mads_core as core;
-pub use mads_core::{main, module, provider, repository, service};
+
+/// Re-exports the asynchronous MADS.rs entry-point attribute.
+pub use mads_core::main;
+
+/// Re-exports the application-module declaration attribute.
+pub use mads_core::module;
+
+/// Re-exports the general-purpose provider declaration attribute.
+pub use mads_core::provider;
+
+/// Re-exports the repository declaration attribute.
+pub use mads_core::repository;
+
+/// Re-exports the service declaration attribute.
+pub use mads_core::service;
 
 /// Re-exports standard integrations when the `common` feature is enabled.
 #[cfg(feature = "common")]
@@ -18,7 +33,26 @@ pub use mads_common as common;
 #[cfg(feature = "extra")]
 pub use mads_extra as extra;
 
-/// Collects ergonomic public imports as MADS.rs APIs are introduced.
+/// Collects application-facing MADS.rs imports.
 pub mod prelude {
-    pub use mads_core::{main, module, provider, repository, service};
+    /// Re-exports the asynchronous MADS.rs entry-point attribute.
+    pub use mads_core::main;
+
+    /// Re-exports the application-module declaration attribute.
+    pub use mads_core::module;
+
+    /// Re-exports the general-purpose provider declaration attribute.
+    pub use mads_core::provider;
+
+    /// Re-exports the repository declaration attribute.
+    pub use mads_core::repository;
+
+    /// Re-exports the service declaration attribute.
+    pub use mads_core::service;
+
+    /// Re-exports types used to build, run, and inspect an application.
+    pub use mads_core::{
+        ApplicationContext, Catalog, Config, ConfigBuilder, Diagnostic, Error, LifecycleHook,
+        LifecycleState, Mads, MadsBuilder, Result, SourceLocation,
+    };
 }

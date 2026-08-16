@@ -2,7 +2,39 @@
 
 use std::sync::Arc;
 
-use mads::core::{Catalog, Mads, ProviderKind};
+use mads::core::{Catalog as CoreCatalog, Mads as CoreMads, ProviderKind};
+
+#[test]
+fn prelude_exposes_core_types_and_bare_attributes() {
+    use mads::prelude::*;
+
+    mod declarations {
+        use mads::prelude::*;
+
+        #[module]
+        struct PreludeModule;
+
+        #[provider]
+        fn prelude_value() -> usize {
+            1
+        }
+
+        #[repository]
+        struct PreludeRepository;
+
+        #[service]
+        struct PreludeService;
+
+        #[main]
+        async fn main() {}
+    }
+
+    let _ = std::any::TypeId::of::<Mads>();
+    let _ = std::any::TypeId::of::<Config>();
+    let _ = std::any::TypeId::of::<Diagnostic>();
+    let _ = std::any::TypeId::of::<Catalog>();
+    let _ = std::any::TypeId::of::<LifecycleState>();
+}
 
 #[mads::module]
 struct FacadeModule;
@@ -33,11 +65,11 @@ impl FacadeService {
 
 #[test]
 fn facade_attributes_register_stable_descriptors() {
-    let module_names: Vec<_> = Catalog::modules()
+    let module_names: Vec<_> = CoreCatalog::modules()
         .into_iter()
         .map(|descriptor| descriptor.type_name())
         .collect();
-    let providers = Catalog::providers();
+    let providers = CoreCatalog::providers();
 
     assert!(module_names.contains(&"facade::FacadeModule"));
     assert!(providers.iter().any(|descriptor| {
@@ -52,7 +84,7 @@ fn facade_attributes_register_stable_descriptors() {
 
 #[test]
 fn service_dependencies_follow_source_field_order() {
-    let descriptor = Catalog::provider_for::<FacadeService>()
+    let descriptor = CoreCatalog::provider_for::<FacadeService>()
         .expect("the facade service descriptor should be registered");
     let dependency_names: Vec<_> = descriptor
         .dependencies()
@@ -65,7 +97,7 @@ fn service_dependencies_follow_source_field_order() {
 
 #[tokio::test]
 async fn cloned_service_handles_share_the_inner_allocation() {
-    let mut builder = Mads::builder();
+    let mut builder = CoreMads::builder();
     builder
         .provide(Clock)
         .expect("clock insertion should succeed");
