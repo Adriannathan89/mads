@@ -77,12 +77,18 @@ impl LifecycleManager {
         for index in 0..self.hooks.len() {
             let hook = self.hooks[index].as_ref();
             if let Err(error) = hook.start(context).await {
-                let startup_error = hook_failure(hook.name(), "startup", error);
+                let mut diagnostic = hook_failure_diagnostic(hook.name(), "startup");
                 for started_index in started.into_iter().rev() {
-                    let _: Result<()> = self.hooks[started_index].stop(context).await;
+                    let rollback_hook = self.hooks[started_index].as_ref();
+                    if let Err(rollback_error) = rollback_hook.stop(context).await {
+                        diagnostic = diagnostic.with_suggestion(format!(
+                            "rollback hook {} failed: {rollback_error}",
+                            rollback_hook.name()
+                        ));
+                    }
                 }
                 self.state = LifecycleState::Stopped;
-                return Err(startup_error);
+                return Err(Error::with_source(diagnostic, error));
             }
             started.push(index);
         }
@@ -132,13 +138,14 @@ fn invalid_transition(state: LifecycleState, operation: &str) -> Error {
 }
 
 fn hook_failure(name: &str, operation: &str, error: Error) -> Error {
-    Error::with_source(
-        Diagnostic::new(
-            MADS011,
-            "lifecycle hook failed",
-            format!("lifecycle hook failed during {operation}"),
-        )
-        .with_subject(name),
-        error,
+    Error::with_source(hook_failure_diagnostic(name, operation), error)
+}
+
+fn hook_failure_diagnostic(name: &str, operation: &str) -> Diagnostic {
+    Diagnostic::new(
+        MADS011,
+        "lifecycle hook failed",
+        format!("lifecycle hook failed during {operation}"),
     )
+    .with_subject(name)
 }
