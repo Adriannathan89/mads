@@ -1,11 +1,12 @@
 //! Integration tests for explicit application construction.
 
 use std::any::TypeId;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use mads_core::{
-    Catalog, ConstructionContext, ErasedProvider, MADS003, Mads, ProviderDescriptor,
-    ProviderFuture, ProviderKind, SourceLocation,
+    ApplicationContext, Catalog, ConstructionContext, ErasedProvider, LifecycleFuture,
+    LifecycleHook, LifecycleState, MADS003, Mads, ProviderDescriptor, ProviderFuture, ProviderKind,
+    SourceLocation,
 };
 
 struct Database;
@@ -94,4 +95,54 @@ async fn construct_does_not_recursively_create_missing_dependencies() {
 
     assert_eq!(error.code(), MADS003);
     assert!(Catalog::provider_for::<Database>().is_ok());
+}
+
+struct ApplicationHook(Arc<Mutex<Vec<&'static str>>>);
+
+impl LifecycleHook for ApplicationHook {
+    fn name(&self) -> &str {
+        "application"
+    }
+
+    fn start<'a>(&'a self, _: &'a ApplicationContext) -> LifecycleFuture<'a> {
+        Box::pin(async move {
+            self.0
+                .lock()
+                .expect("event lock should not be poisoned")
+                .push("start");
+            Ok(())
+        })
+    }
+
+    fn stop<'a>(&'a self, _: &'a ApplicationContext) -> LifecycleFuture<'a> {
+        Box::pin(async move {
+            self.0
+                .lock()
+                .expect("event lock should not be poisoned")
+                .push("stop");
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test]
+async fn built_application_owns_and_runs_registered_lifecycle_hooks() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let mut builder = Mads::builder();
+    builder.lifecycle_hook(ApplicationHook(Arc::clone(&events)));
+    let mut application = builder.build();
+
+    assert_eq!(application.state(), LifecycleState::Created);
+    application.start().await.expect("application should start");
+    assert_eq!(application.state(), LifecycleState::Running);
+    application
+        .shutdown()
+        .await
+        .expect("application should stop");
+
+    assert_eq!(application.state(), LifecycleState::Stopped);
+    assert_eq!(
+        *events.lock().expect("event lock should not be poisoned"),
+        ["start", "stop"]
+    );
 }

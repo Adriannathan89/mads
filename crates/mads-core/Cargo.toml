@@ -12,6 +12,7 @@ mads-core-macros = { path = "../mads-core-macros" }
 tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
+cargo_metadata = "0.19"
 tokio.workspace = true
 
 [features]

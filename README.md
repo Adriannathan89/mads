@@ -99,8 +99,25 @@ surfaces remain intentionally reserved rather than exposed as incomplete APIs.
 
 ## Development
 
-Use the configured stable Rust toolchain and run:
+CI uses stable Rust for formatting, linting, tests, documentation, and coverage.
+Before submitting a change, run the same stable checks locally:
 
-```bash
-cargo check --workspace --all-features
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+cargo tree -p mads-core --edges normal
+cargo llvm-cov --workspace --all-features --ignore-filename-regex '(^|/)tests/ui/' --fail-under-lines 85
+```
+
+The coverage command requires `cargo-llvm-cov` and the
+`llvm-tools-preview` Rust component. It enforces at least 85 percent line
+coverage while excluding only trybuild UI fixtures.
+
+CI separately verifies the minimum supported Rust version (MSRV), Rust 1.85.0.
+When that toolchain is installed locally, run:
+
+```sh
+rustup run 1.85.0 cargo test --workspace --all-features
 ```
