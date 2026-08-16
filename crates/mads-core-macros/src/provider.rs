@@ -1,11 +1,10 @@
 //! Expansion for synchronous and asynchronous provider functions.
 
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::visit::{self, Visit};
 use syn::{
-    Error, FnArg, GenericArgument, GenericParam, ItemFn, PathArguments, ReturnType, Type,
-    spanned::Spanned,
+    Error, Expr, FnArg, GenericArgument, ItemFn, PathArguments, ReturnType, Type, spanned::Spanned,
 };
 
 use crate::path::core_path;
@@ -35,16 +34,10 @@ fn validate_signature(item: &ItemFn) -> syn::Result<()> {
         ));
     }
 
-    if let Some(parameter) = item
-        .sig
-        .generics
-        .params
-        .iter()
-        .find(|parameter| matches!(parameter, GenericParam::Type(_) | GenericParam::Const(_)))
-    {
+    if let Some(parameter) = item.sig.generics.params.first() {
         return Err(Error::new(
             parameter.span(),
-            "`#[mads::provider]` does not support type or const generics",
+            "`#[mads::provider]` does not support lifetime, type, or const generics",
         ));
     }
 
@@ -67,12 +60,14 @@ fn validate_signature(item: &ItemFn) -> syn::Result<()> {
             item.sig.ident.span(),
             "`#[mads::provider]` requires an explicit concrete return type",
         )),
-        ReturnType::Type(_, output) => non_concrete_type(output).map_or(Ok(()), |non_concrete| {
-            Err(Error::new(
-                non_concrete.span(),
-                "`#[mads::provider]` requires an explicit concrete return type",
-            ))
-        }),
+        ReturnType::Type(_, output) => {
+            non_concrete_output_span(output).map_or(Ok(()), |non_concrete| {
+                Err(Error::new(
+                    non_concrete,
+                    "`#[mads::provider]` requires an explicit concrete return type",
+                ))
+            })
+        }
     }
 }
 
@@ -160,26 +155,37 @@ fn expand_provider(item: ItemFn) -> syn::Result<TokenStream> {
     })
 }
 
-fn non_concrete_type(output: &Type) -> Option<&Type> {
-    let mut finder = NonConcreteTypeFinder { found: None };
+fn non_concrete_output_span(output: &Type) -> Option<Span> {
+    let mut finder = NonConcreteOutputFinder { found: None };
     finder.visit_type(output);
     finder.found
 }
 
-struct NonConcreteTypeFinder<'ast> {
-    found: Option<&'ast Type>,
+struct NonConcreteOutputFinder {
+    found: Option<Span>,
 }
 
-impl<'ast> Visit<'ast> for NonConcreteTypeFinder<'ast> {
+impl<'ast> Visit<'ast> for NonConcreteOutputFinder {
     fn visit_type(&mut self, node: &'ast Type) {
         if self.found.is_some() {
             return;
         }
         if matches!(node, Type::Infer(_) | Type::ImplTrait(_)) {
-            self.found = Some(node);
+            self.found = Some(node.span());
             return;
         }
         visit::visit_type(self, node);
+    }
+
+    fn visit_expr(&mut self, node: &'ast Expr) {
+        if self.found.is_some() {
+            return;
+        }
+        if matches!(node, Expr::Infer(_)) {
+            self.found = Some(node.span());
+            return;
+        }
+        visit::visit_expr(self, node);
     }
 }
 

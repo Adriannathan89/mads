@@ -8,7 +8,14 @@ fn attributes_expand_for_supported_dependency_paths() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let target_dir = manifest_dir.join("../../target/macro-consumers");
 
-    for consumer in ["facade", "renamed_facade", "core", "renamed_core"] {
+    for consumer in [
+        "facade",
+        "renamed_facade",
+        "core",
+        "renamed_core",
+        "main_facade",
+        "main_renamed_facade",
+    ] {
         let manifest = manifest_dir
             .join("tests/consumers")
             .join(consumer)

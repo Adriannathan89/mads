@@ -1,0 +1,5 @@
+error: `#[mads::provider]` does not support lifetime, type, or const generics
+ --> tests/ui/fail/provider_lifetime_generic.rs:4:10
+  |
+4 | fn value<'value>() -> String {
+  |          ^^^^^^
