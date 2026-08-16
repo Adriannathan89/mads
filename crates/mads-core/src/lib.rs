@@ -6,8 +6,10 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+mod config;
 mod diagnostic;
 
+pub use config::{Config, ConfigBuilder, ConfigSource, ConfigValue, EnvSource, MapSource};
 pub use diagnostic::{
     Diagnostic, DiagnosticCode, Error, MADS001, MADS003, MADS004, MADS010, MADS011, MADS020,
     Result, SourceLocation,
