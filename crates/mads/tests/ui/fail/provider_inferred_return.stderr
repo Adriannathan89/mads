@@ -1,0 +1,5 @@
+error: `#[mads::provider]` requires an explicit concrete return type
+ --> tests/ui/fail/provider_inferred_return.rs:4:15
+  |
+4 | fn value() -> _ {
+  |               ^

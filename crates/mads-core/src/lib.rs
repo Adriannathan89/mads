@@ -14,6 +14,8 @@ mod descriptor;
 mod diagnostic;
 mod lifecycle;
 mod registry;
+#[cfg(feature = "runtime-tokio")]
+pub mod runtime;
 
 pub use builder::{Mads, MadsBuilder};
 pub use catalog::Catalog;
@@ -30,7 +32,7 @@ pub use diagnostic::{
 pub use lifecycle::{LifecycleFuture, LifecycleHook, LifecycleManager, LifecycleState};
 pub use registry::{ErasedProvider, ProviderRegistry};
 
-pub use mads_core_macros::{module, repository, service};
+pub use mads_core_macros::{main, module, provider, repository, service};
 
 /// Implementation details used by MADS.rs procedural macro expansions.
 #[doc(hidden)]

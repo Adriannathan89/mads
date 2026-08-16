@@ -1,0 +1,5 @@
+error: `#[mads::provider]` cannot be applied to methods; declare a free function without a `self` receiver
+ --> tests/ui/fail/provider_method.rs:7:14
+  |
+7 |     fn value(&self) -> String {
+  |              ^
