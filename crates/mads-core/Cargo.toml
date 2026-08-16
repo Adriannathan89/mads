@@ -11,6 +11,9 @@ inventory.workspace = true
 mads-core-macros = { path = "../mads-core-macros" }
 tokio = { workspace = true, optional = true }
 
+[dev-dependencies]
+tokio.workspace = true
+
 [features]
 default = []
 runtime-tokio = ["dep:tokio"]
