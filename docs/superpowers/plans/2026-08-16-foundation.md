@@ -1291,11 +1291,11 @@ Run:
 
 ```bash
 rg --files crates -g '*.rs'
-rg -L '^//!' crates -g '*.rs'
+rg --files-without-match '^//!' crates -g '*.rs'
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 ```
 
-Expected: `rg -L` prints no Rust source file, and rustdoc exits zero under `missing_docs = deny`.
+Expected: `rg --files-without-match` prints no Rust source file (and exits 1), and rustdoc exits zero under `missing_docs = deny`.
 
 - [x] **Step 2: Audit milestone scope**
 
