@@ -1,0 +1,3 @@
+# Local linked worktrees and Superpowers execution artifacts.
+/.worktrees/
+/.superpowers/
