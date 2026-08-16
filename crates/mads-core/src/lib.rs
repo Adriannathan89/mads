@@ -6,13 +6,20 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+mod catalog;
 mod config;
 mod context;
+mod descriptor;
 mod diagnostic;
 mod registry;
 
+pub use catalog::Catalog;
 pub use config::{Config, ConfigBuilder, ConfigSource, ConfigValue, EnvSource, MapSource};
 pub use context::{ApplicationContext, ConstructionContext};
+pub use descriptor::{
+    DependencyDescriptor, ModuleDescriptor, ProviderConstructor, ProviderDescriptor,
+    ProviderFuture, ProviderKind,
+};
 pub use diagnostic::{
     Diagnostic, DiagnosticCode, Error, MADS001, MADS003, MADS004, MADS010, MADS011, MADS020,
     Result, SourceLocation,
