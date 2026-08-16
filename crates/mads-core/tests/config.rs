@@ -1,6 +1,10 @@
 //! Integration tests for deterministic configuration merging.
 
 use std::collections::BTreeMap;
+#[cfg(unix)]
+use std::ffi::OsString;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
 
 use mads_core::{
     ConfigBuilder, ConfigSource, Diagnostic, EnvSource, Error, MADS020, MapSource, Result,
@@ -61,4 +65,38 @@ fn iter_returns_keys_in_lexical_order() {
     let keys: Vec<_> = config.iter().map(|(key, _)| key).collect();
 
     assert_eq!(keys, ["alpha", "middle", "zeta"]);
+}
+
+#[test]
+fn normalized_environment_key_collisions_use_the_later_variable() {
+    let config = ConfigBuilder::new()
+        .source(EnvSource::from_iter(
+            "MADS_",
+            [("MADS_SERVER__PORT", "3000"), ("MADS_server__port", "8080")],
+        ))
+        .build()
+        .expect("configuration should build");
+
+    assert_eq!(config.get("server.port"), Some("8080"));
+    assert_eq!(config.source_of("server.port"), Some("environment"));
+}
+
+#[cfg(unix)]
+#[test]
+fn environment_source_ignores_non_unicode_names_and_values() {
+    let invalid = OsString::from_vec(vec![0xFF]);
+    let config = ConfigBuilder::new()
+        .source(EnvSource::from_iter(
+            "MADS_",
+            [
+                (OsString::from("MADS_VALID"), OsString::from("value")),
+                (invalid.clone(), OsString::from("ignored")),
+                (OsString::from("MADS_INVALID_VALUE"), invalid),
+            ],
+        ))
+        .build()
+        .expect("configuration should ignore non-Unicode variables");
+
+    assert_eq!(config.get("valid"), Some("value"));
+    assert_eq!(config.len(), 1);
 }

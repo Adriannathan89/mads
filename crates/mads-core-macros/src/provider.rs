@@ -190,6 +190,7 @@ impl<'ast> Visit<'ast> for NonConcreteOutputFinder {
 }
 
 fn result_output(return_type: &Type) -> Option<&Type> {
+    let return_type = ungroup_type(return_type);
     let Type::Path(type_path) = return_type else {
         return None;
     };
@@ -223,5 +224,15 @@ fn result_output(return_type: &Type) -> Option<&Type> {
     match arguments.args.first()? {
         GenericArgument::Type(output) => Some(output),
         _ => None,
+    }
+}
+
+fn ungroup_type(mut type_: &Type) -> &Type {
+    loop {
+        type_ = match type_ {
+            Type::Group(group) => &group.elem,
+            Type::Paren(parenthesized) => &parenthesized.elem,
+            _ => return type_,
+        };
     }
 }

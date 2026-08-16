@@ -45,6 +45,14 @@ struct FacadeRepository;
 #[derive(Clone)]
 struct Clock;
 
+struct GroupedFallibleProvider;
+
+#[allow(clippy::result_large_err, unused_parens)]
+#[mads::provider]
+fn grouped_fallible_provider() -> (mads::core::Result<GroupedFallibleProvider>) {
+    Ok(GroupedFallibleProvider)
+}
+
 #[mads::service]
 struct FacadeService {
     repository: FacadeRepository,
@@ -123,4 +131,22 @@ async fn cloned_service_handles_share_the_inner_allocation() {
         &service,
         &application.context().resolve().unwrap()
     ));
+}
+
+#[tokio::test]
+async fn grouped_mads_results_register_their_success_type() {
+    let mut builder = CoreMads::builder();
+
+    builder
+        .construct::<GroupedFallibleProvider>()
+        .await
+        .expect("a grouped MADS Result provider should construct its success type");
+
+    let application = builder.build();
+    assert!(
+        application
+            .context()
+            .resolve::<GroupedFallibleProvider>()
+            .is_ok()
+    );
 }

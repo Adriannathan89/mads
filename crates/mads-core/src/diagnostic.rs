@@ -30,16 +30,16 @@ pub const MADS001: DiagnosticCode = DiagnosticCode::new("MADS001");
 /// Missing provider registration.
 pub const MADS003: DiagnosticCode = DiagnosticCode::new("MADS003");
 
-/// Invalid provider configuration.
+/// Provider registry type mismatch.
 pub const MADS004: DiagnosticCode = DiagnosticCode::new("MADS004");
 
-/// Route configuration error.
+/// Invalid lifecycle state transition.
 pub const MADS010: DiagnosticCode = DiagnosticCode::new("MADS010");
 
-/// Handler configuration error.
+/// Lifecycle hook failure.
 pub const MADS011: DiagnosticCode = DiagnosticCode::new("MADS011");
 
-/// Runtime configuration error.
+/// Configuration source failure.
 pub const MADS020: DiagnosticCode = DiagnosticCode::new("MADS020");
 
 /// The source position associated with a diagnostic.

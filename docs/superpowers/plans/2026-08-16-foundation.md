@@ -1285,7 +1285,7 @@ git --git-dir=.git-data --work-tree=. commit -m "ci: enforce architecture and co
 - Consumes: All previous task deliverables.
 - Produces: Evidence that Phase 0 and v0.1 meet the approved specification without later-milestone leakage.
 
-- [ ] **Step 1: Audit public documentation coverage**
+- [x] **Step 1: Audit public documentation coverage**
 
 Run:
 
@@ -1297,7 +1297,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 
 Expected: `rg -L` prints no Rust source file, and rustdoc exits zero under `missing_docs = deny`.
 
-- [ ] **Step 2: Audit milestone scope**
+- [x] **Step 2: Audit milestone scope**
 
 Run:
 
@@ -1307,7 +1307,7 @@ rg -n 'axum|diesel|redis|cacheable|rate_limit|request.scope|transient.scope' Car
 
 Expected: matches appear only in documentation that marks those capabilities deferred or in the architecture test's forbidden dependency list; no implementation dependency or public symbol provides them.
 
-- [ ] **Step 3: Run all release gates from clean command invocations**
+- [x] **Step 3: Run all release gates from clean command invocations**
 
 Run:
 
@@ -1321,7 +1321,7 @@ cargo llvm-cov --workspace --all-features --ignore-filename-regex '(^|/)tests/ui
 
 Expected: all five commands exit zero.
 
-- [ ] **Step 4: Inspect the final repository delta**
+- [x] **Step 4: Inspect the final repository delta**
 
 Run:
 
@@ -1332,7 +1332,7 @@ git --git-dir=.git-data --work-tree=. log --oneline --decorate -12
 
 Expected: the worktree is clean because Task 1 committed the pre-existing project documents together with the workspace baseline.
 
-- [ ] **Step 5: Commit final documentation or test corrections if any were required**
+- [x] **Step 5: Commit final documentation or test corrections if any were required**
 
 If Step 1 through Step 3 required a correction, stage only those corrected files and commit:
 
