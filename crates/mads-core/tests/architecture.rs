@@ -4,6 +4,31 @@ use std::collections::{HashMap, HashSet};
 
 use cargo_metadata::{CargoOpt, DependencyKind, MetadataCommand, PackageId};
 
+const FORBIDDEN_DEPENDENCY_FRAGMENTS: [&str; 4] = ["mads-common", "mads-extra", "axum", "diesel"];
+
+fn is_forbidden_dependency(name: &str) -> bool {
+    FORBIDDEN_DEPENDENCY_FRAGMENTS
+        .iter()
+        .any(|fragment| name.contains(fragment))
+}
+
+#[test]
+fn dependency_name_families_are_forbidden() {
+    for name in [
+        "axum-extra",
+        "mads-common-http",
+        "mads-extra-cache",
+        "diesel-async",
+    ] {
+        assert!(
+            is_forbidden_dependency(name),
+            "{name} should match a forbidden dependency family"
+        );
+    }
+
+    assert!(!is_forbidden_dependency("inventory"));
+}
+
 #[test]
 fn core_normal_dependencies_stay_inside_the_core_boundary() {
     let workspace_manifest = format!("{}/../../Cargo.toml", env!("CARGO_MANIFEST_DIR"));
@@ -45,11 +70,10 @@ fn core_normal_dependencies_stay_inside_the_core_boundary() {
         }
     }
 
-    let forbidden = ["mads-common", "mads-extra", "axum", "diesel"];
     let mut violations: Vec<_> = visited
         .into_iter()
         .filter_map(|package_id| package_names.get(package_id).copied())
-        .filter(|name| forbidden.contains(name))
+        .filter(|name| is_forbidden_dependency(name))
         .collect();
     violations.sort_unstable();
 
