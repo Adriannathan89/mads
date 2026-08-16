@@ -1,0 +1,17 @@
+[package]
+name = "mads-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+mads = { path = "../mads" }
+
+[[bin]]
+name = "mads"
+path = "src/main.rs"
+
+[lints]
+workspace = true

@@ -1,0 +1,34 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/mads",
+    "crates/mads-core",
+    "crates/mads-core-macros",
+    "crates/mads-common",
+    "crates/mads-common-macros",
+    "crates/mads-cli",
+    "crates/mads-extra",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["MADS.rs contributors"]
+repository = "https://github.com/Adriannathan89/mads"
+
+[workspace.dependencies]
+inventory = "0.3"
+proc-macro-crate = "3"
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full", "extra-traits"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+trybuild = "1"
+
+[workspace.lints.rust]
+missing_docs = "deny"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "deny"

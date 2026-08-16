@@ -1,3 +1,7 @@
 # Local linked worktrees and Superpowers execution artifacts.
 /.worktrees/
 /.superpowers/
+/target/
+/coverage/
+*.profraw
+.DS_Store

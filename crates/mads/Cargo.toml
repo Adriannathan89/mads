@@ -1,0 +1,21 @@
+[package]
+name = "mads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+mads-common = { path = "../mads-common", optional = true }
+mads-core = { path = "../mads-core" }
+mads-extra = { path = "../mads-extra", optional = true }
+
+[features]
+default = ["common", "runtime-tokio"]
+common = ["dep:mads-common"]
+runtime-tokio = ["mads-core/runtime-tokio"]
+extra = ["dep:mads-extra"]
+
+[lints]
+workspace = true

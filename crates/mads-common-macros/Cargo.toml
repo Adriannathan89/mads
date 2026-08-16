@@ -1,0 +1,15 @@
+[package]
+name = "mads-common-macros"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
