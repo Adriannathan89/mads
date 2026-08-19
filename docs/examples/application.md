@@ -23,6 +23,8 @@ Architecture:
 ```text
 HTTP Route
     ↓
+UserController
+    ↓
 UserService
     ↓
 UserRepository
@@ -60,7 +62,7 @@ user-api/
         ├── input.rs
         ├── repository.rs
         ├── service.rs
-        └── routes.rs
+        └── controller.rs
 ```
 
 ---
@@ -174,16 +176,17 @@ use mads::prelude::*;
 mod input;
 mod model;
 mod repository;
-mod routes;
 mod schema;
 mod service;
+mod controller;
 
 pub use input::*;
 pub use model::*;
 pub use repository::*;
 pub use service::*;
+pub use controller::*;
 
-#[module(path = "/users")]
+#[module]
 pub struct UserModule;
 ```
 
@@ -194,7 +197,7 @@ MADS associates the route/service/repository metadata belonging to this module w
 ```rust
 services = [UserService]
 repositories = [UserRepository]
-routes = [list_users, find_user, create_user, update_user, delete_user]
+routes = [UserRoutes]
 ```
 
 ---
@@ -529,9 +532,9 @@ That type is enough for MADS to construct the service graph.
 
 ---
 
-## 12. Routes
+## 12. Controller
 
-`src/users/routes.rs`:
+`src/users/controller.rs`:
 
 ```rust
 use mads::prelude::*;
@@ -544,71 +547,80 @@ use super::{
     UserService,
 };
 
-#[get("/")]
-pub async fn list_users(
-    query: Query<UserListQuery>,
-    users: UserService,
-) -> Result<Json<Vec<User>>> {
-    let page = query.page.unwrap_or(1);
-    let limit = query.limit.unwrap_or(20);
+#[routes(prefix = "/users")]
+pub trait UserRoutes {
+    #[get("/")]
+    async fn list_users(&self, query: Query<UserListQuery>) -> Result<Json<Vec<User>>>;
 
-    let result = users.list(page, limit).await?;
+    #[get("/:id")]
+    async fn get_user(&self, id: Path<i64>) -> Result<Json<User>>;
 
-    Ok(Json(result))
+    #[post("/")]
+    async fn create_user(&self, input: Json<CreateUser>) -> Result<Created<User>>;
+
+    #[put("/:id")]
+    async fn update_user(
+        &self,
+        id: Path<i64>,
+        input: Json<UpdateUser>,
+    ) -> Result<Json<User>>;
+
+    #[delete("/:id")]
+    async fn delete_user(&self, id: Path<i64>) -> Result<NoContent>;
 }
 
-#[get("/:id")]
-pub async fn get_user(
-    id: Path<i64>,
+#[controller(routes = [UserRoutes])]
+pub struct UserController {
     users: UserService,
-) -> Result<Json<User>> {
-    Ok(Json(users.find(*id).await?))
 }
 
-#[post("/")]
-pub async fn create_user(
-    input: Json<CreateUser>,
-    users: UserService,
-) -> Result<Created<User>> {
-    let user = users.create(input.into_inner()).await?;
+impl UserRoutes for UserController {
+    async fn list_users(&self, query: Query<UserListQuery>) -> Result<Json<Vec<User>>> {
+        let page = query.page.unwrap_or(1);
+        let limit = query.limit.unwrap_or(20);
+        Ok(Json(self.users.list(page, limit).await?))
+    }
 
-    Ok(Created(user))
-}
+    async fn get_user(&self, id: Path<i64>) -> Result<Json<User>> {
+        Ok(Json(self.users.find(*id).await?))
+    }
 
-#[put("/:id")]
-pub async fn update_user(
-    id: Path<i64>,
-    input: Json<UpdateUser>,
-    users: UserService,
-) -> Result<Json<User>> {
-    let user = users
-        .update(*id, input.into_inner())
-        .await?;
+    async fn create_user(&self, input: Json<CreateUser>) -> Result<Created<User>> {
+        Ok(Created(self.users.create(input.into_inner()).await?))
+    }
 
-    Ok(Json(user))
-}
+    async fn update_user(
+        &self,
+        id: Path<i64>,
+        input: Json<UpdateUser>,
+    ) -> Result<Json<User>> {
+        let user = self.users.update(*id, input.into_inner()).await?;
+        Ok(Json(user))
+    }
 
-#[delete("/:id")]
-pub async fn delete_user(
-    id: Path<i64>,
-    users: UserService,
-) -> Result<NoContent> {
-    users.delete(*id).await?;
-
-    Ok(NoContent)
+    async fn delete_user(&self, id: Path<i64>) -> Result<NoContent> {
+        self.users.delete(*id).await?;
+        Ok(NoContent)
+    }
 }
 ```
 
-The handler parameters tell MADS what each route needs:
+The route trait defines the HTTP contract. The controller field declares its
+single application dependency:
 
 ```text
 Path<i64>           → HTTP path extractor
 Query<UserListQuery> → HTTP query extractor
 Json<CreateUser>    → HTTP body + validation
-UserService         → application dependency
+UserService         → controller dependency
 ```
 
-There is no manual `State<AppState>` extraction.
+There is no manual `State<AppState>` extraction. MADS constructs
+`UserRepository`, then `UserService`, then `UserController`.
+
+`#[routes]` generates reusable route metadata, while normal Rust trait checking
+ensures that `UserController` implements every endpoint with matching
+signatures.
 
 ---
 
@@ -676,25 +688,18 @@ From the application code, MADS derives an internal graph resembling:
 ```text
 AppModule
 │
-└── UserModule [/users]
+└── UserModule
     │
-    ├── GET /
-    │   └── UserService
-    │       └── UserRepository
-    │           └── Database
-    │               └── DieselPool
-    │
-    ├── GET /:id
-    │   └── UserService
-    │
-    ├── POST /
-    │   └── UserService
-    │
-    ├── PUT /:id
-    │   └── UserService
-    │
-    └── DELETE /:id
+    └── UserController [/users]
+        ├── GET /
+        ├── GET /:id
+        ├── POST /
+        ├── PUT /:id
+        ├── DELETE /:id
         └── UserService
+            └── UserRepository
+                └── Database
+                    └── DieselPool
 ```
 
 Combined route table:
@@ -741,6 +746,8 @@ run pending migrations
 construct UserRepository
       ↓
 construct UserService
+      ↓
+construct UserController
       ↓
 register Axum routes
       ↓
@@ -795,6 +802,8 @@ Json<CreateUser>
 deserialization
     ↓
 validation
+    ↓
+UserController::create_user
     ↓
 UserService::create
     ↓
@@ -959,7 +968,8 @@ Content-Type: application/json
 }
 ```
 
-MADS validates the `Input` before invoking `UserService`.
+MADS validates the `Input` before invoking `UserController`, which delegates to
+`UserService`.
 
 Response:
 
@@ -1001,9 +1011,10 @@ Database is required by UserRepository.
 Dependency path:
 
 GET /users
-└── UserService
-    └── UserRepository
-        └── Database
+└── UserController
+    └── UserService
+        └── UserRepository
+            └── Database
 
 MADS selected:
   DieselDatabaseAutoConfiguration
@@ -1035,8 +1046,9 @@ but no visible provider was found.
 Dependency graph:
 
 GET /users/:id
-└── UserService
-    └── UserRepository  ← missing
+└── UserController
+    └── UserService
+        └── UserRepository  ← missing
 
 help:
   define UserRepository with #[repository]
@@ -1057,7 +1069,7 @@ Example:
 
 ```text
 AppModule
-└── UserModule [/users]
+└── UserModule
     ├── UserRepository
     │   └── Database
     │       └── DieselPool [PostgreSQL]
@@ -1065,15 +1077,12 @@ AppModule
     ├── UserService
     │   └── UserRepository
     │
-    ├── GET /
-    │   └── UserService
-    ├── GET /:id
-    │   └── UserService
-    ├── POST /
-    │   └── UserService
-    ├── PUT /:id
-    │   └── UserService
-    └── DELETE /:id
+    └── UserController [/users]
+        ├── GET /
+        ├── GET /:id
+        ├── POST /
+        ├── PUT /:id
+        ├── DELETE /:id
         └── UserService
 ```
 
@@ -1208,18 +1217,24 @@ This demonstrates the intended auto-configuration back-off rule.
 
 MADS should not block advanced HTTP features.
 
-A route may directly use an Axum extractor if required:
+A controller route may directly use an Axum extractor if required. An optional
+route contract can extend the controller:
 
 ```rust
 use axum::extract::Multipart;
 
-#[post("/avatar")]
-async fn upload_avatar(
-    multipart: Multipart,
-    users: UserService,
-) -> Result<NoContent> {
-    // ...
-    Ok(NoContent)
+#[routes(prefix = "/users")]
+trait UserUploadRoutes {
+    #[post("/avatar")]
+    async fn upload_avatar(&self, multipart: Multipart) -> Result<NoContent>;
+}
+
+// Add `UserUploadRoutes` to `#[controller(routes = [...])]`.
+impl UserUploadRoutes for UserController {
+    async fn upload_avatar(&self, multipart: Multipart) -> Result<NoContent> {
+        // ...
+        Ok(NoContent)
+    }
 }
 ```
 
@@ -1261,6 +1276,8 @@ UserRepository
     ↓
 UserService
     ↓
+UserController
+    ↓
 HTTP routes
 ```
 
@@ -1294,11 +1311,18 @@ struct UserRepository {
 struct UserService {
     users: UserRepository,
 }
+
+#[controller(routes = [UserRoutes])]
+struct UserController {
+    users: UserService,
+}
 ```
 
 From those Rust types, MADS can derive:
 
 ```text
+UserController
+    ↓
 UserService
     ↓
 UserRepository
