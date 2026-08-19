@@ -29,7 +29,7 @@ Prefix dan endpoint path menolak semua Unicode control character, selain
 validasi yang sudah ada untuk query, fragment, percent-encoding, whitespace,
 dan backslash.
 
-**Acceptance criteria:** `#[get("/health\\0check")]` gagal saat compile dengan
+**Acceptance criteria:** `#[get("/health\0check")]` gagal saat compile dengan
 diagnostic yang jelas.
 
 ## Deferred decisions
