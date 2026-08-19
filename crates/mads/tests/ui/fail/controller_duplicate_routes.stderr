@@ -1,0 +1,5 @@
+error: duplicate controller route trait
+ --> tests/ui/fail/controller_duplicate_routes.rs:7:37
+  |
+7 | #[mads::controller(routes = [Route, Route])]
+  |                                     ^^^^^

@@ -169,12 +169,19 @@ dependencies = [
 name = "mads-common"
 version = "0.1.0"
 dependencies = [
+ "mads-common-macros",
  "mads-core",
 ]
 
 [[package]]
 name = "mads-common-macros"
 version = "0.1.0"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "mads-core"

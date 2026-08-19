@@ -1,10 +1,37 @@
-//! Standard backend integration boundary for MADS.rs.
+//! Standard integration contracts for MADS.rs.
 //!
-//! The `mads foundation` command reports this boundary as reserved because its
-//! scheduled HTTP and database APIs are not implemented in v0.1.
+//! Version 0.1 provides compile-time controller and route contracts while HTTP
+//! runtime adapters, extractors, and server execution remain reserved.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+mod route;
+
 /// Exposes the framework-neutral core boundary to future integrations.
 pub use mads_core as core;
+
+/// Declares a managed controller and its route-trait contracts.
+pub use mads_common_macros::controller;
+
+/// Declares and validates a route-contract trait.
+pub use mads_common_macros::routes;
+
+/// Marks a DELETE route inside a route-contract trait.
+pub use mads_common_macros::delete;
+
+/// Marks a GET route inside a route-contract trait.
+pub use mads_common_macros::get;
+
+/// Marks a PATCH route inside a route-contract trait.
+pub use mads_common_macros::patch;
+
+/// Marks a POST route inside a route-contract trait.
+pub use mads_common_macros::post;
+
+/// Marks a PUT route inside a route-contract trait.
+pub use mads_common_macros::put;
+
+pub use route::{
+    ControllerRouteDescriptor, HttpMethod, RouteCatalog, RouteContractDescriptor, RouteDescriptor,
+};

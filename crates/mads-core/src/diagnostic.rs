@@ -27,11 +27,20 @@ impl fmt::Display for DiagnosticCode {
 /// Duplicate provider registration.
 pub const MADS001: DiagnosticCode = DiagnosticCode::new("MADS001");
 
+/// Ambiguous provider binding.
+pub const MADS002: DiagnosticCode = DiagnosticCode::new("MADS002");
+
 /// Missing provider registration.
 pub const MADS003: DiagnosticCode = DiagnosticCode::new("MADS003");
 
 /// Provider registry type mismatch.
 pub const MADS004: DiagnosticCode = DiagnosticCode::new("MADS004");
+
+/// Dependency cycle.
+pub const MADS005: DiagnosticCode = DiagnosticCode::new("MADS005");
+
+/// Provider construction failure.
+pub const MADS006: DiagnosticCode = DiagnosticCode::new("MADS006");
 
 /// Invalid lifecycle state transition.
 pub const MADS010: DiagnosticCode = DiagnosticCode::new("MADS010");
@@ -41,6 +50,9 @@ pub const MADS011: DiagnosticCode = DiagnosticCode::new("MADS011");
 
 /// Configuration source failure.
 pub const MADS020: DiagnosticCode = DiagnosticCode::new("MADS020");
+
+/// Conflicting integration route declarations.
+pub const MADS030: DiagnosticCode = DiagnosticCode::new("MADS030");
 
 /// The source position associated with a diagnostic.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -132,7 +144,7 @@ impl fmt::Display for Diagnostic {
 /// A framework error containing a structured diagnostic and optional cause.
 #[derive(Debug)]
 pub struct Error {
-    diagnostic: Diagnostic,
+    diagnostics: Vec<Diagnostic>,
     source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
@@ -140,7 +152,20 @@ impl Error {
     /// Creates an error from a structured diagnostic.
     pub fn new(diagnostic: Diagnostic) -> Self {
         Self {
-            diagnostic,
+            diagnostics: vec![diagnostic],
+            source: None,
+        }
+    }
+
+    /// Creates an error from a primary diagnostic and ordered related diagnostics.
+    pub fn from_diagnostics(
+        primary: Diagnostic,
+        related: impl IntoIterator<Item = Diagnostic>,
+    ) -> Self {
+        let mut diagnostics = vec![primary];
+        diagnostics.extend(related);
+        Self {
+            diagnostics,
             source: None,
         }
     }
@@ -151,25 +176,36 @@ impl Error {
         E: std::error::Error + Send + Sync + 'static,
     {
         Self {
-            diagnostic,
+            diagnostics: vec![diagnostic],
             source: Some(Box::new(source)),
         }
     }
 
     /// Returns this error's stable diagnostic code.
-    pub const fn code(&self) -> DiagnosticCode {
-        self.diagnostic.code()
+    pub fn code(&self) -> DiagnosticCode {
+        self.diagnostics[0].code()
     }
 
     /// Returns the structured diagnostic carried by this error.
-    pub const fn diagnostic(&self) -> &Diagnostic {
-        &self.diagnostic
+    pub fn diagnostic(&self) -> &Diagnostic {
+        &self.diagnostics[0]
+    }
+
+    /// return every diagnostic in deterministic report order.
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.diagnostic.fmt(formatter)
+        for (index, diagnostic) in self.diagnostics.iter().enumerate() {
+            if index > 0 {
+                formatter.write_str("\n\n")?;
+            }
+            diagnostic.fmt(formatter)?;
+        }
+        Ok(())
     }
 }
 

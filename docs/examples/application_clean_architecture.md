@@ -94,7 +94,13 @@ user-api/
     │       ├── mod.rs
     │       ├── dto.rs
     │       ├── ports.rs
-    │       └── use_cases.rs
+    │       └── usecase/
+    │           ├── mod.rs
+    │           ├── list_users_usecase.rs
+    │           ├── get_user_usecase.rs
+    │           ├── input_user_usecase.rs
+    │           ├── update_user_usecase.rs
+    │           └── delete_user_usecase.rs
     │
     ├── infrastructure/
     │   └── persistence/
@@ -109,7 +115,8 @@ user-api/
             └── user/
                 ├── mod.rs
                 ├── input.rs
-                └── routes.rs
+                ├── response.rs
+                └── controller.rs
 ```
 
 Layer responsibilities:
@@ -335,9 +342,12 @@ HTTP mapping dilakukan di delivery layer.
 
 ## 11. User Use Cases
 
-`src/application/user/use_cases.rs`:
+The following types live in separate files under
+`src/application/user/usecase/`:
 
 ```rust
+use mads::prelude::*;
+
 use crate::domain::user::User;
 
 use super::{
@@ -348,22 +358,13 @@ use super::{
     UserRepositoryPort,
 };
 
-pub struct UserUseCases<R>
-where
-    R: UserRepositoryPort,
-{
-    repository: R,
+#[service]
+pub struct ListUsersUsecase {
+    repository: Inject<dyn UserRepositoryPort>,
 }
 
-impl<R> UserUseCases<R>
-where
-    R: UserRepositoryPort,
-{
-    pub fn new(repository: R) -> Self {
-        Self { repository }
-    }
-
-    pub async fn list(
+impl ListUsersUsecase {
+    pub async fn execute(
         &self,
         query: ListUsersQuery,
     ) -> Result<Vec<User>, UserApplicationError> {
@@ -372,15 +373,29 @@ where
             .await
             .map_err(Into::into)
     }
+}
 
-    pub async fn find(&self, id: i64) -> Result<User, UserApplicationError> {
+#[service]
+pub struct GetUserUsecase {
+    repository: Inject<dyn UserRepositoryPort>,
+}
+
+impl GetUserUsecase {
+    pub async fn execute(&self, id: i64) -> Result<User, UserApplicationError> {
         self.repository
             .find(id)
             .await?
             .ok_or(UserApplicationError::NotFound)
     }
+}
 
-    pub async fn create(
+#[service]
+pub struct InputUserUsecase {
+    repository: Inject<dyn UserRepositoryPort>,
+}
+
+impl InputUserUsecase {
+    pub async fn execute(
         &self,
         command: CreateUserCommand,
     ) -> Result<User, UserApplicationError> {
@@ -398,8 +413,15 @@ where
             .await
             .map_err(Into::into)
     }
+}
 
-    pub async fn update(
+#[service]
+pub struct UpdateUserUsecase {
+    repository: Inject<dyn UserRepositoryPort>,
+}
+
+impl UpdateUserUsecase {
+    pub async fn execute(
         &self,
         id: i64,
         command: UpdateUserCommand,
@@ -417,8 +439,15 @@ where
             .await?
             .ok_or(UserApplicationError::NotFound)
     }
+}
 
-    pub async fn delete(&self, id: i64) -> Result<(), UserApplicationError> {
+#[service]
+pub struct DeleteUserUsecase {
+    repository: Inject<dyn UserRepositoryPort>,
+}
+
+impl DeleteUserUsecase {
+    pub async fn execute(&self, id: i64) -> Result<(), UserApplicationError> {
         if !self.repository.delete(id).await? {
             return Err(UserApplicationError::NotFound);
         }
@@ -428,7 +457,14 @@ where
 }
 ```
 
-Notice that this application layer still has no Axum or Diesel API.
+Each use case has one public application operation named `execute`. This keeps
+the HTTP controller independent from repository methods and prevents it from
+becoming a second application-service layer.
+
+The application layer uses MADS only for composition metadata (`#[service]`
+and `Inject`). It still contains no Axum, Diesel, HTTP-status, or database-pool
+API. Projects requiring a completely framework-independent application crate
+can replace these annotations with outer-layer provider functions.
 
 ---
 
@@ -439,11 +475,11 @@ Notice that this application layer still has no Axum or Diesel API.
 ```rust
 mod dto;
 mod ports;
-mod use_cases;
+mod usecase;
 
 pub use dto::*;
 pub use ports::*;
-pub use use_cases::*;
+pub use usecase::*;
 ```
 
 ---
@@ -740,31 +776,28 @@ Domain entity does not need `Serialize` solely because HTTP needs JSON.
 
 ---
 
-## 19. HTTP-facing Application Service Adapter
+## 19. Automatic Use Case Injection
 
-For strict Clean Architecture, MADS-specific injection can live in outer-layer composition. One target pattern is a MADS service wrapping the pure use case with a resolved repository port:
+No provider functions are required for the use cases. Their fields are enough
+for MADS to derive the dependencies:
 
-```rust
-use mads::prelude::*;
-
-use crate::{
-    application::user::{UserRepositoryPort, UserUseCases},
-    infrastructure::persistence::user::DieselUserRepository,
-};
-
-#[service]
-pub struct UserApplicationService {
-    repository: DieselUserRepository,
-}
-
-impl UserApplicationService {
-    fn use_cases(&self) -> UserUseCases<&DieselUserRepository> {
-        UserUseCases::new(&self.repository)
-    }
-}
+```text
+ListUsersUsecase   ─┐
+GetUserUsecase    ─┤
+InputUserUsecase  ─┼─→ UserRepositoryPort
+UpdateUserUsecase ─┤       ↑
+DeleteUserUsecase ─┘       │ implemented by
+                       DieselUserRepository
 ```
 
-An even more advanced final MADS implementation can inject a trait capability directly, allowing the wrapper to depend on `Inject<dyn UserRepositoryPort>` instead of the concrete Diesel adapter. The architectural goal remains the same: the application use-case implementation itself is framework-independent.
+`#[repository(as = UserRepositoryPort)]` supplies the port binding and each
+`#[service]` field requests it through `Inject<dyn UserRepositoryPort>`. MADS
+constructs one application-scoped repository adapter and shares its managed
+handle across all five use cases.
+
+Trait bindings are a target capability beyond the concrete-type-only v0.2
+graph. The same field-injection model already works in v0.2 when the field is a
+concrete managed type such as `DieselUserRepository`.
 
 ---
 
@@ -794,17 +827,22 @@ rather than domain concern.
 
 ---
 
-## 21. Routes
+## 21. Controller and Route Contract
 
-`src/delivery/http/user/routes.rs`:
+`src/delivery/http/user/controller.rs`:
 
 ```rust
 use mads::prelude::*;
 
 use crate::application::user::{
     CreateUserCommand,
+    DeleteUserUsecase,
+    GetUserUsecase,
+    InputUserUsecase,
     ListUsersQuery,
+    ListUsersUsecase,
     UpdateUserCommand,
+    UpdateUserUsecase,
 };
 
 use super::{
@@ -812,96 +850,141 @@ use super::{
     ListUsersRequest,
     UpdateUserRequest,
     UserResponse,
-    UserApplicationService,
 };
 
-#[get("/")]
-pub async fn list_users(
-    query: Query<ListUsersRequest>,
-    users: UserApplicationService,
-) -> Result<Json<Vec<UserResponse>>> {
-    let result = users
-        .use_cases()
-        .list(ListUsersQuery {
-            page: query.page.unwrap_or(1),
-            limit: query.limit.unwrap_or(20),
-        })
-        .await
-        .map_err(map_user_error)?;
+#[routes(prefix = "/users")]
+pub trait UserRoutes {
+    #[get("/")]
+    async fn list_users(
+        &self,
+        query: Query<ListUsersRequest>,
+    ) -> Result<Json<Vec<UserResponse>>>;
 
-    Ok(Json(result.into_iter().map(Into::into).collect()))
+    #[get("/:id")]
+    async fn get_user(
+        &self,
+        id: Path<i64>,
+    ) -> Result<Json<UserResponse>>;
+
+    #[post("/")]
+    async fn create_user(
+        &self,
+        request: Json<CreateUserRequest>,
+    ) -> Result<Created<UserResponse>>;
+
+    #[put("/:id")]
+    async fn update_user(
+        &self,
+        id: Path<i64>,
+        request: Json<UpdateUserRequest>,
+    ) -> Result<Json<UserResponse>>;
+
+    #[delete("/:id")]
+    async fn delete_user(
+        &self,
+        id: Path<i64>,
+    ) -> Result<NoContent>;
 }
 
-#[get("/:id")]
-pub async fn get_user(
-    id: Path<i64>,
-    users: UserApplicationService,
-) -> Result<Json<UserResponse>> {
-    let user = users
-        .use_cases()
-        .find(*id)
-        .await
-        .map_err(map_user_error)?;
-
-    Ok(Json(user.into()))
+#[controller(routes = [UserRoutes])]
+pub struct UserController {
+    list_users_usecase: ListUsersUsecase,
+    get_user_usecase: GetUserUsecase,
+    input_user_usecase: InputUserUsecase,
+    update_user_usecase: UpdateUserUsecase,
+    delete_user_usecase: DeleteUserUsecase,
 }
 
-#[post("/")]
-pub async fn create_user(
-    request: Json<CreateUserRequest>,
-    users: UserApplicationService,
-) -> Result<Created<UserResponse>> {
-    let request = request.into_inner();
+impl UserRoutes for UserController {
+    async fn list_users(
+        &self,
+        query: Query<ListUsersRequest>,
+    ) -> Result<Json<Vec<UserResponse>>> {
+        let users = self.list_users_usecase
+            .execute(ListUsersQuery {
+                page: query.page.unwrap_or(1),
+                limit: query.limit.unwrap_or(20),
+            })
+            .await
+            .map_err(map_user_error)?;
 
-    let user = users
-        .use_cases()
-        .create(CreateUserCommand {
-            email: request.email,
-            name: request.name,
-        })
-        .await
-        .map_err(map_user_error)?;
+        Ok(Json(users.into_iter().map(Into::into).collect()))
+    }
 
-    Ok(Created(user.into()))
-}
+    async fn get_user(
+        &self,
+        id: Path<i64>,
+    ) -> Result<Json<UserResponse>> {
+        let user = self.get_user_usecase
+            .execute(*id)
+            .await
+            .map_err(map_user_error)?;
+        Ok(Json(user.into()))
+    }
 
-#[put("/:id")]
-pub async fn update_user(
-    id: Path<i64>,
-    request: Json<UpdateUserRequest>,
-    users: UserApplicationService,
-) -> Result<Json<UserResponse>> {
-    let request = request.into_inner();
-
-    let user = users
-        .use_cases()
-        .update(
-            *id,
-            UpdateUserCommand {
+    async fn create_user(
+        &self,
+        request: Json<CreateUserRequest>,
+    ) -> Result<Created<UserResponse>> {
+        let request = request.into_inner();
+        let user = self.input_user_usecase
+            .execute(CreateUserCommand {
                 email: request.email,
                 name: request.name,
-            },
-        )
-        .await
-        .map_err(map_user_error)?;
+            })
+            .await
+            .map_err(map_user_error)?;
 
-    Ok(Json(user.into()))
-}
+        Ok(Created(user.into()))
+    }
 
-#[delete("/:id")]
-pub async fn delete_user(
-    id: Path<i64>,
-    users: UserApplicationService,
-) -> Result<NoContent> {
-    users
-        .use_cases()
-        .delete(*id)
-        .await
-        .map_err(map_user_error)?;
+    async fn update_user(
+        &self,
+        id: Path<i64>,
+        request: Json<UpdateUserRequest>,
+    ) -> Result<Json<UserResponse>> {
+        let request = request.into_inner();
+        let user = self.update_user_usecase
+            .execute(
+                *id,
+                UpdateUserCommand {
+                    email: request.email,
+                    name: request.name,
+                },
+            )
+            .await
+            .map_err(map_user_error)?;
 
-    Ok(NoContent)
+        Ok(Json(user.into()))
+    }
+
+    async fn delete_user(
+        &self,
+        id: Path<i64>,
+    ) -> Result<NoContent> {
+        self.delete_user_usecase
+            .execute(*id)
+            .await
+            .map_err(map_user_error)?;
+        Ok(NoContent)
+    }
 }
 ```
+
+`#[routes]` owns the HTTP contract. `#[controller]` connects the concrete
+controller to that contract, and normal Rust trait checking ensures that all
+five endpoints are implemented with matching signatures. One controller may
+implement more than one route trait.
+
+The use cases are injected once into `UserController`. Route methods therefore
+receive only request extractors and delegate through
+`self.<operation>_usecase.execute(...)`.
+
+These attributes are available as compile-time contracts with deterministic,
+framework-neutral route metadata in the foundation. They validate the
+trait/controller relationship and expose controller dependencies to the
+existing provider catalog. Runtime route registration, extractors, and Axum
+adapters remain part of the v0.3 HTTP milestone.
 
 HTTP handlers are intentionally thin:
 
@@ -915,7 +998,7 @@ execute use case
 map result/error to HTTP
 ```
 
-Business rules do not live in routes.
+Business rules do not live in the controller.
 
 ---
 
@@ -928,18 +1011,18 @@ use mads::prelude::*;
 
 mod input;
 mod response;
-mod routes;
-mod service_adapter;
+mod controller;
 
 pub use input::*;
 pub use response::*;
-pub use service_adapter::*;
+pub use controller::*;
 
-#[module(path = "/users")]
+#[module]
 pub struct UserHttpModule;
 ```
 
-Route registration is derived from MADS route metadata rather than a manual list.
+The `/users` prefix belongs to the `UserRoutes` contract. Route registration is
+derived from the controller and route metadata rather than a manual list.
 
 ---
 
@@ -965,7 +1048,12 @@ MADS resolves approximately:
 ```text
 UserHttpModule
   ↓
-UserApplicationService
+UserController
+  ↓
+ListUsersUsecase / GetUserUsecase / InputUserUsecase
+UpdateUserUsecase / DeleteUserUsecase
+  ↓
+UserRepositoryPort
   ↓
 DieselUserRepository
   ↓
@@ -974,7 +1062,8 @@ Database
 DieselDatabaseAutoConfiguration
 ```
 
-while the pure application use cases only know `UserRepositoryPort`.
+The application use cases know the MADS injection marker, but their business
+logic depends only on `UserRepositoryPort`, never on `DieselUserRepository`.
 
 ---
 
@@ -1047,9 +1136,9 @@ HTTP Request
     ↓
 MADS / Axum Route
     ↓
-UserApplicationService
+UserController
     ↓
-UserUseCases
+Focused Usecase.execute(...)
     ↓
 UserRepositoryPort
     ↓
@@ -1071,6 +1160,8 @@ Simple MADS architecture may intentionally be:
 ```text
 Route
  ↓
+UserController
+ ↓
 UserService
  ↓
 UserRepository
@@ -1084,6 +1175,8 @@ Clean Architecture adds stronger boundaries:
 
 ```text
 Route
+ ↓
+UserController
  ↓
 Application Use Case
  ↓
@@ -1101,7 +1194,8 @@ Simple architecture
   - application layer can know concrete repository types
 
 Clean Architecture
-  + business rules independent from MADS/Axum/Diesel
+  + business rules independent from Axum/Diesel and persistence implementations
+  + MADS annotations limited to composition metadata
   + persistence replaceable behind ports
   + easier isolated use-case tests
   - more types and mapping code
@@ -1111,11 +1205,13 @@ MADS should support both instead of forcing one style.
 
 ---
 
-## 27. Pure Application Test
+## 27. Focused Application Test
 
-Because use cases are not tied to MADS, they can be tested without starting MADS.
+The MADS test graph can replace the repository-port implementation while
+testing only the selected application use case.
 
 ```rust
+#[repository(as = UserRepositoryPort)]
 struct FakeUserRepository {
     // in-memory data
 }
@@ -1125,13 +1221,10 @@ impl UserRepositoryPort for FakeUserRepository {
     // fake methods
 }
 
-#[tokio::test]
-async fn creating_duplicate_email_fails() {
-    let repository = FakeUserRepository::with_user(...);
-    let users = UserUseCases::new(repository);
-
-    let result = users
-        .create(CreateUserCommand {
+#[mads::test]
+async fn creating_duplicate_email_fails(usecase: InputUserUsecase) {
+    let result = usecase
+        .execute(CreateUserCommand {
             email: "john@example.com".into(),
             name: "John".into(),
         })
@@ -1144,7 +1237,9 @@ async fn creating_duplicate_email_fails() {
 }
 ```
 
-This is a major benefit of keeping application logic inward-facing.
+No Diesel database or HTTP server is required. Projects that require completely
+framework-free use-case unit tests can keep the use cases unannotated and bind
+them with outer-layer `#[provider]` functions instead.
 
 ---
 
@@ -1166,7 +1261,8 @@ async fn get_user_endpoint(client: TestClient) {
 Use both test levels:
 
 ```text
-Domain/Application tests → fast, pure
+Domain tests             → fast, pure
+Application tests        → focused MADS graph with fake ports
 Infrastructure tests     → Diesel integration
 HTTP/MADS tests          → full application graph
 ```
@@ -1179,17 +1275,19 @@ A useful rule is:
 
 > **MADS may compose the application, but the domain should not require MADS to exist.**
 
-For strict Clean Architecture:
+For the annotation-based Clean Architecture style used in this document:
 
 ```text
 domain          must not import mads/axum/diesel
-application     must not import axum/diesel
+application     may import mads injection metadata, but not axum/diesel
 infrastructure  may import diesel + mads Database integration
 delivery        may import mads/common + HTTP concepts
 composition     may know all outer implementations
 ```
 
-This preserves dependency inversion while still benefiting from MADS auto-wiring.
+This preserves dependency inversion while benefiting from MADS auto-wiring.
+The stricter variant keeps MADS out of `application` too and uses composition
+providers, at the cost of additional wiring code.
 
 ---
 
@@ -1198,9 +1296,9 @@ This preserves dependency inversion while still benefiting from MADS auto-wiring
 Developer explicitly writes the architecture that matters:
 
 ```text
-UserUseCases depends on UserRepositoryPort
+Each User use case depends on UserRepositoryPort
 DieselUserRepository implements UserRepositoryPort
-User HTTP module exposes routes
+UserController implements the UserRoutes contract
 AppModule imports User HTTP module
 ```
 

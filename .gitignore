@@ -3,5 +3,6 @@
 /.superpowers/
 /target/
 /coverage/
+/docs/proposed/
 *.profraw
 .DS_Store

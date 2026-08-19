@@ -5,6 +5,6 @@ edition = "2024"
 rust-version = "1.85"
 
 [dependencies]
-mads = { path = "../../..", default-features = false }
+mads = { path = "../../..", default-features = false, features = ["common"] }
 
 [workspace]

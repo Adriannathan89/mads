@@ -1,0 +1,5 @@
+error: route prefix must not end with `/`; use `/` only for the root route
+ --> tests/ui/fail/routes_ambiguous_path.rs:1:25
+  |
+1 | #[mads::routes(prefix = "/users/")]
+  |                         ^^^^^^^^^

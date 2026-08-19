@@ -26,8 +26,8 @@ pub use descriptor::{
     ProviderFuture, ProviderKind,
 };
 pub use diagnostic::{
-    Diagnostic, DiagnosticCode, Error, MADS001, MADS003, MADS004, MADS010, MADS011, MADS020,
-    Result, SourceLocation,
+    Diagnostic, DiagnosticCode, Error, MADS001, MADS002, MADS003, MADS004, MADS005, MADS006,
+    MADS010, MADS011, MADS020, MADS030, Result, SourceLocation,
 };
 pub use lifecycle::{LifecycleFuture, LifecycleHook, LifecycleManager, LifecycleState};
 pub use registry::{ErasedProvider, ProviderRegistry};

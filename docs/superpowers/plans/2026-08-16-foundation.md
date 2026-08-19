@@ -6,6 +6,27 @@
 
 **Architecture:** A layered Cargo workspace keeps framework-neutral semantics in `mads-core`, procedural syntax in dedicated macro crates, outward integrations in `mads-common`, and ergonomic exports in `mads`. Static `inventory` descriptors feed an explicit v0.1 builder; v0.2 will later consume the same metadata for graph planning.
 
+## Approved contract amendment (2026-08-19)
+
+The completed foundation is extended with compile-time HTTP-shaped contracts,
+without moving graph planning or HTTP execution into v0.1:
+
+- `mads-common-macros` implements `#[routes]`, `#[controller]`, and guarded
+  HTTP verb method attributes;
+- a route trait supplies an optional prefix and explicit verb/path methods;
+- a controller must implement every route trait listed in
+  `#[controller(routes = [...])]`;
+- controllers use the existing application-scoped service construction model,
+  may inject multiple services/use cases, and register as
+  `ProviderKind::Service`;
+- construction remains explicit and ordered through `MadsBuilder` in v0.1;
+- route registry metadata, Axum adapters/extractors, automatic graph planning,
+  and trait-object bindings remain deferred to their existing milestones.
+
+This amendment supersedes only statements below that describe the common macro
+crates as empty shells or prohibit route *contract* attributes. Historical task
+steps are retained as the record of the original foundation implementation.
+
 **Tech Stack:** Rust 2024, Rust 1.85 MSRV, Cargo resolver 3, `inventory`, `syn`, `quote`, `proc-macro2`, `proc-macro-crate`, Tokio, `trybuild`, GitHub Actions, and `cargo-llvm-cov`.
 
 ## Global Constraints

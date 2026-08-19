@@ -1,0 +1,5 @@
+error: each route contract method requires exactly one of `#[get]`, `#[post]`, `#[put]`, `#[patch]`, or `#[delete]`
+ --> tests/ui/fail/routes_missing_verb.rs:3:14
+  |
+3 |     async fn index(&self);
+  |              ^^^^^

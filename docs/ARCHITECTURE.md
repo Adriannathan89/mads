@@ -173,6 +173,8 @@ Initial macros:
 #[mads::main]
 #[module]
 #[service]
+#[routes]
+#[controller]
 #[get]
 #[post]
 #[put]
@@ -222,23 +224,19 @@ async fn main() {
 
 ### Module
 
-MVP:
+Foundation:
 
 ```rust
-#[module(
-    services = [UserService],
-    routes = [list_users, get_user],
-)]
+#[module]
 pub struct UserModule;
 ```
 
-Later:
+Later module-graph milestones may add explicit imports and exports without
+requiring services or controllers to be listed twice:
 
 ```rust
 #[module(
     imports = [DatabaseModule],
-    services = [UserRepository, UserService],
-    routes = [list_users, get_user],
     exports = [UserService],
 )]
 pub struct UserModule;
@@ -253,15 +251,24 @@ pub struct UserService {
 }
 ```
 
-### Route
+### Route contract and controller
 
 ```rust
-#[get("/users/:id")]
-async fn get_user(
-    id: Path<u64>,
+#[routes(prefix = "/users")]
+trait UserRoutes {
+    #[get("/:id")]
+    async fn get_user(&self, id: Path<u64>) -> Result<User>;
+}
+
+#[controller(routes = [UserRoutes])]
+struct UserController {
     users: UserService,
-) -> Result<User> {
-    users.find(*id).await
+}
+
+impl UserRoutes for UserController {
+    async fn get_user(&self, id: Path<u64>) -> Result<User> {
+        self.users.find(*id).await
+    }
 }
 ```
 
@@ -412,17 +419,21 @@ Do not start at Stage C merely for a “zero-cost” marketing statement.
 
 ## 9. Handler Adapter
 
-A MADS route macro should generate an Axum-compatible adapter.
+A MADS route/controller contract should generate an Axum-compatible adapter in
+the HTTP runtime milestone.
 
 Application code:
 
 ```rust
-#[get("/users/:id")]
-async fn get_user(
-    id: Path<u64>,
+#[routes(prefix = "/users")]
+trait UserRoutes {
+    #[get("/:id")]
+    async fn get_user(&self, id: Path<u64>) -> Result<User>;
+}
+
+#[controller(routes = [UserRoutes])]
+struct UserController {
     users: UserService,
-) -> Result<User> {
-    users.find(*id).await
 }
 ```
 
@@ -433,9 +444,9 @@ Axum request
     ↓
 extract Path<u64>
     ↓
-resolve UserService from MADS state
+resolve UserController from MADS state
     ↓
-call get_user(...)
+call UserRoutes::get_user(...)
     ↓
 map MADS Result<User>
     ↓
@@ -873,18 +884,24 @@ impl GreetingService {
     }
 }
 
-#[get("/hello/:name")]
-async fn hello(
-    name: Path<String>,
-    greeting: GreetingService,
-) -> String {
-    greeting.hello(&name)
+#[routes(prefix = "/hello")]
+trait GreetingRoutes {
+    #[get("/:name")]
+    async fn hello(&self, name: Path<String>) -> String;
 }
 
-#[module(
-    services = [GreetingService],
-    routes = [hello],
-)]
+#[controller(routes = [GreetingRoutes])]
+struct GreetingController {
+    greeting: GreetingService,
+}
+
+impl GreetingRoutes for GreetingController {
+    async fn hello(&self, name: Path<String>) -> String {
+        self.greeting.hello(&name)
+    }
+}
+
+#[module]
 struct AppModule;
 
 #[mads::main]
@@ -895,7 +912,7 @@ async fn main() {
 
 This spike should prove five things:
 
-1. route macro registration works;
+1. route/controller contracts produce runtime registration in v0.3;
 2. service construction works;
 3. service injection works without application-visible `Arc`/`State`;
 4. handler inputs still use normal typed Rust;

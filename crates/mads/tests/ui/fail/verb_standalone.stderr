@@ -1,0 +1,5 @@
+error: `#[get]` must be used on a method inside a trait annotated with `#[routes]`
+ --> tests/ui/fail/verb_standalone.rs:1:13
+  |
+1 | #[mads::get("/")]
+  |             ^^^

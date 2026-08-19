@@ -8,17 +8,18 @@ dependency-graph behavior.
 
 ```text
 mads-cli ──> mads ──> mads-core ──> mads-core-macros
-                  ├─> mads-common (optional, reserved)
+                  ├─> mads-common (optional, contract macros)
                   └─> mads-extra  (optional, reserved)
 
-mads-common-macros (reserved proc-macro boundary)
+mads-common ──> mads-common-macros
 ```
 
 - `mads-core` provides framework-neutral application construction, lifecycle
   contracts, configuration, provider metadata, and canonical core attributes.
 - `mads-core-macros` implements the core procedural attributes.
-- `mads-common` and `mads-common-macros` reserve future standard backend and
-  route-integration surfaces.
+- `mads-common` and `mads-common-macros` provide compile-time route contracts,
+  deterministic static route metadata, and managed controllers. HTTP execution
+  remains reserved for v0.3.
 - `mads-extra` reserves future post-v1 extension capabilities.
 - `mads` is the stable public facade; applications should depend on this crate.
 - `mads-cli` installs the `mads` development command.
@@ -37,15 +38,16 @@ MADS.rs supports Rust 1.85 and uses the Rust 2024 edition.
 
 Use the facade-qualified attributes as the canonical macro syntax:
 `#[mads::main]`, `#[mads::module]`, `#[mads::provider]`,
-`#[mads::repository]`, and `#[mads::service]`. The `mads::prelude` module also
-collects these attributes with the application-facing core types for ergonomic
-imports.
+`#[mads::repository]`, and `#[mads::service]`. With the default `common`
+feature, it also exports `#[mads::routes]`, `#[mads::controller]`, and the HTTP
+verb attributes. The `mads::prelude` module collects these attributes with the
+application-facing core types for ergonomic imports.
 
 In v0.1, construction is deliberately explicit: create configuration, insert
 the dependencies a managed provider needs, construct that provider, build the
 application, then start and shut it down.
 
-```rust
+```rust,ignore
 use mads::prelude::*;
 
 #[derive(Clone)]
@@ -80,6 +82,49 @@ async fn main() {
 }
 ```
 
+A controller can depend on any number of managed services or use cases. Route
+traits make the controller contract compiler-checked, retain canonical
+method/path metadata, and reject conflicts before controller construction;
+construction is still explicit in v0.1:
+
+```rust,ignore
+use mads::prelude::*;
+
+#[service]
+struct GetUserUsecase;
+
+#[service]
+struct DeleteUserUsecase;
+
+#[routes(prefix = "/users")]
+trait UserRoutes {
+    #[get("/:id")]
+    async fn get_user(&self, id: i64) -> Result<i64>;
+
+    #[delete("/:id")]
+    async fn delete_user(&self, id: i64) -> Result<()>;
+}
+
+#[controller(routes = [UserRoutes])]
+struct UserController {
+    get_user: GetUserUsecase,
+    delete_user: DeleteUserUsecase,
+}
+
+impl UserRoutes for UserController {
+    async fn get_user(&self, id: i64) -> Result<i64> {
+        Ok(id)
+    }
+
+    async fn delete_user(&self, _id: i64) -> Result<()> {
+        Ok(())
+    }
+}
+
+// Build both use cases before explicitly constructing UserController with
+// MadsBuilder.
+```
+
 ## CLI foundation
 
 Use the CLI to report the implemented and reserved boundaries:
@@ -88,14 +133,16 @@ Use the CLI to report the implemented and reserved boundaries:
 mads foundation
 ```
 
-The command reports `core: available`, while `common` and `extra` remain
-reserved. Run `mads --help` for the complete foundation command surface.
+The command reports the core and common contract surfaces as available. The
+common HTTP runtime and `extra` remain reserved. Run `mads --help` for the
+complete foundation command surface.
 
 ## Deferred features
 
-Version 0.1 does not yet provide HTTP routing, database integrations, automatic
-dependency-graph construction, or route/database-specific attributes. Those
-surfaces remain intentionally reserved rather than exposed as incomplete APIs.
+Version 0.1 does not yet provide HTTP execution, Axum registration, extractors,
+database integrations, or automatic dependency-graph construction. Its route
+metadata is available through `mads::common::RouteCatalog`; runtime routing
+remains reserved for v0.3.
 
 ## Development
 

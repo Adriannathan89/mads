@@ -5,6 +5,6 @@ edition = "2024"
 rust-version = "1.85"
 
 [dependencies]
-framework = { package = "mads", path = "../../..", default-features = false }
+framework = { package = "mads", path = "../../..", default-features = false, features = ["common"] }
 
 [workspace]

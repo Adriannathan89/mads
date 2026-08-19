@@ -1,0 +1,5 @@
+error: `#[controller]` supports only non-generic named-field or unit structs
+ --> tests/ui/fail/controller_generic.rs:8:18
+  |
+8 | struct Controller<T> {
+  |                  ^

@@ -1,0 +1,5 @@
+error: route contract methods require an immutable `&self` receiver
+ --> tests/ui/fail/routes_invalid_receiver.rs:4:20
+  |
+4 |     async fn index(&mut self);
+  |                    ^

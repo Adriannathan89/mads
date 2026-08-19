@@ -1,0 +1,5 @@
+error: `#[controller]` requires at least one route trait
+ --> tests/ui/fail/controller_empty_routes.rs:3:30
+  |
+3 | #[mads::controller(routes = [])]
+  |                              ^
