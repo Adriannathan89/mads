@@ -37,3 +37,5 @@ fn named_path(name: &str, facade: bool) -> syn::Result<Path> {
         Ok(parse_quote!(::#ident))
     }
 }
+#[cfg(test)]
+include!("../tests/support/path.rs");

@@ -236,3 +236,5 @@ fn ungroup_type(mut type_: &Type) -> &Type {
         };
     }
 }
+#[cfg(test)]
+include!("../tests/support/provider.rs");

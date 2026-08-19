@@ -37,3 +37,5 @@ pub(crate) fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<T
         }
     })
 }
+#[cfg(test)]
+include!("../tests/support/module.rs");

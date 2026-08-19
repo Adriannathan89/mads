@@ -245,3 +245,5 @@ impl VisitMut for SelfTypeNormalizer<'_> {
         visit_mut::visit_type_path_mut(self, type_path);
     }
 }
+#[cfg(test)]
+include!("../tests/support/managed.rs");

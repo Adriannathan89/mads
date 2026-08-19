@@ -400,3 +400,5 @@ fn validate_path(path: &LitStr, subject: &str, is_prefix: bool) -> syn::Result<(
     }
     Ok(())
 }
+#[cfg(test)]
+include!("../tests/support/routes.rs");

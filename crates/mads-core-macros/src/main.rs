@@ -76,3 +76,5 @@ fn validate_signature(item: &ItemFn) -> syn::Result<()> {
     }
     Ok(())
 }
+#[cfg(test)]
+include!("../tests/support/main_fixture.rs");
