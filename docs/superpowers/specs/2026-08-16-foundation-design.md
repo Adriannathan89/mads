@@ -28,7 +28,7 @@ The implementation must not include:
 
 - dependency graph planning or automatic topological construction;
 - missing-edge or dependency-cycle validation;
-- Axum, HTTP routing, route macros, or HTTP extractors;
+- Axum, HTTP execution, route registration, or HTTP extractors;
 - Diesel, database pools, or migrations;
 - `mads.toml`, typed configuration derives, or secret handling;
 - request or transient provider scopes;
@@ -46,8 +46,8 @@ crates/
 ├── mads/                 Public facade and prelude
 ├── mads-core/            Framework-neutral runtime and application semantics
 ├── mads-core-macros/     Core procedural-macro implementations
-├── mads-common/          Standard backend integration boundary
-├── mads-common-macros/   Reserved HTTP procedural-macro implementation boundary
+├── mads-common/          Compile-time route contract boundary
+├── mads-common-macros/   Route/controller procedural macros
 ├── mads-cli/             Developer CLI foundation
 └── mads-extra/           Reserved post-v1 capability boundary
 ```
@@ -62,7 +62,10 @@ The dependency rules are:
 - `mads-cli` is an outer adapter and may depend on the public framework surface;
 - `mads` composes and re-exports the supported public API.
 
-The common, common-macros, and extra crates are documented boundary shells during this milestone. They do not expose no-op route, database, cache, or policy APIs.
+The common crates expose compile-time route contracts, deterministic static
+route metadata, route-conflict validation, and managed controllers. They do
+not expose HTTP runtime, database, cache, or policy APIs. The extra crate
+remains a documented boundary shell.
 
 ## Public API and Macro Ownership
 
@@ -87,7 +90,17 @@ Core attributes are implemented in `mads-core-macros`, re-exported from `mads-co
 
 Bare attributes are also available after `use mads::prelude::*`, but they are not the canonical documentation style.
 
-`mads-common-macros` owns future `#[get]`, `#[post]`, `#[put]`, `#[patch]`, and `#[delete]` implementations. These are not implemented as placeholders in v0.1.
+`mads-common-macros` owns `#[routes]`, `#[controller]`, `#[get]`, `#[post]`,
+`#[put]`, `#[patch]`, and `#[delete]`. In v0.1 these attributes validate a
+trait-based controller contract only. They do not generate a router, route
+registry, extractors, or Axum adapters.
+
+`#[routes(prefix = "/users")]` accepts a non-generic trait whose methods use
+one explicit HTTP verb/path attribute and immutable `&self`. The macro rejects
+missing, duplicate, or malformed endpoints. `#[controller(routes =
+[UserRoutes])]` accepts a named or unit struct, requires every listed route
+trait to be implemented, and manages every field as a dependency in declaration
+order. Multiple route traits and multiple service/use-case fields are allowed.
 
 ## Core Components
 
@@ -131,6 +144,12 @@ Descriptors are submitted through `inventory`. Collection is sorted explicitly b
 - application-scoped shared-handle behavior;
 - inventory registration;
 - compile-time diagnostics for unsupported declaration shapes.
+
+`#[mads::controller]` uses the same application-scoped handle and construction
+model as `#[mads::service]`. It registers as `ProviderKind::Service`, keeping
+`mads-core` independent from HTTP concepts. Therefore v0.1 callers explicitly
+construct a controller only after constructing and registering all of its
+service/use-case fields.
 
 `#[mads::provider]` supports synchronous or asynchronous free functions with concrete dependency parameters and a concrete return type. Provider results may be direct values or the MADS result form. The macro generates equivalent descriptor and constructor metadata.
 

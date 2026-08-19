@@ -1,6 +1,7 @@
 //! Deterministic discovery and lookup of statically registered metadata.
 
 use std::any::TypeId;
+use std::sync::OnceLock;
 
 use crate::{Diagnostic, Error, MADS001, MADS003, ModuleDescriptor, ProviderDescriptor, Result};
 
@@ -13,14 +14,7 @@ pub struct Catalog;
 impl Catalog {
     /// Returns every registered provider in deterministic declaration order.
     pub fn providers() -> Vec<&'static ProviderDescriptor> {
-        let mut providers: Vec<_> = inventory::iter::<ProviderDescriptor>.into_iter().collect();
-        providers.sort_by(|left, right| {
-            left.type_name()
-                .cmp(right.type_name())
-                .then_with(|| left.kind().cmp(&right.kind()))
-                .then_with(|| compare_locations(left.location(), right.location()))
-        });
-        providers
+        provider_cache().clone()
     }
 
     /// Returns every registered module in deterministic declaration order.
@@ -41,8 +35,9 @@ impl Catalog {
         T: Send + Sync + 'static,
     {
         let type_id = TypeId::of::<T>();
-        let providers: Vec<_> = Self::providers()
-            .into_iter()
+        let providers: Vec<_> = provider_cache()
+            .iter()
+            .copied()
             .filter(|descriptor| descriptor.type_id() == type_id)
             .collect();
 
@@ -66,6 +61,20 @@ impl Catalog {
             )),
         }
     }
+}
+
+fn provider_cache() -> &'static Vec<&'static ProviderDescriptor> {
+    static PROVIDERS: OnceLock<Vec<&'static ProviderDescriptor>> = OnceLock::new();
+    PROVIDERS.get_or_init(|| {
+        let mut providers: Vec<_> = inventory::iter::<ProviderDescriptor>.into_iter().collect();
+        providers.sort_by(|left, right| {
+            left.type_name()
+                .cmp(right.type_name())
+                .then_with(|| left.kind().cmp(&right.kind()))
+                .then_with(|| compare_locations(left.location(), right.location()))
+        });
+        providers
+    })
 }
 
 fn compare_locations(

@@ -1,0 +1,5 @@
+error: route path must be non-empty and start with `/`
+ --> tests/ui/fail/routes_invalid_endpoint_path.rs:3:17
+  |
+3 |     #[mads::get("index")]
+  |                 ^^^^^^^

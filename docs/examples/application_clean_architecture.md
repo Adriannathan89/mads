@@ -980,8 +980,11 @@ The use cases are injected once into `UserController`. Route methods therefore
 receive only request extractors and delegate through
 `self.<operation>_usecase.execute(...)`.
 
-Both attributes are proposed target APIs for the MADS HTTP milestone; they are
-not part of the current v0.2 dependency-graph implementation.
+These attributes are available as compile-time contracts with deterministic,
+framework-neutral route metadata in the foundation. They validate the
+trait/controller relationship and expose controller dependencies to the
+existing provider catalog. Runtime route registration, extractors, and Axum
+adapters remain part of the v0.3 HTTP milestone.
 
 HTTP handlers are intentionally thin:
 

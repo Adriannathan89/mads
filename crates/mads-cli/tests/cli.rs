@@ -21,7 +21,8 @@ fn foundation_check_reports_available_boundaries() {
         .assert()
         .success()
         .stdout(contains("core: available"))
-        .stdout(contains("common: reserved"))
+        .stdout(contains("common contracts: available"))
+        .stdout(contains("common HTTP runtime: reserved"))
         .stdout(contains("extra: reserved"));
 }
 

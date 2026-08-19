@@ -15,6 +15,8 @@ fn attributes_expand_for_supported_dependency_paths() {
         "renamed_core",
         "main_facade",
         "main_renamed_facade",
+        "common",
+        "renamed_common",
     ] {
         let manifest = manifest_dir
             .join("tests/consumers")

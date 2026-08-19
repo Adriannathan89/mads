@@ -1,8 +1,8 @@
 //! Development commands for inspecting the MADS.rs v0.1 foundation.
 //!
 //! The `mads` executable accepts `--help` (`-h`), `--version` (`-V`), and the
-//! `foundation` command. The latter reports the available core boundary and
-//! the reserved common and extra boundaries without claiming future support.
+//! `foundation` command. The latter reports the available core and common
+//! contract boundaries without claiming future HTTP runtime support.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
@@ -40,5 +40,7 @@ fn print_help(to_stderr: bool) {
 }
 
 fn print_foundation() {
-    println!("core: available\ncommon: reserved\nextra: reserved");
+    println!(
+        "core: available\ncommon contracts: available\ncommon HTTP runtime: reserved\nextra: reserved"
+    );
 }

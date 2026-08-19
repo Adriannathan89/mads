@@ -108,7 +108,16 @@ Result/Error foundation
 #[service]
 #[repository]
 #[provider]
+#[routes]
+#[controller]
+#[get] / #[post] / #[put] / #[patch] / #[delete] contract validation
 ```
+
+Route/controller attributes at this milestone emit framework-neutral static
+metadata and validate route conflicts, but do not execute HTTP requests.
+`#[controller]` is an application-scoped managed provider and may depend on
+multiple services/use cases. Route registration, extractors, and Axum adapters
+remain assigned to v0.3.
 
 ### Service / Repository Macro MVP
 
@@ -210,12 +219,8 @@ Membawa Axum sebagai standard HTTP engine tanpa membuat `core` menjadi HTTP-spec
 ### Implement in `common`
 
 ```text
-route registry metadata
-#[get]
-#[post]
-#[put]
-#[patch]
-#[delete]
+route registry and adapter execution
+runtime expansion of the v0.1 route/controller contracts
 Axum router generation
 Path<T>
 Query<T>
@@ -232,20 +237,24 @@ NoContent
 Target:
 
 ```rust
-#[get("/users/:id")]
-async fn get_user(
-    id: Path<i64>,
+#[routes(prefix = "/users")]
+trait UserRoutes {
+    #[get("/:id")]
+    async fn get_user(&self, id: Path<i64>) -> Result<Json<User>>;
+}
+
+#[controller(routes = [UserRoutes])]
+struct UserController {
     users: UserService,
-) -> Result<Json<User>> {
-    // ...
 }
 ```
 
 MADS harus membedakan:
 
 ```text
-Path<i64>   → extractor
-UserService → dependency graph node
+Path<i64>             → extractor
+UserService           → controller dependency graph node
+UserController method → Axum handler adapter
 ```
 
 ### Exit Criteria

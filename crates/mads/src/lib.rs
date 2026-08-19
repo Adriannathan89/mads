@@ -29,6 +29,34 @@ pub use mads_core::service;
 #[cfg(feature = "common")]
 pub use mads_common as common;
 
+/// Re-exports the managed-controller declaration attribute.
+#[cfg(feature = "common")]
+pub use mads_common::controller;
+
+/// Re-exports the DELETE route-contract attribute.
+#[cfg(feature = "common")]
+pub use mads_common::delete;
+
+/// Re-exports the GET route-contract attribute.
+#[cfg(feature = "common")]
+pub use mads_common::get;
+
+/// Re-exports the PATCH route-contract attribute.
+#[cfg(feature = "common")]
+pub use mads_common::patch;
+
+/// Re-exports the POST route-contract attribute.
+#[cfg(feature = "common")]
+pub use mads_common::post;
+
+/// Re-exports the route-trait declaration attribute.
+#[cfg(feature = "common")]
+pub use mads_common::routes;
+
+/// Re-exports the PUT route-contract attribute.
+#[cfg(feature = "common")]
+pub use mads_common::put;
+
 /// Re-exports extensions when the `extra` feature is enabled.
 #[cfg(feature = "extra")]
 pub use mads_extra as extra;
@@ -49,6 +77,14 @@ pub mod prelude {
 
     /// Re-exports the service declaration attribute.
     pub use mads_core::service;
+
+    /// Re-exports the managed-controller declaration attribute.
+    #[cfg(feature = "common")]
+    pub use mads_common::controller;
+
+    /// Re-exports route-contract attributes.
+    #[cfg(feature = "common")]
+    pub use mads_common::{delete, get, patch, post, put, routes};
 
     /// Re-exports types used to build, run, and inspect an application.
     pub use mads_core::{

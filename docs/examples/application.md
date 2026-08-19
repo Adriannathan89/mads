@@ -618,9 +618,10 @@ UserService         → controller dependency
 There is no manual `State<AppState>` extraction. MADS constructs
 `UserRepository`, then `UserService`, then `UserController`.
 
-`#[routes]` generates reusable route metadata, while normal Rust trait checking
-ensures that `UserController` implements every endpoint with matching
-signatures.
+`#[routes]` validates the reusable route contract, while normal Rust trait
+checking ensures that `UserController` implements every endpoint with matching
+signatures. The foundation also retains deterministic framework-neutral route
+metadata; v0.3 adds Axum adapters and router construction.
 
 ---
 

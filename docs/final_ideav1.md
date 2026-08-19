@@ -198,6 +198,8 @@ V1 berisi dua capability standar.
 #[put]
 #[patch]
 #[delete]
+#[routes]
+#[controller]
 route metadata
 route registry
 Axum adapter
@@ -300,12 +302,21 @@ pub struct UserService {
     users: UserRepository,
 }
 
-#[get("/users/:id")]
-async fn get_user(
-    id: Path<i64>,
+#[routes(prefix = "/users")]
+pub trait UserRoutes {
+    #[get("/:id")]
+    async fn get_user(&self, id: Path<i64>) -> Result<Json<User>>;
+}
+
+#[controller(routes = [UserRoutes])]
+pub struct UserController {
     users: UserService,
-) -> Result<Json<User>> {
-    Ok(Json(users.find(*id).await?))
+}
+
+impl UserRoutes for UserController {
+    async fn get_user(&self, id: Path<i64>) -> Result<Json<User>> {
+        Ok(Json(self.users.find(*id).await?))
+    }
 }
 ```
 
@@ -313,10 +324,11 @@ Internal graph:
 
 ```text
 GET /users/:id
-  └── UserService
-        └── UserRepository
-              └── Database
-                    └── DieselPool
+  └── UserController
+        └── UserService
+              └── UserRepository
+                    └── Database
+                          └── DieselPool
 ```
 
 ---
@@ -522,12 +534,21 @@ MADS menangani lifecycle/integration, bukan mengganti Diesel.
 Routes mendeskripsikan HTTP intent:
 
 ```rust
-#[post("/users")]
-async fn create_user(
-    body: Json<CreateUser>,
+#[routes(prefix = "/users")]
+trait UserRoutes {
+    #[post("/")]
+    async fn create_user(&self, body: Json<CreateUser>) -> Result<Created<User>>;
+}
+
+#[controller(routes = [UserRoutes])]
+struct UserController {
     users: UserService,
-) -> Result<Created<User>> {
-    Ok(Created(users.create(body.into_inner()).await?))
+}
+
+impl UserRoutes for UserController {
+    async fn create_user(&self, body: Json<CreateUser>) -> Result<Created<User>> {
+        Ok(Created(self.users.create(body.into_inner()).await?))
+    }
 }
 ```
 
@@ -537,7 +558,7 @@ MADS mengklasifikasikan parameter melalui type metadata:
 Json<CreateUser> → HTTP body / validation
 Path<i64>        → HTTP path
 Query<T>         → HTTP query
-UserService      → application dependency
+UserService      → controller/application dependency
 ```
 
 Common path tidak memerlukan `State<AppState>` atau `Arc<UserService>`.
@@ -862,10 +883,13 @@ Route metadata
 Contoh future API:
 
 ```rust
-#[get("/users/:id")]
-#[cacheable(ttl = "5m")]
-#[rate_limit(requests = 100, window = "1m")]
-async fn get_user(...) {}
+#[routes(prefix = "/users")]
+trait UserRoutes {
+    #[get("/:id")]
+    #[cacheable(ttl = "5m")]
+    #[rate_limit(requests = 100, window = "1m")]
+    async fn get_user(&self, ...);
+}
 ```
 
 Macro tersebut harus menghasilkan metadata/policy, bukan hard-code Redis di route handler.

@@ -1,0 +1,5 @@
+error: `#[routes]` does not support generic traits
+ --> tests/ui/fail/routes_generic.rs:2:13
+  |
+2 | trait Routes<T> {
+  |             ^

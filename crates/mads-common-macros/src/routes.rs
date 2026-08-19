@@ -1,0 +1,396 @@
+//! Expansion for compile-time route-contract traits.
+
+use std::collections::BTreeSet;
+
+use proc_macro2::TokenStream;
+use quote::quote;
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
+use syn::{
+    Attribute, Error, FnArg, ItemTrait, LitStr, Meta, ReturnType, Token, TraitItem, TraitItemFn,
+    Type, parse_quote, spanned::Spanned,
+};
+
+const CONTRACT_MARKER: &str = "__MADS_ROUTE_CONTRACT";
+const VERBS: &[&str] = &["get", "post", "put", "patch", "delete"];
+
+struct RoutesArguments {
+    prefix: Option<LitStr>,
+}
+
+impl Parse for RoutesArguments {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        if input.is_empty() {
+            return Ok(Self { prefix: None });
+        }
+
+        let name: syn::Ident = input.parse()?;
+        if name != "prefix" {
+            return Err(Error::new(name.span(), "expected `prefix = \"/...\"`"));
+        }
+        input.parse::<Token![=]>()?;
+        let prefix: LitStr = input.parse()?;
+        if !input.is_empty() {
+            return Err(input.error("`#[routes]` accepts only one `prefix` argument"));
+        }
+
+        Ok(Self {
+            prefix: Some(prefix),
+        })
+    }
+}
+
+/// Expands a route trait after validating its endpoint contract.
+pub(crate) fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
+    let arguments = syn::parse2::<RoutesArguments>(arguments)?;
+    if let Some(prefix) = &arguments.prefix {
+        validate_path(prefix, "route prefix", true)?;
+    }
+    let common = crate::path::common_path()?;
+    let prefix = arguments
+        .prefix
+        .unwrap_or_else(|| LitStr::new("", proc_macro2::Span::call_site()));
+
+    let mut item: ItemTrait = syn::parse2(item)?;
+    validate_trait_shape(&item)?;
+
+    let mut routes = BTreeSet::new();
+    let mut descriptors = Vec::new();
+    let mut route_count = 0usize;
+    for trait_item in &mut item.items {
+        let TraitItem::Fn(method) = trait_item else {
+            return Err(Error::new(
+                trait_item.span(),
+                "`#[routes]` traits may contain route methods only",
+            ));
+        };
+        descriptors.push(validate_method(method, &mut routes, &prefix)?);
+        route_count += 1;
+    }
+
+    if route_count == 0 {
+        return Err(Error::new(
+            item.ident.span(),
+            "`#[routes]` requires at least one route method",
+        ));
+    }
+
+    let marker_ident = syn::Ident::new(CONTRACT_MARKER, item.ident.span());
+    if item.items.iter().any(|trait_item| match trait_item {
+        TraitItem::Const(value) => value.ident == marker_ident,
+        _ => false,
+    }) {
+        return Err(Error::new(
+            item.ident.span(),
+            format!("`{CONTRACT_MARKER}` is reserved by `#[routes]`"),
+        ));
+    }
+
+    let marker: TraitItem = parse_quote! {
+        #[doc(hidden)]
+        const __MADS_ROUTE_CONTRACT: () = ();
+    };
+    item.items.insert(0, marker);
+
+    let descriptors = descriptors.iter().map(|descriptor| {
+        let method = descriptor.method.tokens(&common);
+        let path = &descriptor.path;
+        let full_path = &descriptor.full_path;
+        let handler = &descriptor.handler;
+        quote! {
+            #common::RouteDescriptor::new(
+                #method,
+                #prefix,
+                #path,
+                #full_path,
+                #handler,
+                #common::core::SourceLocation::new(file!(), line!(), column!()),
+            )
+        }
+    });
+    let metadata: TraitItem = parse_quote! {
+        #[doc(hidden)]
+        const __MADS_ROUTE_METADATA: &'static [#common::RouteDescriptor] = &[
+            #(#descriptors,)*
+        ];
+    };
+    item.items.insert(1, metadata);
+
+    Ok(quote!(#item))
+}
+
+fn validate_trait_shape(item: &ItemTrait) -> syn::Result<()> {
+    if !item.generics.params.is_empty() || item.generics.where_clause.is_some() {
+        return Err(Error::new(
+            item.generics.span(),
+            "`#[routes]` does not support generic traits",
+        ));
+    }
+    if let Some(unsafety) = &item.unsafety {
+        return Err(Error::new(
+            unsafety.span(),
+            "`#[routes]` does not support unsafe traits",
+        ));
+    }
+    if let Some(auto_token) = &item.auto_token {
+        return Err(Error::new(
+            auto_token.span(),
+            "`#[routes]` does not support auto traits",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_method(
+    method: &mut TraitItemFn,
+    routes: &mut BTreeSet<(String, String)>,
+    prefix: &LitStr,
+) -> syn::Result<RouteMetadata> {
+    if method.default.is_some() {
+        return Err(Error::new(
+            method.span(),
+            "route contract methods must not provide default implementations",
+        ));
+    }
+    if method.sig.asyncness.is_none() {
+        return Err(Error::new(
+            method.sig.fn_token.span(),
+            "route contract methods must be async",
+        ));
+    }
+    if method.sig.constness.is_some()
+        || method.sig.unsafety.is_some()
+        || method.sig.abi.is_some()
+        || method.sig.variadic.is_some()
+        || !method.sig.generics.params.is_empty()
+        || method.sig.generics.where_clause.is_some()
+    {
+        return Err(Error::new(
+            method.sig.span(),
+            "route contract methods cannot be const, unsafe, extern, variadic, or generic",
+        ));
+    }
+
+    let Some(FnArg::Receiver(receiver)) = method.sig.inputs.first() else {
+        return Err(Error::new(
+            method.sig.inputs.span(),
+            "route contract methods require `&self` as the first parameter",
+        ));
+    };
+    if receiver.reference.is_none()
+        || receiver.mutability.is_some()
+        || receiver.colon_token.is_some()
+    {
+        return Err(Error::new(
+            receiver.span(),
+            "route contract methods require an immutable `&self` receiver",
+        ));
+    }
+
+    let mut route_attributes = Vec::new();
+    for (index, attribute) in method.attrs.iter().enumerate() {
+        if let Some(verb) = route_verb(attribute) {
+            route_attributes.push((index, verb));
+        }
+    }
+    if route_attributes.len() != 1 {
+        return Err(Error::new(
+            method.sig.ident.span(),
+            "each route contract method requires exactly one of `#[get]`, `#[post]`, `#[put]`, `#[patch]`, or `#[delete]`",
+        ));
+    }
+
+    let (attribute_index, verb) = &route_attributes[0];
+    let attribute = &method.attrs[*attribute_index];
+    let path = parse_route_path(attribute)?;
+    validate_path(&path, "route path", false)?;
+
+    let full_path = join_paths(prefix, &path)?;
+
+    let identity = ((*verb).to_owned(), full_path.value());
+    if !routes.insert(identity) {
+        return Err(Error::new(
+            attribute.span(),
+            "duplicate HTTP verb and path in this route contract",
+        ));
+    }
+
+    method.attrs.remove(*attribute_index);
+    make_future_send(method);
+    Ok(RouteMetadata {
+        method: HttpVerb::from_name(verb),
+        path,
+        full_path,
+        handler: LitStr::new(&method.sig.ident.to_string(), method.sig.ident.span()),
+    })
+}
+
+struct RouteMetadata {
+    method: HttpVerb,
+    path: LitStr,
+    full_path: LitStr,
+    handler: LitStr,
+}
+
+#[derive(Clone, Copy)]
+enum HttpVerb {
+    Get,
+    Post,
+    Put,
+    Patch,
+    Delete,
+}
+
+impl HttpVerb {
+    fn from_name(name: &str) -> Self {
+        match name {
+            "get" => Self::Get,
+            "post" => Self::Post,
+            "put" => Self::Put,
+            "patch" => Self::Patch,
+            "delete" => Self::Delete,
+            _ => unreachable!("validated route verbs are exhaustive"),
+        }
+    }
+
+    fn tokens(self, common: &syn::Path) -> proc_macro2::TokenStream {
+        match self {
+            Self::Get => quote!(#common::HttpMethod::Get),
+            Self::Post => quote!(#common::HttpMethod::Post),
+            Self::Put => quote!(#common::HttpMethod::Put),
+            Self::Patch => quote!(#common::HttpMethod::Patch),
+            Self::Delete => quote!(#common::HttpMethod::Delete),
+        }
+    }
+}
+
+fn make_future_send(method: &mut TraitItemFn) {
+    let output: Type = match &method.sig.output {
+        ReturnType::Default => parse_quote!(()),
+        ReturnType::Type(_, output) => (**output).clone(),
+    };
+    method.sig.asyncness = None;
+    method.sig.output = parse_quote!(
+        -> impl ::core::future::Future<Output = #output> + ::core::marker::Send
+    );
+}
+
+fn route_verb(attribute: &Attribute) -> Option<&'static str> {
+    let ident = attribute.path().segments.last()?.ident.to_string();
+    VERBS.iter().copied().find(|verb| ident == *verb)
+}
+
+fn parse_route_path(attribute: &Attribute) -> syn::Result<LitStr> {
+    match &attribute.meta {
+        Meta::List(list) => {
+            let paths = list.parse_args_with(Punctuated::<LitStr, Token![,]>::parse_terminated)?;
+            if paths.len() == 1 {
+                Ok(paths
+                    .first()
+                    .expect("a single parsed path must be present")
+                    .clone())
+            } else {
+                Err(Error::new(
+                    list.span(),
+                    "route attributes require exactly one string path",
+                ))
+            }
+        }
+        _ => Err(Error::new(
+            attribute.span(),
+            "route attributes require exactly one string path",
+        )),
+    }
+}
+
+fn join_paths(prefix: &LitStr, path: &LitStr) -> syn::Result<LitStr> {
+    let prefix = prefix.value();
+    let path_value = path.value();
+    let full_path = if prefix.is_empty() || prefix == "/" {
+        path_value
+    } else if path_value == "/" {
+        prefix
+    } else {
+        format!("{prefix}{path_value}")
+    };
+    Ok(LitStr::new(&full_path, path.span()))
+}
+
+fn validate_path(path: &LitStr, subject: &str, is_prefix: bool) -> syn::Result<()> {
+    let value = path.value();
+    if value.is_empty() || !value.starts_with('/') {
+        return Err(Error::new(
+            path.span(),
+            format!("{subject} must be non-empty and start with `/`"),
+        ));
+    }
+    if value.contains(['?', '#']) {
+        return Err(Error::new(
+            path.span(),
+            format!("{subject} must not contain a query string or fragment"),
+        ));
+    }
+    if value.contains(['\\', '%']) || value.chars().any(char::is_whitespace) {
+        return Err(Error::new(
+            path.span(),
+            format!("{subject} must not contain backslashes, percent-encoding, or whitespace"),
+        ));
+    }
+    if value != "/" && value.ends_with('/') {
+        return Err(Error::new(
+            path.span(),
+            format!("{subject} must not end with `/`; use `/` only for the root route"),
+        ));
+    }
+
+    if value == "/" {
+        return Ok(());
+    }
+
+    let mut parameters = BTreeSet::new();
+    for segment in value.split('/').skip(1) {
+        if segment.is_empty() || matches!(segment, "." | "..") {
+            return Err(Error::new(
+                path.span(),
+                format!("{subject} must not contain empty, `.` or `..` segments"),
+            ));
+        }
+        if let Some(parameter) = segment.strip_prefix(':') {
+            let mut characters = parameter.chars();
+            let Some(first) = characters.next() else {
+                return Err(Error::new(
+                    path.span(),
+                    format!("{subject} contains an empty parameter"),
+                ));
+            };
+            if !(first == '_' || first.is_ascii_alphabetic())
+                || !characters
+                    .all(|character| character == '_' || character.is_ascii_alphanumeric())
+            {
+                return Err(Error::new(
+                    path.span(),
+                    format!("{subject} parameters must use `[A-Za-z_][A-Za-z0-9_]*`"),
+                ));
+            }
+            if !parameters.insert(parameter) {
+                return Err(Error::new(
+                    path.span(),
+                    format!("{subject} must not repeat parameter `:{parameter}`"),
+                ));
+            }
+        } else if segment.contains(':') {
+            return Err(Error::new(
+                path.span(),
+                format!("{subject} parameters must occupy an entire path segment"),
+            ));
+        }
+    }
+
+    if is_prefix && value.contains(':') {
+        return Err(Error::new(
+            path.span(),
+            "route prefix must not contain parameters; declare them on the endpoint path",
+        ));
+    }
+    Ok(())
+}

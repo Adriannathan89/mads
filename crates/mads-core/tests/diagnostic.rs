@@ -2,9 +2,7 @@
 
 use std::fmt;
 
-use mads_core::{
-    Diagnostic, Error, MADS001, MADS002, MADS003, MADS005, MADS006, SourceLocation,
-};
+use mads_core::{Diagnostic, Error, MADS001, MADS002, MADS003, MADS005, MADS006, SourceLocation};
 
 #[test]
 fn graph_diagnostic_codes_are_stable() {

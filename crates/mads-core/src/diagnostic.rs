@@ -51,6 +51,9 @@ pub const MADS011: DiagnosticCode = DiagnosticCode::new("MADS011");
 /// Configuration source failure.
 pub const MADS020: DiagnosticCode = DiagnosticCode::new("MADS020");
 
+/// Conflicting integration route declarations.
+pub const MADS030: DiagnosticCode = DiagnosticCode::new("MADS030");
+
 /// The source position associated with a diagnostic.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SourceLocation {
