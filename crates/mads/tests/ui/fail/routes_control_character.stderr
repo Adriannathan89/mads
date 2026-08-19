@@ -1,0 +1,5 @@
+error: route path must not contain control characters
+ --> tests/ui/fail/routes_control_character.rs:3:17
+  |
+3 |     #[mads::get("/health\0check")]
+  |                 ^^^^^^^^^^^^^^^^

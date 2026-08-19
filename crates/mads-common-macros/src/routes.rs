@@ -330,6 +330,12 @@ fn validate_path(path: &LitStr, subject: &str, is_prefix: bool) -> syn::Result<(
             format!("{subject} must not contain a query string or fragment"),
         ));
     }
+    if value.chars().any(char::is_control) {
+        return Err(Error::new(
+            path.span(),
+            format!("{subject} must not contain control characters"),
+        ));
+    }
     if value.contains(['\\', '%']) || value.chars().any(char::is_whitespace) {
         return Err(Error::new(
             path.span(),

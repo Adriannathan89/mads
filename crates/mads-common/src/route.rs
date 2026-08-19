@@ -239,7 +239,7 @@ fn validate_routes(
 ) -> Result<()> {
     let mut seen = BTreeMap::new();
     for (controller, route) in routes {
-        let key = (route.method(), route.full_path());
+        let key = (route.method(), canonical_pattern(route.full_path()));
         if let Some((previous_controller, previous_route)) = seen.insert(key, (controller, route)) {
             let primary = Diagnostic::new(
                 MADS030,
@@ -264,4 +264,17 @@ fn validate_routes(
         }
     }
     Ok(())
+}
+
+fn canonical_pattern(path: &str) -> String {
+    path.split('/')
+        .map(|segment| {
+            if segment.starts_with(':') {
+                ":*"
+            } else {
+                segment
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }

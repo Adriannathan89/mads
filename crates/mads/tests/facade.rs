@@ -217,6 +217,46 @@ async fn controller_construction_rejects_conflicting_route_traits() {
 }
 
 #[allow(dead_code)]
+#[mads::routes(prefix = "/users")]
+trait UserIdParameterRoutes {
+    #[mads::get("/:id")]
+    async fn by_id(&self);
+}
+
+#[allow(dead_code)]
+#[mads::routes(prefix = "/users")]
+trait UserNameParameterRoutes {
+    #[mads::get("/:user_id")]
+    async fn by_user_id(&self);
+}
+
+#[mads::controller(routes = [UserIdParameterRoutes, UserNameParameterRoutes])]
+struct EquivalentParameterRouteController;
+
+impl UserIdParameterRoutes for EquivalentParameterRouteController {
+    async fn by_id(&self) {}
+}
+
+impl UserNameParameterRoutes for EquivalentParameterRouteController {
+    async fn by_user_id(&self) {}
+}
+
+#[tokio::test]
+async fn controller_construction_rejects_equivalent_parameter_route_patterns() {
+    let mut builder = CoreMads::builder();
+    let error = match builder
+        .construct::<EquivalentParameterRouteController>()
+        .await
+    {
+        Ok(_) => panic!("equivalent parameter route patterns must conflict"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.code(), mads::core::MADS030);
+    assert!(error.to_string().contains("GET /users/:user_id"));
+}
+
+#[allow(dead_code)]
 #[mads::routes(prefix = "/")]
 trait RootRoutes {
     #[mads::get("/health")]
