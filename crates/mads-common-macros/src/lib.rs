@@ -1,4 +1,14 @@
 //! Procedural macros for compile-time controller and route contracts.
+//!
+//! The attributes in this crate are re-exported by `mads-common` and, when the
+//! `common` feature is enabled, by the `mads` facade. They validate the shape
+//! of route traits and controllers during compilation, then emit the static
+//! metadata consumed by `mads_common::RouteCatalog` and the MADS dependency
+//! graph.
+//!
+//! Route attributes are deliberately contract-only in v0.1: they do not start
+//! an HTTP server or select a runtime adapter. Runtime routing remains a later
+//! integration concern.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
@@ -11,6 +21,14 @@ mod routes;
 mod verb;
 
 /// Declares a managed controller and the route traits it must implement.
+///
+/// The attribute accepts one argument in the form
+/// `routes = [RouteTrait, ...]`. The annotated item must be a non-generic
+/// named-field or unit struct. Every listed trait must be implemented by the
+/// controller; otherwise compilation fails at the controller declaration.
+/// Named fields are treated as dependency edges and are resolved by the MADS
+/// construction context when the controller is built. The generated public
+/// handle is cheap to clone because its state is stored behind an `Arc`.
 #[proc_macro_attribute]
 pub fn controller(arguments: TokenStream, item: TokenStream) -> TokenStream {
     controller::expand(arguments.into(), item.into())
@@ -19,6 +37,16 @@ pub fn controller(arguments: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Declares and validates a trait containing HTTP route contracts.
+///
+/// A route trait may optionally declare a `prefix = "/..."`. It must contain
+/// at least one method, and each method must be an async `&self` method with
+/// exactly one of the HTTP verb attributes [`get`], [`post`], [`put`],
+/// [`patch`], or [`delete`]. Methods remain abstract so that the controller's
+/// implementation is the only handler body.
+///
+/// The macro rejects malformed or ambiguous paths, duplicate method/path
+/// pairs, generic traits, and default method implementations. It also emits
+/// static route descriptors for later catalog validation.
 #[proc_macro_attribute]
 pub fn routes(arguments: TokenStream, item: TokenStream) -> TokenStream {
     routes::expand(arguments.into(), item.into())
@@ -27,30 +55,47 @@ pub fn routes(arguments: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Marks a GET method inside a trait annotated with [`routes`].
+///
+/// The attribute takes exactly one string path, such as `#[get("/:id")]`.
+/// It is only valid on an abstract async route-contract method; using it on a
+/// free function, an inherent method, or a trait without [`routes`] produces a
+/// compile-time diagnostic.
 #[proc_macro_attribute]
 pub fn get(arguments: TokenStream, item: TokenStream) -> TokenStream {
     verb::outside_contract("get", arguments.into(), item.into()).into()
 }
 
 /// Marks a POST method inside a trait annotated with [`routes`].
+///
+/// The attribute takes exactly one string path and is validated together with
+/// the route trait's optional prefix.
 #[proc_macro_attribute]
 pub fn post(arguments: TokenStream, item: TokenStream) -> TokenStream {
     verb::outside_contract("post", arguments.into(), item.into()).into()
 }
 
 /// Marks a PUT method inside a trait annotated with [`routes`].
+///
+/// The attribute takes exactly one string path and is validated together with
+/// the route trait's optional prefix.
 #[proc_macro_attribute]
 pub fn put(arguments: TokenStream, item: TokenStream) -> TokenStream {
     verb::outside_contract("put", arguments.into(), item.into()).into()
 }
 
 /// Marks a PATCH method inside a trait annotated with [`routes`].
+///
+/// The attribute takes exactly one string path and is validated together with
+/// the route trait's optional prefix.
 #[proc_macro_attribute]
 pub fn patch(arguments: TokenStream, item: TokenStream) -> TokenStream {
     verb::outside_contract("patch", arguments.into(), item.into()).into()
 }
 
 /// Marks a DELETE method inside a trait annotated with [`routes`].
+///
+/// The attribute takes exactly one string path and is validated together with
+/// the route trait's optional prefix.
 #[proc_macro_attribute]
 pub fn delete(arguments: TokenStream, item: TokenStream) -> TokenStream {
     verb::outside_contract("delete", arguments.into(), item.into()).into()

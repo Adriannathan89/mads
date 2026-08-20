@@ -1,10 +1,18 @@
 //! Expansion paths that work through the common crate or public facade.
+//!
+//! Procedural macros may be invoked through either `mads-common` directly or
+//! the `mads` facade. This module resolves the path that generated code should
+//! use so renamed dependencies and in-crate macro tests remain valid.
 
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::Span;
 use syn::{Error, Path, parse_quote};
 
 /// Resolves the common integration path visible to the macro consumer.
+///
+/// Direct users receive a path to `mads-common`; facade users receive the
+/// facade's `common` module. An actionable compile-time error is returned when
+/// neither package is present in the consumer's dependency graph.
 pub(crate) fn common_path() -> syn::Result<Path> {
     if let Ok(found) = crate_name("mads-common") {
         return found_path(found, false);

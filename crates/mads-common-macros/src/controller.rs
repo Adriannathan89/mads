@@ -1,4 +1,9 @@
 //! Expansion for managed controllers associated with route traits.
+//!
+//! The expansion keeps the user's documented struct and field visibility while
+//! moving the actual fields into a private `Arc`-backed representation. It also
+//! registers dependency and route metadata without requiring a runtime-specific
+//! router.
 
 use std::collections::BTreeSet;
 
