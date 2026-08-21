@@ -4,5 +4,6 @@
 /target/
 /coverage/
 /docs/proposed/
+/.codex/
 *.profraw
 .DS_Store

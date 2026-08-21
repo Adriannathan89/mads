@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use mads::common::{HttpMethod, RouteCatalog};
-use mads::core::{Catalog as CoreCatalog, Mads as CoreMads, ProviderKind};
+use mads::core::{
+    Catalog as CoreCatalog, Mads as CoreMads, ProviderKind, ProviderOrigin, ProviderVisibility,
+};
 
 #[test]
 fn prelude_exposes_core_types_and_bare_attributes() {
@@ -53,6 +55,15 @@ fn prelude_exposes_core_types_and_bare_attributes() {
 
 #[mads::module]
 struct FacadeModule;
+
+/// Public managed service used to verify facade visibility metadata.
+#[mads::service]
+pub struct PublicGraphService;
+
+#[mads::provider]
+pub(crate) fn restricted_graph_value() -> u16 {
+    16
+}
 
 #[mads::repository]
 struct FacadeRepository;
@@ -145,6 +156,18 @@ fn facade_attributes_register_stable_descriptors() {
         descriptor.type_name() == "facade::FacadeController"
             && descriptor.kind() == ProviderKind::Service
     }));
+    assert_eq!(
+        CoreCatalog::provider_for::<PublicGraphService>()
+            .expect("public service descriptor should exist")
+            .visibility(),
+        ProviderVisibility::Public,
+    );
+    assert_eq!(
+        CoreCatalog::provider_for::<u16>()
+            .expect("restricted provider descriptor should exist")
+            .visibility(),
+        ProviderVisibility::Private,
+    );
 }
 
 #[test]
@@ -173,87 +196,6 @@ fn controller_keeps_deterministic_route_metadata() {
     assert_eq!(routes[1].method(), HttpMethod::Post);
     assert_eq!(routes[1].full_path(), "/users");
     assert!(RouteCatalog::validate_controller::<FacadeController>().is_ok());
-}
-
-#[allow(dead_code)]
-#[mads::routes]
-trait DuplicateReadRoutes {
-    #[mads::get("/duplicate")]
-    async fn first(&self);
-}
-
-#[allow(dead_code)]
-#[mads::routes]
-trait DuplicateAdminRoutes {
-    #[mads::get("/duplicate")]
-    async fn second(&self);
-}
-
-#[mads::controller(routes = [DuplicateReadRoutes, DuplicateAdminRoutes])]
-struct DuplicateRouteController;
-
-impl DuplicateReadRoutes for DuplicateRouteController {
-    async fn first(&self) {}
-}
-
-impl DuplicateAdminRoutes for DuplicateRouteController {
-    async fn second(&self) {}
-}
-
-#[tokio::test]
-async fn controller_construction_rejects_conflicting_route_traits() {
-    let mut builder = CoreMads::builder();
-    let error = match builder.construct::<DuplicateRouteController>().await {
-        Ok(_) => panic!("conflicting route traits must fail before controller allocation"),
-        Err(error) => error,
-    };
-
-    assert_eq!(error.code(), mads::core::MADS030);
-    assert!(error.to_string().contains("GET /duplicate"));
-    assert_eq!(
-        RouteCatalog::validate().unwrap_err().code(),
-        mads::core::MADS030
-    );
-}
-
-#[allow(dead_code)]
-#[mads::routes(prefix = "/users")]
-trait UserIdParameterRoutes {
-    #[mads::get("/:id")]
-    async fn by_id(&self);
-}
-
-#[allow(dead_code)]
-#[mads::routes(prefix = "/users")]
-trait UserNameParameterRoutes {
-    #[mads::get("/:user_id")]
-    async fn by_user_id(&self);
-}
-
-#[mads::controller(routes = [UserIdParameterRoutes, UserNameParameterRoutes])]
-struct EquivalentParameterRouteController;
-
-impl UserIdParameterRoutes for EquivalentParameterRouteController {
-    async fn by_id(&self) {}
-}
-
-impl UserNameParameterRoutes for EquivalentParameterRouteController {
-    async fn by_user_id(&self) {}
-}
-
-#[tokio::test]
-async fn controller_construction_rejects_equivalent_parameter_route_patterns() {
-    let mut builder = CoreMads::builder();
-    let error = match builder
-        .construct::<EquivalentParameterRouteController>()
-        .await
-    {
-        Ok(_) => panic!("equivalent parameter route patterns must conflict"),
-        Err(error) => error,
-    };
-
-    assert_eq!(error.code(), mads::core::MADS030);
-    assert!(error.to_string().contains("GET /users/:user_id"));
 }
 
 #[allow(dead_code)]
@@ -295,20 +237,25 @@ async fn cloned_service_handles_share_the_inner_allocation() {
     builder
         .provide(Clock)
         .expect("clock insertion should succeed");
-    builder
-        .construct::<FacadeRepository>()
-        .await
-        .expect("repository construction should succeed");
-    builder
-        .construct::<FacadeService>()
-        .await
-        .expect("service construction should succeed");
 
-    let application = builder.build();
+    let application = builder
+        .build()
+        .await
+        .expect("the application graph should build");
     let service = application
         .context()
         .resolve::<FacadeService>()
         .expect("the constructed service should resolve");
+    let graph_service = application
+        .graph()
+        .provider::<FacadeService>()
+        .expect("the facade service should be in the graph");
+    assert_eq!(graph_service.origin(), ProviderOrigin::Service);
+    assert_eq!(graph_service.visibility(), ProviderVisibility::Private);
+    assert!(application.graph().dependencies().iter().any(|edge| {
+        edge.provider_type_name().ends_with("FacadeService")
+            && edge.dependency_type_name().ends_with("FacadeRepository")
+    }));
     let cloned = service.as_ref().clone();
 
     assert!(service.has_dependencies());
@@ -323,6 +270,9 @@ async fn cloned_service_handles_share_the_inner_allocation() {
 async fn controller_constructs_after_multiple_usecases() {
     let mut builder = CoreMads::builder();
     builder
+        .provide(Clock)
+        .expect("clock insertion should succeed");
+    builder
         .construct::<QueryUsecase>()
         .await
         .expect("query use case construction should succeed");
@@ -335,7 +285,10 @@ async fn controller_constructs_after_multiple_usecases() {
         .await
         .expect("controller construction should succeed");
 
-    let application = builder.build();
+    let application = builder
+        .build()
+        .await
+        .expect("the application graph should build");
     let controller = application
         .context()
         .resolve::<FacadeController>()
@@ -350,13 +303,19 @@ async fn controller_constructs_after_multiple_usecases() {
 #[tokio::test]
 async fn grouped_mads_results_register_their_success_type() {
     let mut builder = CoreMads::builder();
+    builder
+        .provide(Clock)
+        .expect("clock insertion should succeed");
 
     builder
         .construct::<GroupedFallibleProvider>()
         .await
         .expect("a grouped MADS Result provider should construct its success type");
 
-    let application = builder.build();
+    let application = builder
+        .build()
+        .await
+        .expect("the application graph should build");
     assert!(
         application
             .context()

@@ -1,4 +1,10 @@
 //! Framework-neutral route metadata and validation.
+//!
+//! The types in this module are the stable boundary between compile-time route
+//! macros and a future HTTP adapter. They contain only immutable, `'static`
+//! metadata, so catalog inspection does not construct controllers or start a
+//! server. [`RouteCatalog`] provides deterministic lookup and conflict
+//! validation over the descriptors registered by `#[controller]`.
 
 use std::any::TypeId;
 use std::collections::BTreeMap;
@@ -7,6 +13,9 @@ use std::sync::OnceLock;
 use mads_core::{Diagnostic, Error, MADS030, Result, SourceLocation};
 
 /// An HTTP method declared by a route contract.
+///
+/// This enum mirrors the route attributes exported by the common integration
+/// (`#[get]`, `#[post]`, `#[put]`, `#[patch]`, and `#[delete]`).
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum HttpMethod {
     /// The HTTP GET method.
@@ -35,6 +44,11 @@ impl HttpMethod {
 }
 
 /// Static metadata for one route method.
+///
+/// A descriptor records both the method-local path and the canonical path after
+/// applying the route-trait prefix. Its source location points back to the
+/// route declaration, allowing catalog diagnostics to identify the offending
+/// source span without retaining runtime state.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct RouteDescriptor {
     method: HttpMethod,
@@ -97,6 +111,10 @@ impl RouteDescriptor {
 }
 
 /// Route metadata contributed by one route trait to a controller.
+///
+/// A controller can implement multiple route contracts. The descriptor keeps
+/// each contract separate so callers can preserve trait and method order while
+/// validating the combined controller surface.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct RouteContractDescriptor {
     trait_name: &'static str,
@@ -121,6 +139,10 @@ impl RouteContractDescriptor {
 }
 
 /// Static route metadata contributed by one managed controller.
+///
+/// Values are collected through the internal inventory registry when the
+/// application is linked. The descriptor stores no controller instance and is
+/// therefore safe to inspect during bootstrap before dependency construction.
 pub struct ControllerRouteDescriptor {
     type_name: &'static str,
     type_id: fn() -> TypeId,
@@ -160,15 +182,28 @@ impl ControllerRouteDescriptor {
 mads_core::__private::inventory::collect!(ControllerRouteDescriptor);
 
 /// Looks up and validates route-contract metadata.
+///
+/// The catalog is a read-only view of metadata emitted by `#[routes]` and
+/// `#[controller]`. Validation canonicalizes parameter names, so routes such as
+/// `/users/:id` and `/users/:user_id` conflict when they use the same HTTP
+/// method and controller scope. A conflict is reported as the framework's
+/// `MADS030` diagnostic.
 pub struct RouteCatalog;
 
 impl RouteCatalog {
     /// Returns registered controllers in deterministic type-name order.
+    ///
+    /// The returned vector contains references to static descriptors; cloning
+    /// the vector does not clone controller state.
     pub fn controllers() -> Vec<&'static ControllerRouteDescriptor> {
         controller_cache().clone()
     }
 
-    /// Returns route descriptors declared by controller `T`, preserving trait and method order.
+    /// Returns route descriptors declared by controller `T`, preserving trait
+    /// and method order.
+    ///
+    /// An unregistered type produces an empty vector. `T` must be a concrete,
+    /// thread-safe application type because it is matched by its `TypeId`.
     pub fn routes_for<T>() -> Vec<RouteDescriptor>
     where
         T: Send + Sync + 'static,
@@ -183,6 +218,10 @@ impl RouteCatalog {
     }
 
     /// Validates route conflicts within controller `T`.
+    ///
+    /// If `T` is not registered, validation succeeds with no work. Otherwise,
+    /// duplicate method/canonical-path pairs return a diagnostic containing the
+    /// current and first declarations.
     #[allow(clippy::result_large_err)]
     pub fn validate_controller<T>() -> Result<()>
     where
@@ -202,6 +241,9 @@ impl RouteCatalog {
     }
 
     /// Validates route conflicts across every registered controller.
+    ///
+    /// This is the application-wide validation entry point and should run
+    /// before a runtime adapter installs HTTP routes.
     #[allow(clippy::result_large_err)]
     pub fn validate() -> Result<()> {
         let routes = Self::controllers().into_iter().flat_map(|controller| {

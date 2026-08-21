@@ -1,4 +1,10 @@
 //! Expansion for compile-time route-contract traits.
+//!
+//! This module owns the route grammar used by `#[routes]` and the HTTP verb
+//! attributes. Validation happens before metadata is emitted so malformed
+//! paths cannot reach a runtime adapter. The generated trait retains the
+//! developer's method documentation and gains hidden contract/metadata
+//! constants used by `#[controller]`.
 
 use std::collections::BTreeSet;
 

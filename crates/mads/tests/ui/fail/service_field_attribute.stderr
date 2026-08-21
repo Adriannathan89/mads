@@ -1,4 +1,4 @@
-error: `#[mads::service]` managed-provider fields support documentation attributes only in v0.1; remove this field attribute
+error: `#[mads::service]` managed-provider fields support documentation attributes only in v0.2; remove this field attribute
  --> tests/ui/fail/service_field_attribute.rs:5:5
   |
 5 |     #[allow(dead_code)]

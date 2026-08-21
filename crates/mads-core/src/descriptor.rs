@@ -17,6 +17,15 @@ pub enum ProviderKind {
     Provider,
 }
 
+/// Describes whether a provider declaration is public outside its Rust module.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum ProviderVisibility {
+    /// The provider is public outside its Rust module.
+    Public,
+    /// The provider is private to its Rust module.
+    Private,
+}
+
 /// The asynchronous result of constructing an erased provider.
 pub type ProviderFuture<'a> = Pin<Box<dyn Future<Output = Result<ErasedProvider>> + Send + 'a>>;
 
@@ -52,6 +61,7 @@ pub struct ProviderDescriptor {
     type_name: &'static str,
     type_id: fn() -> TypeId,
     dependencies: &'static [DependencyDescriptor],
+    visibility: ProviderVisibility,
     location: SourceLocation,
     constructor: ProviderConstructor,
 }
@@ -63,6 +73,7 @@ impl ProviderDescriptor {
         type_name: &'static str,
         type_id: fn() -> TypeId,
         dependencies: &'static [DependencyDescriptor],
+        visibility: ProviderVisibility,
         location: SourceLocation,
         constructor: ProviderConstructor,
     ) -> Self {
@@ -71,6 +82,7 @@ impl ProviderDescriptor {
             type_name,
             type_id,
             dependencies,
+            visibility,
             location,
             constructor,
         }
@@ -94,6 +106,11 @@ impl ProviderDescriptor {
     /// Returns the static dependency descriptors required by this provider.
     pub const fn dependencies(&self) -> &'static [DependencyDescriptor] {
         self.dependencies
+    }
+
+    /// Returns the provider's declaration visibility metadata.
+    pub const fn visibility(&self) -> ProviderVisibility {
+        self.visibility
     }
 
     /// Returns the provider declaration's source location.

@@ -1,7 +1,9 @@
 //! Framework-neutral runtime contracts for MADS.rs.
 //!
-//! The v0.1 foundation reserves this crate for runtime semantics and re-exports
-//! its procedural macros, without introducing HTTP or database integrations.
+//! Version 0.2 provides framework-neutral application construction, lifecycle
+//! management, configuration, provider metadata, and deterministic dependency
+//! graph analysis. It re-exports the core procedural macros without introducing
+//! HTTP or database integrations.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
@@ -12,6 +14,7 @@ mod config;
 mod context;
 mod descriptor;
 mod diagnostic;
+mod graph;
 mod lifecycle;
 mod registry;
 #[cfg(feature = "runtime-tokio")]
@@ -23,11 +26,15 @@ pub use config::{Config, ConfigBuilder, ConfigSource, ConfigValue, EnvSource, Ma
 pub use context::{ApplicationContext, ConstructionContext};
 pub use descriptor::{
     DependencyDescriptor, ModuleDescriptor, ProviderConstructor, ProviderDescriptor,
-    ProviderFuture, ProviderKind,
+    ProviderFuture, ProviderKind, ProviderVisibility,
 };
 pub use diagnostic::{
     Diagnostic, DiagnosticCode, Error, MADS001, MADS002, MADS003, MADS004, MADS005, MADS006,
     MADS010, MADS011, MADS020, MADS030, Result, SourceLocation,
+};
+pub use graph::{
+    ApplicationGraph, ConstructionPlan, ConstructionStep, DependencyEdge, GraphAnalysis,
+    ProviderNode, ProviderOrigin, ProviderState,
 };
 pub use lifecycle::{LifecycleFuture, LifecycleHook, LifecycleManager, LifecycleState};
 pub use registry::{ErasedProvider, ProviderRegistry};

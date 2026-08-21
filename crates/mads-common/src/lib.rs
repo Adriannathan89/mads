@@ -1,7 +1,12 @@
 //! Standard integration contracts for MADS.rs.
 //!
-//! Version 0.1 provides compile-time controller and route contracts while HTTP
+//! Version 0.2 provides compile-time controller and route contracts while HTTP
 //! runtime adapters, extractors, and server execution remain reserved.
+//!
+//! Use [`routes`] to declare an abstract route contract and [`controller`] to
+//! bind one or more such contracts to a managed controller. The resulting
+//! descriptors can be inspected through [`RouteCatalog`] before a future HTTP
+//! integration installs runtime handlers.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
@@ -32,6 +37,7 @@ pub use mads_common_macros::post;
 /// Marks a PUT route inside a route-contract trait.
 pub use mads_common_macros::put;
 
+/// Static route and controller metadata types used by the contract catalog.
 pub use route::{
     ControllerRouteDescriptor, HttpMethod, RouteCatalog, RouteContractDescriptor, RouteDescriptor,
 };

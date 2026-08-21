@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use mads_core::{
     Config, ConstructionContext, DependencyDescriptor, ErasedProvider, ModuleDescriptor,
-    ProviderDescriptor, ProviderFuture, ProviderKind, ProviderRegistry, SourceLocation,
+    ProviderDescriptor, ProviderFuture, ProviderKind, ProviderRegistry, ProviderVisibility,
+    SourceLocation,
 };
 
 struct Dependency;
@@ -36,6 +37,7 @@ async fn provider_descriptor_preserves_complete_construction_metadata() {
         "descriptor::Output",
         output_type_id,
         &DEPENDENCIES,
+        ProviderVisibility::Public,
         location,
         output_constructor,
     );
@@ -44,6 +46,7 @@ async fn provider_descriptor_preserves_complete_construction_metadata() {
     assert_eq!(descriptor.type_name(), "descriptor::Output");
     assert_eq!(descriptor.type_id(), TypeId::of::<Output>());
     assert_eq!(descriptor.dependencies().len(), 1);
+    assert_eq!(descriptor.visibility(), ProviderVisibility::Public);
     assert_eq!(
         descriptor.dependencies()[0].type_name(),
         "descriptor::Dependency"

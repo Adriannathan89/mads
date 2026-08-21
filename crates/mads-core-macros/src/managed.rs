@@ -77,7 +77,7 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
         return Err(Error::new(
             attribute.span(),
             format!(
-                "`#[mads::{}]` managed providers support documentation attributes only in v0.1; remove this struct attribute",
+                "`#[mads::{}]` managed providers support documentation attributes only in v0.2; remove this struct attribute",
                 kind.attribute_name()
             ),
         ));
@@ -89,7 +89,7 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
                 return Err(Error::new(
                     attribute.span(),
                     format!(
-                        "`#[mads::{}]` managed-provider fields support documentation attributes only in v0.1; remove this field attribute",
+                        "`#[mads::{}]` managed-provider fields support documentation attributes only in v0.2; remove this field attribute",
                         kind.attribute_name()
                     ),
                 ));
@@ -99,6 +99,7 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
 
     let core = core_path()?;
     let provider_kind = kind.provider_kind(&core);
+    let provider_visibility = provider_visibility(&item.vis, &core);
     let ItemStruct {
         attrs,
         vis,
@@ -197,11 +198,20 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
                 concat!(module_path!(), "::", stringify!(#ident)),
                 || ::core::any::TypeId::of::<#ident>(),
                 #dependencies,
+                #provider_visibility,
                 #core::SourceLocation::new(file!(), line!(), column!()),
                 #constructor_ident,
             )
         }
     })
+}
+
+fn provider_visibility(visibility: &syn::Visibility, core: &syn::Path) -> TokenStream {
+    if matches!(visibility, syn::Visibility::Public(_)) {
+        quote!(#core::ProviderVisibility::Public)
+    } else {
+        quote!(#core::ProviderVisibility::Private)
+    }
 }
 
 fn is_repr(attribute: &&Attribute) -> bool {

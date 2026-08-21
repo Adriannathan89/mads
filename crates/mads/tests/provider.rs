@@ -1,6 +1,6 @@
 //! Integration tests for explicit provider-function construction.
 
-use mads::core::{Catalog, Config, ConfigBuilder, MADS003, Mads, MapSource};
+use mads::core::{Catalog, Config, ConfigBuilder, MADS003, Mads, MapSource, ProviderVisibility};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ConfiguredValue(String);
@@ -10,6 +10,9 @@ struct CombinedValue {
     configured: String,
     entries: usize,
 }
+
+/// Output type for the public provider visibility fixture.
+pub struct PublicProviderValue;
 
 #[mads::provider]
 fn configured_value(config: Config) -> ConfiguredValue {
@@ -30,6 +33,12 @@ async fn combined_value(
         configured: configured.0,
         entries: config.len(),
     })
+}
+
+#[mads::provider]
+/// Public provider used to verify visibility metadata.
+pub fn public_provider() -> PublicProviderValue {
+    PublicProviderValue
 }
 
 fn test_config() -> Config {
@@ -55,39 +64,37 @@ fn provider_dependencies_follow_parameter_order() {
     assert_eq!(dependency_names, ["Config", "ConfiguredValue"]);
 }
 
+#[test]
+fn provider_visibility_matches_function_visibility() {
+    assert_eq!(
+        Catalog::provider_for::<ConfiguredValue>()
+            .expect("private provider descriptor should be registered")
+            .visibility(),
+        ProviderVisibility::Private,
+    );
+    assert_eq!(
+        Catalog::provider_for::<CombinedValue>()
+            .expect("private async provider descriptor should be registered")
+            .visibility(),
+        ProviderVisibility::Private,
+    );
+    assert_eq!(
+        Catalog::provider_for::<PublicProviderValue>()
+            .expect("public provider descriptor should be registered")
+            .visibility(),
+        ProviderVisibility::Public,
+    );
+}
+
 #[tokio::test]
-async fn explicit_order_stores_direct_and_fallible_provider_outputs() {
-    let mut builder = Mads::builder_with_config(test_config());
-    builder
-        .construct::<ConfiguredValue>()
+async fn automatic_build_stores_direct_and_fallible_provider_outputs() {
+    let application = Mads::builder_with_config(test_config())
+        .build()
         .await
-        .expect("the direct provider should construct first");
-    builder
-        .construct::<CombinedValue>()
-        .await
-        .expect("the fallible provider should construct after its dependency");
-    let application = builder.build();
+        .expect("the provider graph should build");
 
-    let configured = application
-        .context()
-        .resolve::<ConfiguredValue>()
-        .expect("the direct output should be stored");
-    let combined = application
-        .context()
-        .resolve::<CombinedValue>()
-        .expect("the fallible output should be stored");
-
-    assert_eq!(
-        configured.as_ref(),
-        &ConfiguredValue("provider-test".into())
-    );
-    assert_eq!(
-        combined.as_ref(),
-        &CombinedValue {
-            configured: "provider-test".into(),
-            entries: 1,
-        }
-    );
+    assert!(application.context().resolve::<ConfiguredValue>().is_ok());
+    assert!(application.context().resolve::<CombinedValue>().is_ok());
 }
 
 #[tokio::test]

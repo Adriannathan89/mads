@@ -4,8 +4,8 @@ use std::any::TypeId;
 use std::sync::Arc;
 
 use mads_core::{
-    Catalog, ConstructionContext, ErasedProvider, MADS001, MADS003, ModuleDescriptor,
-    ProviderDescriptor, ProviderFuture, ProviderKind, SourceLocation,
+    Catalog, ConstructionContext, ErasedProvider, MADS002, MADS003, Mads, ModuleDescriptor,
+    ProviderDescriptor, ProviderFuture, ProviderKind, ProviderVisibility, SourceLocation,
 };
 
 struct Alpha;
@@ -47,6 +47,7 @@ inventory::submit! {
         "alpha::Provider",
         alpha_type_id,
         &[],
+        ProviderVisibility::Private,
         SourceLocation::new(file!(), line!(), column!()),
         alpha_constructor,
     )
@@ -58,6 +59,7 @@ inventory::submit! {
         "duplicate::First",
         duplicate_type_id,
         &[],
+        ProviderVisibility::Private,
         SourceLocation::new(file!(), line!(), column!()),
         duplicate_constructor,
     )
@@ -69,6 +71,7 @@ inventory::submit! {
         "duplicate::Second",
         duplicate_type_id,
         &[],
+        ProviderVisibility::Private,
         SourceLocation::new(file!(), line!(), column!()),
         duplicate_constructor,
     )
@@ -93,12 +96,12 @@ fn provider_for_selects_the_matching_descriptor() {
 }
 
 #[test]
-fn provider_for_reports_duplicate_descriptors() {
+fn provider_for_reports_ambiguous_descriptors() {
     let Err(error) = Catalog::provider_for::<Duplicate>() else {
         panic!("duplicates should be rejected");
     };
 
-    assert_eq!(error.code(), MADS001);
+    assert_eq!(error.code(), MADS002);
 }
 
 #[test]
@@ -108,4 +111,14 @@ fn provider_for_reports_a_missing_descriptor() {
     };
 
     assert_eq!(error.code(), MADS003);
+}
+
+#[tokio::test]
+async fn manual_construction_rejects_ambiguous_provider_outputs() {
+    let mut builder = Mads::builder();
+    let Err(error) = builder.construct::<Duplicate>().await else {
+        panic!("different providers for one output type must be ambiguous");
+    };
+
+    assert_eq!(error.code(), MADS002);
 }

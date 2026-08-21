@@ -1,4 +1,9 @@
 //! Expansion for managed controllers associated with route traits.
+//!
+//! The expansion keeps the user's documented struct and field visibility while
+//! moving the actual fields into a private `Arc`-backed representation. It also
+//! registers dependency and route metadata without requiring a runtime-specific
+//! router.
 
 use std::collections::BTreeSet;
 
@@ -85,7 +90,7 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
     {
         return Err(Error::new(
             attribute.span(),
-            "`#[controller]` structs support documentation and lint attributes only in v0.1",
+            "`#[controller]` structs support documentation and lint attributes only in v0.2",
         ));
     }
     if let Fields::Named(fields) = &item.fields {
@@ -97,7 +102,7 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
             {
                 return Err(Error::new(
                     attribute.span(),
-                    "`#[controller]` fields support documentation and lint attributes only in v0.1",
+                    "`#[controller]` fields support documentation and lint attributes only in v0.2",
                 ));
             }
         }
@@ -105,6 +110,7 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
 
     let common = common_path()?;
     let core = quote!(#common::core);
+    let provider_visibility = provider_visibility(&item.vis, &core);
     let generated_suffix = generated_suffix(&item, &item.ident);
     let ItemStruct {
         attrs,
@@ -221,6 +227,7 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
                 concat!(module_path!(), "::", stringify!(#ident)),
                 || ::core::any::TypeId::of::<#ident>(),
                 #dependencies,
+                #provider_visibility,
                 #core::SourceLocation::new(file!(), line!(), column!()),
                 #constructor_ident,
             )
@@ -234,6 +241,14 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
             )
         }
     })
+}
+
+fn provider_visibility(visibility: &syn::Visibility, core: &TokenStream) -> TokenStream {
+    if matches!(visibility, syn::Visibility::Public(_)) {
+        quote!(#core::ProviderVisibility::Public)
+    } else {
+        quote!(#core::ProviderVisibility::Private)
+    }
 }
 
 fn generated_suffix(item: &ItemStruct, ident: &Ident) -> String {
