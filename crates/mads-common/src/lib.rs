@@ -46,5 +46,12 @@ pub use mads_common_macros::put;
 
 /// Static route and controller metadata types used by the contract catalog.
 pub use route::{
-    ControllerRouteDescriptor, HttpMethod, RouteCatalog, RouteContractDescriptor, RouteDescriptor,
+    ControllerRegistrar, ControllerRouteDescriptor, HttpMethod, RouteCatalog,
+    RouteContractDescriptor, RouteDescriptor,
 };
+
+/// Implementation details used by generated HTTP route adapters.
+#[doc(hidden)]
+pub mod __private {
+    pub use crate::route::{ValidatedRouteIter, validate_descriptors};
+}
