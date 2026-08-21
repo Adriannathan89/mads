@@ -77,7 +77,7 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
         return Err(Error::new(
             attribute.span(),
             format!(
-                "`#[mads::{}]` managed providers support documentation attributes only in v0.1; remove this struct attribute",
+                "`#[mads::{}]` managed providers support documentation attributes only in v0.2; remove this struct attribute",
                 kind.attribute_name()
             ),
         ));
@@ -89,7 +89,7 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
                 return Err(Error::new(
                     attribute.span(),
                     format!(
-                        "`#[mads::{}]` managed-provider fields support documentation attributes only in v0.1; remove this field attribute",
+                        "`#[mads::{}]` managed-provider fields support documentation attributes only in v0.2; remove this field attribute",
                         kind.attribute_name()
                     ),
                 ));

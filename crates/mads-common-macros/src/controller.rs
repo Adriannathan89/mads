@@ -90,7 +90,7 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
     {
         return Err(Error::new(
             attribute.span(),
-            "`#[controller]` structs support documentation and lint attributes only in v0.1",
+            "`#[controller]` structs support documentation and lint attributes only in v0.2",
         ));
     }
     if let Fields::Named(fields) = &item.fields {
@@ -102,7 +102,7 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
             {
                 return Err(Error::new(
                     attribute.span(),
-                    "`#[controller]` fields support documentation and lint attributes only in v0.1",
+                    "`#[controller]` fields support documentation and lint attributes only in v0.2",
                 ));
             }
         }
