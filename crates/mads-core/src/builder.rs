@@ -1,5 +1,7 @@
 //! Explicit application construction and lifecycle ownership.
 
+use std::collections::VecDeque;
+
 use crate::{
     ApplicationContext, ApplicationGraph, Catalog, Config, ConstructionContext, ConstructionPlan,
     ConstructionStep, Diagnostic, Error, GraphAnalysis, LifecycleHook, LifecycleManager,
@@ -85,7 +87,7 @@ impl MadsBuilder {
                 let context = ConstructionContext::new(&self.registry, &self.config);
                 (step.descriptor().constructor())(&context)
                     .await
-                    .map_err(|source| provider_construction_error(step, source))?
+                    .map_err(|source| provider_construction_error(step, &graph, source))?
             };
             self.registry
                 .insert_erased(step.type_id(), step.type_name, value)?;
@@ -152,15 +154,104 @@ impl Mads {
     }
 }
 
-fn provider_construction_error(step: &ConstructionStep, source: Error) -> Error {
-    Error::with_source(
-        Diagnostic::new(
-            MADS006,
-            "provider construction failed",
-            "a provider constructor returned an error",
-        )
-        .with_subject(step.type_name())
-        .with_location(step.location()),
-        source,
+fn provider_construction_error(
+    step: &ConstructionStep,
+    graph: &ApplicationGraph,
+    source: Error,
+) -> Error {
+    let mut diagnostic = Diagnostic::new(
+        MADS006,
+        "provider construction failed",
+        "a provider constructor returned an error",
     )
+    .with_subject(step.type_name())
+    .with_location(step.location());
+    if let Some(path) = consumer_path(graph, step) {
+        diagnostic = diagnostic.with_suggestion(format!("construction path: {path}"));
+    }
+    Error::with_source(diagnostic, source)
+}
+
+fn consumer_path(graph: &ApplicationGraph, failing_step: &ConstructionStep) -> Option<String> {
+    if !graph
+        .dependencies
+        .iter()
+        .any(|edge| edge.dependency_type_id == failing_step.type_id())
+    {
+        return None;
+    }
+
+    let mut roots = graph
+        .providers
+        .iter()
+        .enumerate()
+        .filter(|(_, provider)| {
+            !graph
+                .dependencies
+                .iter()
+                .any(|edge| edge.dependency_type_id == provider.type_id)
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    roots.sort_by(|left, right| provider_order(graph, *left, *right));
+
+    let mut visited = vec![false; graph.providers.len()];
+    let mut queue = VecDeque::new();
+    for root in roots {
+        visited[root] = true;
+        queue.push_back(vec![root]);
+    }
+
+    while let Some(path) = queue.pop_front() {
+        let provider = *path.last().expect("paths are never empty");
+        if graph.providers[provider].type_id == failing_step.type_id() {
+            return Some(
+                path.iter()
+                    .map(|index| graph.providers[*index].type_name)
+                    .collect::<Vec<_>>()
+                    .join(" -> "),
+            );
+        }
+
+        let mut dependencies = graph
+            .dependencies
+            .iter()
+            .filter(|edge| edge.provider_type_id == graph.providers[provider].type_id)
+            .filter_map(|edge| {
+                graph
+                    .providers
+                    .iter()
+                    .position(|candidate| candidate.type_id == edge.dependency_type_id)
+            })
+            .collect::<Vec<_>>();
+        dependencies.sort_by(|left, right| provider_order(graph, *left, *right));
+        for dependency in dependencies {
+            if !visited[dependency] {
+                visited[dependency] = true;
+                let mut path = path.clone();
+                path.push(dependency);
+                queue.push_back(path);
+            }
+        }
+    }
+
+    None
+}
+
+fn provider_order(graph: &ApplicationGraph, left: usize, right: usize) -> std::cmp::Ordering {
+    let left = &graph.providers[left];
+    let right = &graph.providers[right];
+    left.type_name
+        .cmp(right.type_name)
+        .then_with(|| left.origin.cmp(&right.origin))
+        .then_with(|| match (left.location, right.location) {
+            (Some(left), Some(right)) => left
+                .file
+                .cmp(right.file)
+                .then_with(|| left.line.cmp(&right.line))
+                .then_with(|| left.column.cmp(&right.column)),
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        })
 }

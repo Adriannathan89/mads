@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use mads::common::{HttpMethod, RouteCatalog};
-use mads::core::{Catalog as CoreCatalog, Mads as CoreMads, ProviderKind, ProviderVisibility};
+use mads::core::{
+    Catalog as CoreCatalog, Mads as CoreMads, ProviderKind, ProviderOrigin, ProviderVisibility,
+};
 
 #[test]
 fn prelude_exposes_core_types_and_bare_attributes() {
@@ -235,14 +237,6 @@ async fn cloned_service_handles_share_the_inner_allocation() {
     builder
         .provide(Clock)
         .expect("clock insertion should succeed");
-    builder
-        .construct::<FacadeRepository>()
-        .await
-        .expect("repository construction should succeed");
-    builder
-        .construct::<FacadeService>()
-        .await
-        .expect("service construction should succeed");
 
     let application = builder
         .build()
@@ -252,6 +246,16 @@ async fn cloned_service_handles_share_the_inner_allocation() {
         .context()
         .resolve::<FacadeService>()
         .expect("the constructed service should resolve");
+    let graph_service = application
+        .graph()
+        .provider::<FacadeService>()
+        .expect("the facade service should be in the graph");
+    assert_eq!(graph_service.origin(), ProviderOrigin::Service);
+    assert_eq!(graph_service.visibility(), ProviderVisibility::Private);
+    assert!(application.graph().dependencies().iter().any(|edge| {
+        edge.provider_type_name().ends_with("FacadeService")
+            && edge.dependency_type_name().ends_with("FacadeRepository")
+    }));
     let cloned = service.as_ref().clone();
 
     assert!(service.has_dependencies());

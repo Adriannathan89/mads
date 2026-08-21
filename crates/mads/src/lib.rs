@@ -88,7 +88,9 @@ pub mod prelude {
 
     /// Re-exports types used to build, run, and inspect an application.
     pub use mads_core::{
-        ApplicationContext, Catalog, Config, ConfigBuilder, Diagnostic, Error, LifecycleHook,
-        LifecycleState, Mads, MadsBuilder, Result, SourceLocation,
+        ApplicationContext, ApplicationGraph, Catalog, Config, ConfigBuilder, ConstructionPlan,
+        ConstructionStep, DependencyEdge, Diagnostic, Error, GraphAnalysis, LifecycleHook,
+        LifecycleState, Mads, MadsBuilder, ProviderNode, ProviderOrigin, ProviderState,
+        ProviderVisibility, Result, SourceLocation,
     };
 }

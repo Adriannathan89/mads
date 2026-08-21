@@ -86,11 +86,15 @@ pub(crate) fn analyze_parts(
             (ProviderState::Provided, _) | (_, None) => ProviderOrigin::Provided,
             (_, Some(descriptor)) => descriptor.kind().into(),
         };
+        let visibility = match (satisfied_provider.state, matching_descriptor) {
+            (ProviderState::Provided, _) | (_, None) => ProviderVisibility::Public,
+            (_, Some(descriptor)) => descriptor.visibility(),
+        };
         providers.push(ProviderNode {
             type_id: satisfied_provider.type_id,
             type_name: satisfied_provider.type_name,
             origin,
-            visibility: ProviderVisibility::Public,
+            visibility,
             state: satisfied_provider.state,
             location: None,
             declared_dependencies: &[],
@@ -673,6 +677,14 @@ mod tests {
         assert_eq!(
             analysis.graph().provider::<PlanDatabase>().unwrap().state(),
             ProviderState::Preconstructed
+        );
+        assert_eq!(
+            analysis
+                .graph()
+                .provider::<PlanDatabase>()
+                .unwrap()
+                .visibility(),
+            ProviderVisibility::Private
         );
     }
 }
