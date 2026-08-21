@@ -16,11 +16,14 @@ edition = "2024"
 [dependencies]
 mads = "0.3"
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
 ```
 
 ## `src/main.rs`
 
-```rust,ignore
+```rust,no_run
 use mads::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -114,17 +117,20 @@ framework errors internally.
 `build_router` validates every route and returns an Axum router. Test the full
 generated path in-process with Tower:
 
-```rust,ignore
-use axum::{body::Body, http::{Request, StatusCode}};
+```rust,no_run
+use mads::axum::{body::Body, http::{Request, StatusCode}};
 use mads::prelude::*;
 use tower::ServiceExt;
 
-let application = Mads::builder().build().await?;
-let response = build_router(&application)?
-    .oneshot(Request::builder().uri("/users/7").body(Body::empty())?)
-    .await?;
-assert_eq!(response.status(), StatusCode::OK);
-# Ok::<(), Box<dyn std::error::Error>>(())
+#[mads::main]
+async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let application = Mads::builder().build().await?;
+    let response = build_router(&application)?
+        .oneshot(Request::builder().uri("/users/7").body(Body::empty())?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    Ok(())
+}
 ```
 
 Use `mads::common::axum` when a native extractor, response, router operation,

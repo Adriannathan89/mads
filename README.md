@@ -19,6 +19,9 @@ builds a router, starts application lifecycle hooks, or binds a socket.
 [dependencies]
 mads = "0.3"
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
 ```
 
 MADS.rs supports Rust 1.85 and uses Rust edition 2024.
@@ -30,7 +33,7 @@ adapter. `#[mads::controller]` resolves the managed controller from the
 application once while the router is built; handlers do not receive manual
 `State<AppState>` or perform per-request provider resolution.
 
-```rust,ignore
+```rust,no_run
 use mads::prelude::*;
 
 #[derive(Clone, serde::Serialize)]
@@ -38,7 +41,7 @@ struct User {
     id: u64,
 }
 
-#[mads::routes(prefix = "/users")]
+#[mads::routes(prefix = "/readme-users")]
 trait UserRoutes {
     #[mads::get("/:id")]
     async fn get_user(&self, id: Path<u64>) -> HttpResult<Json<User>>;
@@ -54,7 +57,7 @@ impl UserRoutes for UserController {
 }
 
 #[mads::main]
-async fn main() {
+async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let application = Mads::builder().build().await?;
     let router = build_router(&application)?;
 
@@ -109,17 +112,20 @@ router construction.
 Use Tower's `ServiceExt::oneshot` against the state-complete router. This tests
 the real generated adapter without opening a TCP listener:
 
-```rust,ignore
-use axum::{body::Body, http::Request};
+```rust,no_run
+use mads::axum::{body::Body, http::{Request, StatusCode}};
 use mads::prelude::*;
 use tower::ServiceExt;
 
-let application = Mads::builder().build().await?;
-let response = build_router(&application)?
-    .oneshot(Request::builder().uri("/users/7").body(Body::empty())?)
-    .await?;
-assert_eq!(response.status(), axum::http::StatusCode::OK);
-# Ok::<(), Box<dyn std::error::Error>>(())
+#[mads::main]
+async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let application = Mads::builder().build().await?;
+    let response = build_router(&application)?
+        .oneshot(Request::builder().uri("/users/7").body(Body::empty())?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    Ok(())
+}
 ```
 
 ## Current scope
