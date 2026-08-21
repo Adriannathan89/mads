@@ -12,6 +12,7 @@
 #![forbid(unsafe_code)]
 
 mod extract;
+mod response;
 mod route;
 
 /// Re-exports Axum for native runtime integration.
@@ -19,6 +20,9 @@ pub use axum;
 
 /// Standard Axum-compatible HTTP request extractors.
 pub use extract::{Header, Json, Path, Query, Request, headers};
+
+/// Standard Axum-compatible HTTP response types.
+pub use response::{Created, HttpError, HttpResult, NoContent};
 
 /// Exposes the framework-neutral core boundary to future integrations.
 pub use mads_core as core;
