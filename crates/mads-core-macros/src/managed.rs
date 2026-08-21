@@ -99,6 +99,7 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
 
     let core = core_path()?;
     let provider_kind = kind.provider_kind(&core);
+    let provider_visibility = provider_visibility(&item.vis, &core);
     let ItemStruct {
         attrs,
         vis,
@@ -197,11 +198,20 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
                 concat!(module_path!(), "::", stringify!(#ident)),
                 || ::core::any::TypeId::of::<#ident>(),
                 #dependencies,
+                #provider_visibility,
                 #core::SourceLocation::new(file!(), line!(), column!()),
                 #constructor_ident,
             )
         }
     })
+}
+
+fn provider_visibility(visibility: &syn::Visibility, core: &syn::Path) -> TokenStream {
+    if matches!(visibility, syn::Visibility::Public(_)) {
+        quote!(#core::ProviderVisibility::Public)
+    } else {
+        quote!(#core::ProviderVisibility::Private)
+    }
 }
 
 fn is_repr(attribute: &&Attribute) -> bool {

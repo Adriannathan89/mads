@@ -73,6 +73,7 @@ fn validate_signature(item: &ItemFn) -> syn::Result<()> {
 
 fn expand_provider(item: ItemFn) -> syn::Result<TokenStream> {
     let core = core_path()?;
+    let provider_visibility = provider_visibility(&item.vis, &core);
     let ident = &item.sig.ident;
     let return_type = match &item.sig.output {
         ReturnType::Type(_, return_type) => return_type.as_ref(),
@@ -147,12 +148,21 @@ fn expand_provider(item: ItemFn) -> syn::Result<TokenStream> {
                     stringify!(#output_type),
                     || ::core::any::TypeId::of::<#output_type>(),
                     &[#(#dependency_descriptors,)*],
+                    #provider_visibility,
                     #core::SourceLocation::new(file!(), line!(), column!()),
                     __mads_construct,
                 )
             }
         };
     })
+}
+
+fn provider_visibility(visibility: &syn::Visibility, core: &syn::Path) -> TokenStream {
+    if matches!(visibility, syn::Visibility::Public(_)) {
+        quote!(#core::ProviderVisibility::Public)
+    } else {
+        quote!(#core::ProviderVisibility::Private)
+    }
 }
 
 fn non_concrete_output_span(output: &Type) -> Option<Span> {

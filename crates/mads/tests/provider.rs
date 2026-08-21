@@ -1,6 +1,6 @@
 //! Integration tests for explicit provider-function construction.
 
-use mads::core::{Catalog, Config, ConfigBuilder, MADS003, Mads, MapSource};
+use mads::core::{Catalog, Config, ConfigBuilder, MADS003, Mads, MapSource, ProviderVisibility};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ConfiguredValue(String);
@@ -10,6 +10,9 @@ struct CombinedValue {
     configured: String,
     entries: usize,
 }
+
+/// Output type for the public provider visibility fixture.
+pub struct PublicProviderValue;
 
 #[mads::provider]
 fn configured_value(config: Config) -> ConfiguredValue {
@@ -30,6 +33,12 @@ async fn combined_value(
         configured: configured.0,
         entries: config.len(),
     })
+}
+
+#[mads::provider]
+/// Public provider used to verify visibility metadata.
+pub fn public_provider() -> PublicProviderValue {
+    PublicProviderValue
 }
 
 fn test_config() -> Config {
@@ -53,6 +62,28 @@ fn provider_dependencies_follow_parameter_order() {
         .collect();
 
     assert_eq!(dependency_names, ["Config", "ConfiguredValue"]);
+}
+
+#[test]
+fn provider_visibility_matches_function_visibility() {
+    assert_eq!(
+        Catalog::provider_for::<ConfiguredValue>()
+            .expect("private provider descriptor should be registered")
+            .visibility(),
+        ProviderVisibility::Private,
+    );
+    assert_eq!(
+        Catalog::provider_for::<CombinedValue>()
+            .expect("private async provider descriptor should be registered")
+            .visibility(),
+        ProviderVisibility::Private,
+    );
+    assert_eq!(
+        Catalog::provider_for::<PublicProviderValue>()
+            .expect("public provider descriptor should be registered")
+            .visibility(),
+        ProviderVisibility::Public,
+    );
 }
 
 #[tokio::test]

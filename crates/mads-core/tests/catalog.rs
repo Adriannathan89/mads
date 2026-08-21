@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use mads_core::{
     Catalog, ConstructionContext, ErasedProvider, MADS001, MADS003, ModuleDescriptor,
-    ProviderDescriptor, ProviderFuture, ProviderKind, SourceLocation,
+    ProviderDescriptor, ProviderFuture, ProviderKind, ProviderVisibility, SourceLocation,
 };
 
 struct Alpha;
@@ -47,6 +47,7 @@ inventory::submit! {
         "alpha::Provider",
         alpha_type_id,
         &[],
+        ProviderVisibility::Private,
         SourceLocation::new(file!(), line!(), column!()),
         alpha_constructor,
     )
@@ -58,6 +59,7 @@ inventory::submit! {
         "duplicate::First",
         duplicate_type_id,
         &[],
+        ProviderVisibility::Private,
         SourceLocation::new(file!(), line!(), column!()),
         duplicate_constructor,
     )
@@ -69,6 +71,7 @@ inventory::submit! {
         "duplicate::Second",
         duplicate_type_id,
         &[],
+        ProviderVisibility::Private,
         SourceLocation::new(file!(), line!(), column!()),
         duplicate_constructor,
     )

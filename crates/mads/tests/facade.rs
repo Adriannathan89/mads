@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use mads::common::{HttpMethod, RouteCatalog};
-use mads::core::{Catalog as CoreCatalog, Mads as CoreMads, ProviderKind};
+use mads::core::{Catalog as CoreCatalog, Mads as CoreMads, ProviderKind, ProviderVisibility};
 
 #[test]
 fn prelude_exposes_core_types_and_bare_attributes() {
@@ -53,6 +53,15 @@ fn prelude_exposes_core_types_and_bare_attributes() {
 
 #[mads::module]
 struct FacadeModule;
+
+/// Public managed service used to verify facade visibility metadata.
+#[mads::service]
+pub struct PublicGraphService;
+
+#[mads::provider]
+pub(crate) fn restricted_graph_value() -> u16 {
+    16
+}
 
 #[mads::repository]
 struct FacadeRepository;
@@ -145,6 +154,18 @@ fn facade_attributes_register_stable_descriptors() {
         descriptor.type_name() == "facade::FacadeController"
             && descriptor.kind() == ProviderKind::Service
     }));
+    assert_eq!(
+        CoreCatalog::provider_for::<PublicGraphService>()
+            .expect("public service descriptor should exist")
+            .visibility(),
+        ProviderVisibility::Public,
+    );
+    assert_eq!(
+        CoreCatalog::provider_for::<u16>()
+            .expect("restricted provider descriptor should exist")
+            .visibility(),
+        ProviderVisibility::Private,
+    );
 }
 
 #[test]

@@ -110,6 +110,7 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
 
     let common = common_path()?;
     let core = quote!(#common::core);
+    let provider_visibility = provider_visibility(&item.vis, &core);
     let generated_suffix = generated_suffix(&item, &item.ident);
     let ItemStruct {
         attrs,
@@ -226,6 +227,7 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
                 concat!(module_path!(), "::", stringify!(#ident)),
                 || ::core::any::TypeId::of::<#ident>(),
                 #dependencies,
+                #provider_visibility,
                 #core::SourceLocation::new(file!(), line!(), column!()),
                 #constructor_ident,
             )
@@ -239,6 +241,14 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
             )
         }
     })
+}
+
+fn provider_visibility(visibility: &syn::Visibility, core: &TokenStream) -> TokenStream {
+    if matches!(visibility, syn::Visibility::Public(_)) {
+        quote!(#core::ProviderVisibility::Public)
+    } else {
+        quote!(#core::ProviderVisibility::Private)
+    }
 }
 
 fn generated_suffix(item: &ItemStruct, ident: &Ident) -> String {

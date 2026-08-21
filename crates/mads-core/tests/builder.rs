@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use mads_core::{
     ApplicationContext, Catalog, ConstructionContext, ErasedProvider, LifecycleFuture,
     LifecycleHook, LifecycleState, MADS003, Mads, ProviderDescriptor, ProviderFuture, ProviderKind,
-    SourceLocation,
+    ProviderVisibility, SourceLocation,
 };
 
 struct Database;
@@ -46,6 +46,7 @@ inventory::submit! {
         "builder::Database",
         database_type_id,
         &[],
+        ProviderVisibility::Private,
         SourceLocation::new(file!(), line!(), column!()),
         database_constructor,
     )
@@ -57,6 +58,7 @@ inventory::submit! {
         "builder::Repository",
         repository_type_id,
         &[],
+        ProviderVisibility::Private,
         SourceLocation::new(file!(), line!(), column!()),
         repository_constructor,
     )

@@ -23,7 +23,7 @@ pub use config::{Config, ConfigBuilder, ConfigSource, ConfigValue, EnvSource, Ma
 pub use context::{ApplicationContext, ConstructionContext};
 pub use descriptor::{
     DependencyDescriptor, ModuleDescriptor, ProviderConstructor, ProviderDescriptor,
-    ProviderFuture, ProviderKind,
+    ProviderFuture, ProviderKind, ProviderVisibility,
 };
 pub use diagnostic::{
     Diagnostic, DiagnosticCode, Error, MADS001, MADS002, MADS003, MADS004, MADS005, MADS006,
