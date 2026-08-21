@@ -7,8 +7,16 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+axum.workspace = true
+axum-extra.workspace = true
 mads-common-macros = { path = "../mads-common-macros" }
 mads-core = { path = "../mads-core" }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tower.workspace = true
 
 [lints]
 workspace = true

@@ -1,17 +1,24 @@
 //! Standard integration contracts for MADS.rs.
 //!
-//! Version 0.2 provides compile-time controller and route contracts while HTTP
-//! runtime adapters, extractors, and server execution remain reserved.
+//! Version 0.3 provides compile-time controller and route contracts together
+//! with Axum-compatible HTTP adapters and extractors.
 //!
 //! Use [`routes`] to declare an abstract route contract and [`controller`] to
 //! bind one or more such contracts to a managed controller. The resulting
-//! descriptors can be inspected through [`RouteCatalog`] before a future HTTP
-//! integration installs runtime handlers.
+//! descriptors can be inspected through [`RouteCatalog`] before the HTTP
+//! runtime installs handlers.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+mod extract;
 mod route;
+
+/// Re-exports Axum for native runtime integration.
+pub use axum;
+
+/// Standard Axum-compatible HTTP request extractors.
+pub use extract::{Header, Json, Path, Query, Request, headers};
 
 /// Exposes the framework-neutral core boundary to future integrations.
 pub use mads_core as core;
