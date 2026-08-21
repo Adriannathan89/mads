@@ -65,6 +65,31 @@ impl StdError for HttpRuntimeError {
 ///
 /// Route validation completes before lifecycle hooks start or the listener is
 /// bound. Once lifecycle startup succeeds, every exit path attempts shutdown.
+/// A bind or serving failure is retained if shutdown succeeds; if shutdown
+/// also fails, both failures are returned in [`HttpRuntimeError::OperationAndShutdown`].
+///
+/// # Errors
+///
+/// Returns [`HttpRuntimeError::Bootstrap`] for route validation, controller
+/// resolution, or registrar failures; [`HttpRuntimeError::Lifecycle`] for
+/// lifecycle start or clean-shutdown failures; [`HttpRuntimeError::Bind`] when
+/// the address cannot be bound; [`HttpRuntimeError::Serve`] for an Axum serving
+/// failure; or [`HttpRuntimeError::OperationAndShutdown`] when an operational
+/// failure and its cleanup failure occur together.
+///
+/// # Examples
+///
+/// ```no_run
+/// use mads_common::{core::Mads, serve};
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), mads_common::HttpRuntimeError> {
+///     let application = Mads::builder().build().await.map_err(
+///         mads_common::HttpRuntimeError::Bootstrap,
+///     )?;
+///     serve(application, "127.0.0.1:3000").await
+/// }
+/// ```
 #[allow(clippy::result_large_err)]
 pub async fn serve(
     application: Mads,

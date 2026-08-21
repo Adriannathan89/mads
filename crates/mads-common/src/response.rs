@@ -47,21 +47,68 @@ pub enum HttpError {
 
 impl HttpError {
     /// Creates a 400 Bad Request error with a safe client-facing message.
+    ///
+    /// The message is serialized as the `error.message` field. This constructor
+    /// does not expose an internal source because the error is already a
+    /// client-facing failure.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mads_common::HttpError;
+    ///
+    /// let error = HttpError::bad_request("invalid page number");
+    /// assert_eq!(error.to_string(), "invalid page number");
+    /// ```
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self::BadRequest(message.into())
     }
 
     /// Creates a 404 Not Found error with a safe client-facing message.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mads_common::HttpError;
+    ///
+    /// let error = HttpError::not_found("user does not exist");
+    /// assert_eq!(error.to_string(), "user does not exist");
+    /// ```
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::NotFound(message.into())
     }
 
     /// Creates a 409 Conflict error with a safe client-facing message.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mads_common::HttpError;
+    ///
+    /// let error = HttpError::conflict("username is already taken");
+    /// assert_eq!(error.to_string(), "username is already taken");
+    /// ```
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::Conflict(message.into())
     }
 
     /// Creates a 500 Internal Server Error without exposing its source to clients.
+    ///
+    /// The source remains available through [`std::error::Error::source`] for
+    /// server-side logging, while the HTTP response always contains the stable
+    /// message `internal server error`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io;
+    ///
+    /// use mads_common::HttpError;
+    ///
+    /// let error = HttpError::internal(io::Error::other("database unavailable"));
+    /// assert_eq!(error.to_string(), "internal server error");
+    /// assert!(std::error::Error::source(&error).is_some());
+    /// ```
     pub fn internal(source: impl Error + Send + Sync + 'static) -> Self {
         Self::Internal(Box::new(source))
     }
@@ -108,11 +155,45 @@ impl IntoResponse for HttpError {
 }
 
 /// A result type for HTTP handlers that use [`HttpError`] as their error type.
+///
+/// This is the delivery-layer result type. Use [`crate::core::Result`] for
+/// application construction, dependency resolution, and server bootstrap
+/// operations instead.
+///
+/// # Examples
+///
+/// ```
+/// use mads_common::{HttpResult, Json};
+///
+/// fn health() -> HttpResult<Json<&'static str>> {
+///     Ok(Json("ok"))
+/// }
+///
+/// assert!(health().is_ok());
+/// ```
 pub type HttpResult<T> = std::result::Result<T, HttpError>;
 
 /// A response wrapper that changes a successful inner response to 201 Created.
+///
+/// The inner value is converted using Axum's [`IntoResponse`] implementation,
+/// then only the status code is replaced. Headers and the response body from
+/// the inner value are preserved.
+///
+/// # Examples
+///
+/// ```
+/// use axum::{http::StatusCode, response::IntoResponse};
+///
+/// use mads_common::Created;
+///
+/// let response = Created("created").into_response();
+/// assert_eq!(response.status(), StatusCode::CREATED);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Created<T>(pub T);
+pub struct Created<T>(
+    /// The successful response value to convert to an Axum response.
+    pub T,
+);
 
 impl<T> IntoResponse for Created<T>
 where
@@ -126,6 +207,17 @@ where
 }
 
 /// An empty response with the 204 No Content status.
+///
+/// # Examples
+///
+/// ```
+/// use axum::{http::StatusCode, response::IntoResponse};
+///
+/// use mads_common::NoContent;
+///
+/// let response = NoContent.into_response();
+/// assert_eq!(response.status(), StatusCode::NO_CONTENT);
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct NoContent;
 

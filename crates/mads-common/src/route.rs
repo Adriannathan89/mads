@@ -32,6 +32,15 @@ pub enum HttpMethod {
 
 impl HttpMethod {
     /// Returns the conventional uppercase HTTP method name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mads_common::HttpMethod;
+    ///
+    /// assert_eq!(HttpMethod::Get.as_str(), "GET");
+    /// assert_eq!(HttpMethod::Delete.as_str(), "DELETE");
+    /// ```
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Get => "GET",
@@ -61,6 +70,30 @@ pub struct RouteDescriptor {
 
 impl RouteDescriptor {
     /// Creates static route metadata emitted by `#[routes]`.
+    ///
+    /// Integrations that construct descriptors manually receive the same
+    /// fail-closed validation as macro-generated metadata when they pass the
+    /// descriptor to [`RouteCatalog::validate`] or
+    /// [`crate::__private::validate_descriptors`]. `full_path` must be the
+    /// canonical join of `prefix` and `path`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mads_common::{HttpMethod, RouteDescriptor};
+    /// use mads_common::core::SourceLocation;
+    ///
+    /// const ROUTE: RouteDescriptor = RouteDescriptor::new(
+    ///     HttpMethod::Get,
+    ///     "/users",
+    ///     "/:id",
+    ///     "/users/:id",
+    ///     "get_user",
+    ///     SourceLocation::new("routes.rs", 10, 5),
+    /// );
+    ///
+    /// assert_eq!(ROUTE.full_path(), "/users/:id");
+    /// ```
     pub const fn new(
         method: HttpMethod,
         prefix: &'static str,
@@ -123,6 +156,31 @@ pub struct RouteContractDescriptor {
 
 impl RouteContractDescriptor {
     /// Creates route-contract metadata emitted by `#[controller]`.
+    ///
+    /// The route slice must remain available for the entire program because
+    /// descriptors are registered as immutable static metadata. Runtime
+    /// validation rejects an empty trait name, an empty route slice, and
+    /// duplicate contract declarations.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mads_common::{HttpMethod, RouteContractDescriptor, RouteDescriptor};
+    /// use mads_common::core::SourceLocation;
+    ///
+    /// const ROUTES: &[RouteDescriptor] = &[RouteDescriptor::new(
+    ///     HttpMethod::Get,
+    ///     "",
+    ///     "/health",
+    ///     "/health",
+    ///     "health",
+    ///     SourceLocation::new("routes.rs", 1, 1),
+    /// )];
+    /// const CONTRACT: RouteContractDescriptor =
+    ///     RouteContractDescriptor::new("HealthRoutes", ROUTES);
+    ///
+    /// assert_eq!(CONTRACT.trait_name(), "HealthRoutes");
+    /// ```
     pub const fn new(trait_name: &'static str, routes: &'static [RouteDescriptor]) -> Self {
         Self { trait_name, routes }
     }
@@ -152,6 +210,12 @@ pub struct ControllerRouteDescriptor {
 
 impl ControllerRouteDescriptor {
     /// Creates static controller-route metadata emitted by `#[controller]`.
+    ///
+    /// This constructor intentionally creates metadata without executable
+    /// registrar code. It is useful for catalog inspection and compatibility
+    /// tooling, but HTTP bootstrap rejects it with `MADS030`; use
+    /// [`Self::with_registrar`] for a controller that can be installed in a
+    /// router.
     pub const fn new(
         type_name: &'static str,
         type_id: fn() -> TypeId,
@@ -166,6 +230,10 @@ impl ControllerRouteDescriptor {
     }
 
     /// Creates controller metadata with its typed HTTP route registrar.
+    ///
+    /// The registrar is invoked only after the complete descriptor catalog has
+    /// passed validation. It must consume exactly the validated routes supplied
+    /// by [`ValidatedRouteIter`], then return the updated router.
     pub const fn with_registrar(
         type_name: &'static str,
         type_id: fn() -> TypeId,
@@ -317,7 +385,18 @@ impl RouteCatalog {
     /// Returns registered controllers in deterministic type-name order.
     ///
     /// The returned vector contains references to static descriptors; cloning
-    /// the vector does not clone controller state.
+    /// the vector does not clone controller state. This is an inspection-only
+    /// operation and does not resolve providers, invoke registrars, or start
+    /// lifecycle hooks.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mads_common::RouteCatalog;
+    ///
+    /// let controllers = RouteCatalog::controllers();
+    /// assert!(controllers.iter().all(|controller| !controller.type_name().is_empty()));
+    /// ```
     pub fn controllers() -> Vec<&'static ControllerRouteDescriptor> {
         controller_cache().clone()
     }
@@ -327,6 +406,15 @@ impl RouteCatalog {
     ///
     /// An unregistered type produces an empty vector. `T` must be a concrete,
     /// thread-safe application type because it is matched by its `TypeId`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mads_common::RouteCatalog;
+    ///
+    /// struct NotAController;
+    /// assert!(RouteCatalog::routes_for::<NotAController>().is_empty());
+    /// ```
     pub fn routes_for<T>() -> Vec<RouteDescriptor>
     where
         T: Send + Sync + 'static,
@@ -345,6 +433,20 @@ impl RouteCatalog {
     /// If `T` is not registered, validation succeeds with no work. Otherwise,
     /// duplicate method/canonical-path pairs return a diagnostic containing the
     /// current and first declarations.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`mads_core::Error`] with diagnostic code `MADS030` when the
+    /// controller metadata is malformed or contains a conflicting route.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mads_common::RouteCatalog;
+    ///
+    /// struct NotAController;
+    /// assert!(RouteCatalog::validate_controller::<NotAController>().is_ok());
+    /// ```
     #[allow(clippy::result_large_err)]
     pub fn validate_controller<T>() -> Result<()>
     where
@@ -367,6 +469,20 @@ impl RouteCatalog {
     ///
     /// This is the application-wide validation entry point and should run
     /// before a runtime adapter installs HTTP routes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`mads_core::Error`] with diagnostic code `MADS030` for the
+    /// first invalid descriptor or duplicate route found in the deterministic
+    /// catalog order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mads_common::RouteCatalog;
+    ///
+    /// assert!(RouteCatalog::validate().is_ok());
+    /// ```
     #[allow(clippy::result_large_err)]
     pub fn validate() -> Result<()> {
         let _ = Self::validated()?;
