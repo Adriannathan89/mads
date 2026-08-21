@@ -13,9 +13,9 @@ mads-common-macros = { path = "../mads-common-macros" }
 mads-core = { path = "../mads-core" }
 serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
-tokio.workspace = true
 tower.workspace = true
 
 [lints]
