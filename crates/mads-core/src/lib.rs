@@ -12,6 +12,7 @@ mod config;
 mod context;
 mod descriptor;
 mod diagnostic;
+mod graph;
 mod lifecycle;
 mod registry;
 #[cfg(feature = "runtime-tokio")]
@@ -28,6 +29,10 @@ pub use descriptor::{
 pub use diagnostic::{
     Diagnostic, DiagnosticCode, Error, MADS001, MADS002, MADS003, MADS004, MADS005, MADS006,
     MADS010, MADS011, MADS020, MADS030, Result, SourceLocation,
+};
+pub use graph::{
+    ApplicationGraph, ConstructionPlan, ConstructionStep, DependencyEdge, GraphAnalysis,
+    ProviderNode, ProviderOrigin, ProviderState,
 };
 pub use lifecycle::{LifecycleFuture, LifecycleHook, LifecycleManager, LifecycleState};
 pub use registry::{ErasedProvider, ProviderRegistry};
