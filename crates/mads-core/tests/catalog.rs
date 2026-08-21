@@ -4,7 +4,7 @@ use std::any::TypeId;
 use std::sync::Arc;
 
 use mads_core::{
-    Catalog, ConstructionContext, ErasedProvider, MADS001, MADS003, ModuleDescriptor,
+    Catalog, ConstructionContext, ErasedProvider, MADS002, MADS003, ModuleDescriptor,
     ProviderDescriptor, ProviderFuture, ProviderKind, ProviderVisibility, SourceLocation,
 };
 
@@ -96,12 +96,12 @@ fn provider_for_selects_the_matching_descriptor() {
 }
 
 #[test]
-fn provider_for_reports_duplicate_descriptors() {
+fn provider_for_reports_ambiguous_descriptors() {
     let Err(error) = Catalog::provider_for::<Duplicate>() else {
         panic!("duplicates should be rejected");
     };
 
-    assert_eq!(error.code(), MADS001);
+    assert_eq!(error.code(), MADS002);
 }
 
 #[test]

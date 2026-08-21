@@ -41,6 +41,39 @@ pub enum ProviderState {
     Planned,
 }
 
+#[allow(dead_code)]
+#[derive(Clone, Copy)]
+pub(crate) struct SatisfiedProvider {
+    pub(crate) type_id: TypeId,
+    pub(crate) type_name: &'static str,
+    pub(crate) state: ProviderState,
+}
+
+#[allow(dead_code)]
+impl SatisfiedProvider {
+    pub(crate) fn provided<T>() -> Self
+    where
+        T: Send + Sync + 'static,
+    {
+        Self {
+            type_id: TypeId::of::<T>(),
+            type_name: std::any::type_name::<T>(),
+            state: ProviderState::Provided,
+        }
+    }
+
+    pub(crate) fn preconstructed<T>() -> Self
+    where
+        T: Send + Sync + 'static,
+    {
+        Self {
+            type_id: TypeId::of::<T>(),
+            type_name: std::any::type_name::<T>(),
+            state: ProviderState::Preconstructed,
+        }
+    }
+}
+
 /// Immutable metadata for one provider in an application graph.
 pub struct ProviderNode {
     pub(crate) type_id: TypeId,

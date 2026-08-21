@@ -3,7 +3,9 @@
 use std::any::TypeId;
 use std::sync::OnceLock;
 
-use crate::{Diagnostic, Error, MADS001, MADS003, ModuleDescriptor, ProviderDescriptor, Result};
+use crate::{
+    Diagnostic, Error, MADS001, MADS002, MADS003, ModuleDescriptor, ProviderDescriptor, Result,
+};
 
 inventory::collect!(ProviderDescriptor);
 inventory::collect!(ModuleDescriptor);
@@ -51,11 +53,21 @@ impl Catalog {
                 .with_subject(std::any::type_name::<T>()),
             )),
             [provider] => Ok(provider),
+            [first, rest @ ..] if rest.iter().all(|provider| exact_identity(first, provider)) => {
+                Err(Error::new(
+                    Diagnostic::new(
+                        MADS001,
+                        "duplicate provider declaration",
+                        "the same provider declaration was registered more than once",
+                    )
+                    .with_subject(std::any::type_name::<T>()),
+                ))
+            }
             _ => Err(Error::new(
                 Diagnostic::new(
-                    MADS001,
-                    "duplicate provider",
-                    "multiple statically declared providers exist for this type",
+                    MADS002,
+                    "ambiguous provider binding",
+                    "multiple provider declarations produce the same concrete type",
                 )
                 .with_subject(std::any::type_name::<T>()),
             )),
@@ -85,4 +97,18 @@ fn compare_locations(
         .cmp(right.file)
         .then_with(|| left.line.cmp(&right.line))
         .then_with(|| left.column.cmp(&right.column))
+}
+
+fn exact_identity(left: &ProviderDescriptor, right: &ProviderDescriptor) -> bool {
+    left.type_id() == right.type_id()
+        && left.kind() == right.kind()
+        && left.type_name() == right.type_name()
+        && left.visibility() == right.visibility()
+        && left.location() == right.location()
+        && left.dependencies().len() == right.dependencies().len()
+        && left
+            .dependencies()
+            .iter()
+            .zip(right.dependencies())
+            .all(|(left, right)| left.type_id() == right.type_id())
 }

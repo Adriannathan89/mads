@@ -1,5 +1,6 @@
 //! Immutable provider graph inspection types.
 
+mod analysis;
 mod model;
 
 pub use model::{
