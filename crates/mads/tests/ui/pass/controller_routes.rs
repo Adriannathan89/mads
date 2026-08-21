@@ -18,6 +18,16 @@ pub trait QueryRoutes {
     /// Gets one user.
     #[mads::get("/:id")]
     async fn get_user(&self, id: Path<i64>) -> String;
+
+    /// Compile-time-disabled route used to verify `cfg` propagation.
+    #[cfg(any())]
+    #[mads::get("/cfg-disabled")]
+    async fn cfg_disabled(&self);
+
+    /// Compile-time-disabled route used to verify `cfg_attr` propagation.
+    #[cfg_attr(all(), cfg(any()))]
+    #[mads::get("/cfg-attr-disabled")]
+    async fn cfg_attr_disabled(&self);
 }
 
 /// Command route contract.

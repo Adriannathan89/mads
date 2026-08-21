@@ -339,4 +339,5 @@ impl VisitMut for SelfTypeNormalizer<'_> {
     }
 }
 #[cfg(test)]
-include!("../tests/support/controller.rs");
+#[path = "../tests/support/controller.rs"]
+mod tests;

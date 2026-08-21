@@ -107,11 +107,13 @@ fn expand_with_common(
     item.items.insert(0, marker);
 
     let descriptor_tokens = descriptors.iter().map(|descriptor| {
+        let conditional_attributes = &descriptor.conditional_attributes;
         let method = descriptor.method.tokens(common);
         let path = &descriptor.path;
         let full_path = &descriptor.full_path;
         let handler = &descriptor.handler;
         quote! {
+            #(#conditional_attributes)*
             #common::RouteDescriptor::new(
                 #method,
                 #prefix,
@@ -252,6 +254,12 @@ fn validate_method(
         ));
     }
 
+    let conditional_attributes = method
+        .attrs
+        .iter()
+        .filter(|attribute| is_conditional_attribute(attribute))
+        .cloned()
+        .collect();
     method.attrs.remove(*attribute_index);
     let argument_types = method
         .sig
@@ -271,6 +279,7 @@ fn validate_method(
         handler: LitStr::new(&method.sig.ident.to_string(), method.sig.ident.span()),
         handler_ident: method.sig.ident.clone(),
         argument_types,
+        conditional_attributes,
     })
 }
 
@@ -281,6 +290,7 @@ struct RouteMetadata {
     handler: LitStr,
     handler_ident: syn::Ident,
     argument_types: Vec<Type>,
+    conditional_attributes: Vec<Attribute>,
 }
 
 impl RouteMetadata {
@@ -290,6 +300,7 @@ impl RouteMetadata {
         let handler = &self.handler;
         let handler_ident = &self.handler_ident;
         let argument_types = &self.argument_types;
+        let conditional_attributes = &self.conditional_attributes;
         let arguments = argument_types
             .iter()
             .enumerate()
@@ -297,22 +308,29 @@ impl RouteMetadata {
             .collect::<Vec<_>>();
 
         quote! {
-            let __mads_path = __mads_routes.next(#method, #handler)?;
-            let __mads_handler_controller = __mads_controller.clone();
-            __mads_router = __mads_router.route(
-                __mads_path,
-                #routing(move |#(#arguments: #argument_types),*| {
-                    let __mads_controller = __mads_handler_controller.clone();
-                    async move {
-                        <Self as #trait_ident>::#handler_ident(
-                            &__mads_controller,
-                            #(#arguments,)*
-                        ).await
-                    }
-                }),
-            );
+            #(#conditional_attributes)*
+            {
+                let __mads_path = __mads_routes.next(#method, #handler)?;
+                let __mads_handler_controller = __mads_controller.clone();
+                __mads_router = __mads_router.route(
+                    __mads_path,
+                    #routing(move |#(#arguments: #argument_types),*| {
+                        let __mads_controller = __mads_handler_controller.clone();
+                        async move {
+                            <Self as #trait_ident>::#handler_ident(
+                                &__mads_controller,
+                                #(#arguments,)*
+                            ).await
+                        }
+                    }),
+                );
+            }
         }
     }
+}
+
+fn is_conditional_attribute(attribute: &Attribute) -> bool {
+    attribute.path().is_ident("cfg") || attribute.path().is_ident("cfg_attr")
 }
 
 #[derive(Clone, Copy)]
@@ -494,4 +512,5 @@ fn validate_path(path: &LitStr, subject: &str, is_prefix: bool) -> syn::Result<(
     Ok(())
 }
 #[cfg(test)]
-include!("../tests/support/routes.rs");
+#[path = "../tests/support/routes.rs"]
+mod tests;
