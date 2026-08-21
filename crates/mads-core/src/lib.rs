@@ -1,7 +1,9 @@
 //! Framework-neutral runtime contracts for MADS.rs.
 //!
-//! The v0.1 foundation reserves this crate for runtime semantics and re-exports
-//! its procedural macros, without introducing HTTP or database integrations.
+//! Version 0.2 provides framework-neutral application construction, lifecycle
+//! management, configuration, provider metadata, and deterministic dependency
+//! graph analysis. It re-exports the core procedural macros without introducing
+//! HTTP or database integrations.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]

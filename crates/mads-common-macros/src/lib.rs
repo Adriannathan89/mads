@@ -6,9 +6,10 @@
 //! metadata consumed by `mads_common::RouteCatalog` and the MADS dependency
 //! graph.
 //!
-//! Route attributes are deliberately contract-only in v0.1: they do not start
+//! Route attributes are deliberately contract-only in v0.2: they do not start
 //! an HTTP server or select a runtime adapter. Runtime routing remains a later
-//! integration concern.
+//! integration concern, while the generated metadata participates in graph
+//! validation and route-catalog inspection.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]

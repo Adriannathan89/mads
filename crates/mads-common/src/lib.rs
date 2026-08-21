@@ -1,6 +1,6 @@
 //! Standard integration contracts for MADS.rs.
 //!
-//! Version 0.1 provides compile-time controller and route contracts while HTTP
+//! Version 0.2 provides compile-time controller and route contracts while HTTP
 //! runtime adapters, extractors, and server execution remain reserved.
 //!
 //! Use [`routes`] to declare an abstract route contract and [`controller`] to

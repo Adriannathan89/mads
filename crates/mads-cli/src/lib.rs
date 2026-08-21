@@ -1,4 +1,4 @@
-//! Development commands for inspecting the MADS.rs v0.1 foundation.
+//! Development commands for inspecting the MADS.rs v0.2 foundation.
 //!
 //! The `mads` executable accepts `--help` (`-h`), `--version` (`-V`), and the
 //! `foundation` command. The latter reports the available core and common
