@@ -4,7 +4,7 @@ use std::any::TypeId;
 use std::sync::Arc;
 
 use mads_core::{
-    Catalog, ConstructionContext, ErasedProvider, MADS002, MADS003, ModuleDescriptor,
+    Catalog, ConstructionContext, ErasedProvider, MADS002, MADS003, Mads, ModuleDescriptor,
     ProviderDescriptor, ProviderFuture, ProviderKind, ProviderVisibility, SourceLocation,
 };
 
@@ -111,4 +111,14 @@ fn provider_for_reports_a_missing_descriptor() {
     };
 
     assert_eq!(error.code(), MADS003);
+}
+
+#[tokio::test]
+async fn manual_construction_rejects_ambiguous_provider_outputs() {
+    let mut builder = Mads::builder();
+    let Err(error) = builder.construct::<Duplicate>().await else {
+        panic!("different providers for one output type must be ambiguous");
+    };
+
+    assert_eq!(error.code(), MADS002);
 }

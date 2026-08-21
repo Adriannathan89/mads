@@ -1,14 +1,16 @@
 //! Explicit application construction and lifecycle ownership.
 
 use crate::{
-    ApplicationContext, Catalog, Config, ConstructionContext, LifecycleHook, LifecycleManager,
-    LifecycleState, ProviderRegistry, Result,
+    ApplicationContext, Catalog, Config, ConstructionContext, GraphAnalysis, LifecycleHook,
+    LifecycleManager, LifecycleState, ProviderRegistry, Result,
+    graph::{SatisfiedProvider, analyze_catalog},
 };
 
 /// Builds an application by explicitly providing and constructing providers.
 pub struct MadsBuilder {
     config: Config,
     registry: ProviderRegistry,
+    satisfied: Vec<SatisfiedProvider>,
     lifecycle: LifecycleManager,
 }
 
@@ -23,6 +25,7 @@ impl MadsBuilder {
         Self {
             config,
             registry,
+            satisfied: vec![SatisfiedProvider::provided::<Config>()],
             lifecycle: LifecycleManager::new(),
         }
     }
@@ -34,6 +37,7 @@ impl MadsBuilder {
         T: Send + Sync + 'static,
     {
         self.registry.insert(value)?;
+        self.satisfied.push(SatisfiedProvider::provided::<T>());
         Ok(self)
     }
 
@@ -51,7 +55,14 @@ impl MadsBuilder {
 
         self.registry
             .insert_erased(descriptor.type_id(), descriptor.type_name(), value)?;
+        self.satisfied
+            .push(SatisfiedProvider::preconstructed::<T>());
         Ok(self)
+    }
+
+    /// Analyzes the complete provider graph without invoking constructors.
+    pub fn analyze(&self) -> GraphAnalysis {
+        analyze_catalog(&self.satisfied)
     }
 
     /// Registers a hook that runs when the completed application starts and stops.

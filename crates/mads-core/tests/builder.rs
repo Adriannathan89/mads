@@ -1,12 +1,14 @@
 //! Integration tests for explicit application construction.
 
 use std::any::TypeId;
+use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 
 use mads_core::{
-    ApplicationContext, Catalog, ConstructionContext, ErasedProvider, LifecycleFuture,
-    LifecycleHook, LifecycleState, MADS003, Mads, ProviderDescriptor, ProviderFuture, ProviderKind,
-    ProviderVisibility, SourceLocation,
+    ApplicationContext, Catalog, ConstructionContext, ConstructionStep, DependencyDescriptor,
+    ErasedProvider, LifecycleFuture, LifecycleHook, LifecycleState, MADS003, Mads,
+    ProviderDescriptor, ProviderFuture, ProviderKind, ProviderState, ProviderVisibility,
+    SourceLocation,
 };
 
 struct Database;
@@ -29,8 +31,23 @@ fn repository_type_id() -> TypeId {
     TypeId::of::<Repository>()
 }
 
+thread_local! {
+    static DATABASE_CONSTRUCTIONS: Cell<usize> = const { Cell::new(0) };
+}
+
+fn reset_database_constructions() {
+    DATABASE_CONSTRUCTIONS.set(0);
+}
+
+fn database_constructions() -> usize {
+    DATABASE_CONSTRUCTIONS.get()
+}
+
 fn database_constructor<'a>(_: &'a ConstructionContext<'a>) -> ProviderFuture<'a> {
-    Box::pin(async { Ok(Arc::new(Database::new()) as ErasedProvider) })
+    Box::pin(async {
+        DATABASE_CONSTRUCTIONS.set(DATABASE_CONSTRUCTIONS.get() + 1);
+        Ok(Arc::new(Database::new()) as ErasedProvider)
+    })
 }
 
 fn repository_constructor<'a>(context: &'a ConstructionContext<'a>) -> ProviderFuture<'a> {
@@ -39,6 +56,11 @@ fn repository_constructor<'a>(context: &'a ConstructionContext<'a>) -> ProviderF
         Ok(Arc::new(Repository { database }) as ErasedProvider)
     })
 }
+
+static REPOSITORY_DEPENDENCIES: [DependencyDescriptor; 1] = [DependencyDescriptor::new(
+    "builder::Database",
+    database_type_id,
+)];
 
 inventory::submit! {
     ProviderDescriptor::new(
@@ -57,7 +79,7 @@ inventory::submit! {
         ProviderKind::Repository,
         "builder::Repository",
         repository_type_id,
-        &[],
+        &REPOSITORY_DEPENDENCIES,
         ProviderVisibility::Private,
         SourceLocation::new(file!(), line!(), column!()),
         repository_constructor,
@@ -97,6 +119,53 @@ async fn construct_does_not_recursively_create_missing_dependencies() {
 
     assert_eq!(error.code(), MADS003);
     assert!(Catalog::provider_for::<Database>().is_ok());
+}
+
+#[test]
+fn builder_analysis_is_repeatable_and_side_effect_free() {
+    reset_database_constructions();
+    let builder = Mads::builder();
+
+    let first = builder.analyze();
+    let second = builder.analyze();
+
+    assert!(first.is_valid());
+    assert!(second.is_valid());
+    assert_eq!(database_constructions(), 0);
+    assert_eq!(
+        first
+            .construction_plan()
+            .unwrap()
+            .steps()
+            .iter()
+            .map(ConstructionStep::type_name)
+            .collect::<Vec<_>>(),
+        second
+            .construction_plan()
+            .unwrap()
+            .steps()
+            .iter()
+            .map(ConstructionStep::type_name)
+            .collect::<Vec<_>>(),
+    );
+}
+
+#[tokio::test]
+async fn explicit_and_preconstructed_values_have_distinct_states() {
+    let mut builder = Mads::builder();
+    builder.provide(Database::new()).unwrap();
+    builder.construct::<Repository>().await.unwrap();
+
+    let analysis = builder.analyze();
+    assert_eq!(
+        analysis.graph().provider::<Database>().unwrap().state(),
+        ProviderState::Provided
+    );
+    assert_eq!(
+        analysis.graph().provider::<Repository>().unwrap().state(),
+        ProviderState::Preconstructed
+    );
+    assert!(analysis.construction_plan().unwrap().steps().is_empty());
 }
 
 struct ApplicationHook(Arc<Mutex<Vec<&'static str>>>);
