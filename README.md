@@ -1,8 +1,8 @@
 # MADS.rs
 
 MADS.rs is a layered Rust workspace for a clean-architecture application
-foundation. Version 0.1 intentionally favors explicit construction over implicit
-dependency-graph behavior.
+foundation. Version 0.2 provides deterministic, side-effect-free provider-graph
+analysis and automatic application-scoped construction.
 
 ## Crate diagram
 
@@ -29,7 +29,7 @@ features to depend on only the core boundary:
 
 ```toml
 [dependencies]
-mads = { version = "0.1", default-features = false }
+mads = { version = "0.2", default-features = false }
 ```
 
 MADS.rs supports Rust 1.85 and uses the Rust 2024 edition.
@@ -43,9 +43,10 @@ feature, it also exports `#[mads::routes]`, `#[mads::controller]`, and the HTTP
 verb attributes. The `mads::prelude` module collects these attributes with the
 application-facing core types for ergonomic imports.
 
-In v0.1, construction is deliberately explicit: create configuration, insert
-the dependencies a managed provider needs, construct that provider, build the
-application, then start and shut it down.
+MADS.rs analyzes the complete static provider catalog before construction. It
+validates duplicate bindings, ambiguous outputs, unresolved dependencies, and
+cycles without invoking constructors. A valid graph is then constructed
+sequentially in deterministic dependency order.
 
 ```rust,ignore
 use mads::prelude::*;
@@ -60,20 +61,16 @@ struct Greeter {
 
 #[mads::main]
 async fn main() {
-    let config = ConfigBuilder::new()
-        .build()
-        .expect("an empty configuration is valid");
-    let mut builder = Mads::builder_with_config(config);
+    let mut builder = Mads::builder();
 
     builder
         .provide(Greeting("hello".to_owned()))
-        .expect("the greeting dependency should be inserted");
-    builder
-        .construct::<Greeter>()
-        .await
-        .expect("the managed provider should be constructed explicitly");
+        .expect("the external value should be inserted");
 
-    let mut application = builder.build();
+    let mut application = builder
+        .build()
+        .await
+        .expect("the complete provider graph should validate and build");
     application.start().await.expect("the application should start");
     application
         .shutdown()
@@ -84,8 +81,7 @@ async fn main() {
 
 A controller can depend on any number of managed services or use cases. Route
 traits make the controller contract compiler-checked, retain canonical
-method/path metadata, and reject conflicts before controller construction;
-construction is still explicit in v0.1:
+method/path metadata, and reject conflicts before controller construction:
 
 ```rust,ignore
 use mads::prelude::*;
@@ -121,9 +117,35 @@ impl UserRoutes for UserController {
     }
 }
 
-// Build both use cases before explicitly constructing UserController with
-// MadsBuilder.
+// `build().await` constructs these providers in dependency order.
 ```
+
+## Graph analysis and inspection
+
+Call `builder.analyze()` to inspect the complete catalog without running a
+constructor. `GraphAnalysis` exposes immutable provider nodes, resolved
+dependency edges, diagnostics, and a deterministic `ConstructionPlan` when the
+graph is valid. After a successful build, use `application.graph()` and
+`application.construction_plan()` to inspect the validated graph and the plan
+that ran.
+
+Every discovered provider is included, even when no other provider references
+it. Values inserted with `provide` override one matching static provider and
+are recorded as public application-wide values. `construct::<T>()` remains a
+manual escape hatch; manually constructed providers are not constructed again
+by `build()`.
+
+Provider declaration visibility is recorded as descriptive metadata: `pub`
+providers are public and inherited or restricted visibility is private. MADS.rs
+does not enforce visibility until module semantics are introduced.
+
+The graph diagnostics are stable:
+
+- `MADS001`: exact duplicate provider descriptor.
+- `MADS002`: ambiguous provider binding.
+- `MADS003`: unresolved dependency.
+- `MADS005`: dependency cycle.
+- `MADS006`: provider construction failure.
 
 ## CLI foundation
 
@@ -134,13 +156,15 @@ mads foundation
 ```
 
 The command reports the core and common contract surfaces as available. The
-common HTTP runtime and `extra` remain reserved. Run `mads --help` for the
-complete foundation command surface.
+graph data model and runtime analysis are implemented, but final `mads graph`
+rendering is deferred. The common HTTP runtime and `extra` remain reserved. Run
+`mads --help` for the complete foundation command surface.
 
 ## Deferred features
 
-Version 0.1 does not yet provide HTTP execution, Axum registration, extractors,
-database integrations, or automatic dependency-graph construction. Its route
+Version 0.2 does not yet provide HTTP execution, Axum registration, extractors,
+Diesel or other database integrations, module imports or exports, trait
+bindings, qualifiers, additional scopes, or final CLI graph rendering. Route
 metadata is available through `mads::common::RouteCatalog`; runtime routing
 remains reserved for v0.3.
 
