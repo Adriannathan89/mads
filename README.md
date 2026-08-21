@@ -121,7 +121,7 @@ use tower::ServiceExt;
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let application = Mads::builder().build().await?;
     let response = build_router(&application)?
-        .oneshot(Request::builder().uri("/users/7").body(Body::empty())?)
+        .oneshot(Request::builder().uri("/readme-users/7").body(Body::empty())?)
         .await?;
     assert_eq!(response.status(), StatusCode::OK);
     Ok(())
