@@ -29,6 +29,22 @@ pub use mads_core::service;
 #[cfg(feature = "common")]
 pub use mads_common as common;
 
+/// Re-exports Axum for native HTTP runtime integration.
+#[cfg(feature = "common")]
+pub use mads_common::axum;
+
+/// Re-exports HTTP request extractors and their typed-header support.
+#[cfg(feature = "common")]
+pub use mads_common::{Header, Json, Path, Query, Request, headers};
+
+/// Re-exports standard HTTP response types.
+#[cfg(feature = "common")]
+pub use mads_common::{Created, HttpError, HttpResult, NoContent};
+
+/// Re-exports HTTP router construction and runtime startup functions.
+#[cfg(feature = "common")]
+pub use mads_common::{HttpRuntimeError, build_router, serve};
+
 /// Re-exports the managed-controller declaration attribute.
 #[cfg(feature = "common")]
 pub use mads_common::controller;
@@ -86,11 +102,23 @@ pub mod prelude {
     #[cfg(feature = "common")]
     pub use mads_common::{delete, get, patch, post, put, routes};
 
+    /// Re-exports standard HTTP request extractors and typed-header support.
+    #[cfg(feature = "common")]
+    pub use mads_common::{Header, Json, Path, Query, Request, headers};
+
+    /// Re-exports standard HTTP response types.
+    #[cfg(feature = "common")]
+    pub use mads_common::{Created, HttpError, HttpResult, NoContent};
+
+    /// Re-exports HTTP router construction and runtime startup functions.
+    #[cfg(feature = "common")]
+    pub use mads_common::{HttpRuntimeError, build_router, serve};
+
     /// Re-exports types used to build, run, and inspect an application.
     pub use mads_core::{
         ApplicationContext, ApplicationGraph, Catalog, Config, ConfigBuilder, ConstructionPlan,
         ConstructionStep, DependencyEdge, Diagnostic, Error, GraphAnalysis, LifecycleHook,
         LifecycleState, Mads, MadsBuilder, ProviderNode, ProviderOrigin, ProviderState,
-        ProviderVisibility, Result, SourceLocation,
+        ProviderVisibility, SourceLocation,
     };
 }

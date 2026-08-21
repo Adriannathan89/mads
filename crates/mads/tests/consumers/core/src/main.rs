@@ -6,4 +6,10 @@ struct AppModule;
 #[mads_core::repository]
 struct Repository;
 
-fn main() {}
+fn framework_result() -> mads_core::Result<()> {
+    Ok(())
+}
+
+fn main() {
+    let _ = framework_result;
+}

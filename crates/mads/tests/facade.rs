@@ -7,6 +7,31 @@ use mads::core::{
     Catalog as CoreCatalog, Mads as CoreMads, ProviderKind, ProviderOrigin, ProviderVisibility,
 };
 
+fn framework_result() -> mads::core::Result<()> {
+    Ok(())
+}
+
+#[test]
+fn prelude_exposes_the_http_runtime_surface() {
+    use mads::prelude::{
+        Created, Header, HttpError, HttpResult, Json, NoContent, Path, Query, Request,
+        build_router, serve,
+    };
+
+    let _ = std::any::TypeId::of::<Created<NoContent>>();
+    let _ = std::any::TypeId::of::<Header<mads::common::headers::ContentType>>();
+    let _ = std::any::TypeId::of::<HttpError>();
+    let _ = std::any::TypeId::of::<HttpResult<NoContent>>();
+    let _ = std::any::TypeId::of::<Json<NoContent>>();
+    let _ = std::any::TypeId::of::<Path<String>>();
+    let _ = std::any::TypeId::of::<Query<String>>();
+    let _ = std::any::TypeId::of::<Request>();
+    let _ = build_router;
+    let _ = serve;
+    let _ = framework_result;
+    let _: mads::common::axum::Router = mads::common::axum::Router::new();
+}
+
 #[test]
 fn prelude_exposes_core_types_and_bare_attributes() {
     use mads::prelude::*;
