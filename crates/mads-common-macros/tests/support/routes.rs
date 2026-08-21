@@ -296,6 +296,39 @@ fn validates_path_rules_and_prefix_joining() {
 }
 
 #[test]
+fn rejects_axum_reserved_and_malformed_capture_syntax_before_expansion() {
+    for path in ["/*rest", "/{id}", "/{id", "/id}", "/users/{id}"] {
+        let item: TokenStream = syn::parse_str(&format!(
+            "trait InvalidRoutes {{ #[get(\"{path}\")] async fn route(&self); }}"
+        ))
+        .expect("route trait should parse");
+        assert!(
+            expand_with_common(quote!(), item, &syn::parse_quote!(mads_common)).is_err(),
+            "macro expansion accepted reserved path `{path}`"
+        );
+    }
+
+    for prefix in ["/*rest", "/{id}", "/{id", "/id}"] {
+        let arguments: TokenStream = syn::parse_str(&format!("prefix = \"{prefix}\""))
+            .expect("route arguments should parse");
+        assert!(
+            expand_with_common(
+                arguments,
+                quote! {
+                    trait InvalidPrefixRoutes {
+                        #[get("/users")]
+                        async fn route(&self);
+                    }
+                },
+                &syn::parse_quote!(mads_common),
+            )
+            .is_err(),
+            "macro expansion accepted reserved prefix `{prefix}`"
+        );
+    }
+}
+
+#[test]
 fn identifies_route_verbs_and_parses_attributes() {
     let item: syn::ItemFn = syn::parse_str("#[get(\"/users\")] fn list() {}").unwrap();
     assert_eq!(route_verb(&item.attrs[0]), Some("get"));

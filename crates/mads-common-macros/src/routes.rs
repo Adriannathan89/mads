@@ -488,6 +488,14 @@ fn validate_path(path: &LitStr, subject: &str, is_prefix: bool) -> syn::Result<(
                 format!("{subject} must not contain empty, `.` or `..` segments"),
             ));
         }
+        if segment.starts_with('*') || segment.contains(['{', '}']) {
+            return Err(Error::new(
+                path.span(),
+                format!(
+                    "{subject} must not use Axum wildcard or brace-capture syntax; use `:parameter` captures"
+                ),
+            ));
+        }
         if let Some(parameter) = segment.strip_prefix(':') {
             let mut characters = parameter.chars();
             let Some(first) = characters.next() else {

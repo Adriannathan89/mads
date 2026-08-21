@@ -206,6 +206,35 @@ fn assert_invalid(controllers: &[&ControllerRouteDescriptor]) {
     assert_eq!(error.code(), MADS030);
 }
 
+fn descriptor_with_path(path: &'static str) -> ControllerRouteDescriptor {
+    let routes = Box::leak(Box::new([RouteDescriptor::new(
+        HttpMethod::Get,
+        "",
+        path,
+        path,
+        "invalid_route",
+        SourceLocation::new("tests/route_validation.rs", 140, 5),
+    )]));
+    let contracts = Box::leak(Box::new([RouteContractDescriptor::new("Routes", routes)]));
+    controller("test::InvalidPathController", first_type_id, contracts)
+}
+
+fn descriptor_with_prefix(
+    prefix: &'static str,
+    full_path: &'static str,
+) -> ControllerRouteDescriptor {
+    let routes = Box::leak(Box::new([RouteDescriptor::new(
+        HttpMethod::Get,
+        prefix,
+        "/users",
+        full_path,
+        "invalid_route",
+        SourceLocation::new("tests/route_validation.rs", 150, 5),
+    )]));
+    let contracts = Box::leak(Box::new([RouteContractDescriptor::new("Routes", routes)]));
+    controller("test::InvalidPrefixController", first_type_id, contracts)
+}
+
 #[test]
 fn rejects_invalid_route_paths_and_source_coordinates() {
     for contracts in [
@@ -231,6 +260,42 @@ fn rejects_invalid_route_paths_and_source_coordinates() {
         let descriptor = controller("test::Controller", first_type_id, contracts);
         assert_invalid(&[&descriptor]);
     }
+}
+
+#[test]
+fn rejects_axum_reserved_and_malformed_capture_syntax() {
+    for path in ["/*rest", "/{id}", "/{id", "/id}", "/users/{id}"] {
+        let descriptor = descriptor_with_path(path);
+        assert_invalid(&[&descriptor]);
+    }
+
+    for (prefix, full_path) in [
+        ("/*rest", "/*rest/users"),
+        ("/{id}", "/{id}/users"),
+        ("/{id", "/{id/users"),
+        ("/id}", "/id}/users"),
+    ] {
+        let descriptor = descriptor_with_prefix(prefix, full_path);
+        assert_invalid(&[&descriptor]);
+    }
+}
+
+#[test]
+fn rejects_wildcards_before_axum_router_construction_can_panic() {
+    let descriptor = descriptor_with_path("/*rest");
+    let result = std::panic::catch_unwind(|| {
+        mads_common::__private::validate_descriptors(&[&descriptor]).map(|_| {
+            mads_common::axum::Router::<()>::new().route(
+                "/*rest",
+                mads_common::axum::routing::get(|| async { "unreachable" }),
+            )
+        })
+    });
+
+    let error = result
+        .expect("invalid metadata must return an error before Axum can panic")
+        .expect_err("Axum wildcard metadata must fail closed");
+    assert_eq!(error.code(), MADS030);
 }
 
 #[test]

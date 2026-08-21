@@ -618,6 +618,15 @@ fn validate_path(
                 Some(location),
             ));
         }
+        if segment.starts_with('*') || segment.contains(['{', '}']) {
+            return Err(metadata_error(
+                subject,
+                format!(
+                    "{subject} must not use Axum wildcard or brace-capture syntax; use `:parameter` captures"
+                ),
+                Some(location),
+            ));
+        }
         if let Some(parameter) = segment.strip_prefix(':') {
             let mut characters = parameter.chars();
             let Some(first) = characters.next() else {
