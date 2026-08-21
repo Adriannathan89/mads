@@ -5,14 +5,14 @@
 use std::cmp::Ordering;
 
 use crate::{
-    Diagnostic, MADS001, MADS002, MADS003, ProviderDescriptor, ProviderOrigin, ProviderState,
-    ProviderVisibility, SourceLocation,
+    Diagnostic, MADS001, MADS002, MADS003, MADS005, ProviderDescriptor, ProviderOrigin,
+    ProviderState, ProviderVisibility, SourceLocation,
 };
 
 use super::model::{
-    ApplicationGraph, ConstructionPlan, DependencyEdge, GraphAnalysis, ProviderNode,
-    SatisfiedProvider,
+    ApplicationGraph, DependencyEdge, GraphAnalysis, ProviderNode, SatisfiedProvider,
 };
+use super::{cycle, plan};
 
 pub(crate) fn analyze_parts(
     descriptors: &[&'static ProviderDescriptor],
@@ -144,6 +144,16 @@ pub(crate) fn analyze_parts(
         }
     }
 
+    let graph = ApplicationGraph {
+        providers,
+        dependencies,
+    };
+    if diagnostics.is_empty() {
+        for cycle in cycle::detect(&graph) {
+            diagnostics.push(PendingDiagnostic::cycle(cycle));
+        }
+    }
+
     diagnostics.sort_by(PendingDiagnostic::order);
     let diagnostics = diagnostics
         .into_iter()
@@ -151,13 +161,10 @@ pub(crate) fn analyze_parts(
         .collect::<Vec<_>>();
     let construction_plan = diagnostics
         .is_empty()
-        .then(|| ConstructionPlan { steps: Vec::new() });
+        .then(|| plan::create(&graph, &unique_descriptors));
 
     GraphAnalysis {
-        graph: ApplicationGraph {
-            providers,
-            dependencies,
-        },
+        graph,
         diagnostics,
         construction_plan,
     }
@@ -259,6 +266,19 @@ impl PendingDiagnostic {
         }
     }
 
+    fn cycle(cycle: cycle::Cycle) -> Self {
+        let subject = cycle.names[0];
+        let message = format!("provider dependency cycle: {}", cycle.names.join(" -> "));
+        Self {
+            diagnostic: Diagnostic::new(MADS005, "dependency cycle", message)
+                .with_subject(subject)
+                .with_location(cycle.location)
+                .with_suggestion("remove or invert one dependency in the cycle"),
+            subject,
+            location: Some(cycle.location),
+        }
+    }
+
     fn order(left: &Self, right: &Self) -> Ordering {
         left.diagnostic
             .code()
@@ -280,9 +300,9 @@ mod tests {
     use std::sync::Arc;
 
     use crate::{
-        ConstructionContext, DependencyDescriptor, Diagnostic, ErasedProvider, MADS001, MADS002,
-        MADS003, ProviderDescriptor, ProviderFuture, ProviderKind, ProviderOrigin, ProviderState,
-        ProviderVisibility, SourceLocation,
+        ConstructionContext, ConstructionStep, DependencyDescriptor, Diagnostic, ErasedProvider,
+        MADS001, MADS002, MADS003, MADS005, ProviderDescriptor, ProviderFuture, ProviderKind,
+        ProviderOrigin, ProviderState, ProviderVisibility, SourceLocation,
     };
 
     use super::*;
@@ -295,6 +315,22 @@ mod tests {
     struct SecondMissing;
     struct AbsentAlpha;
     struct AbsentZeta;
+    #[derive(Default)]
+    struct SelfCycle;
+    #[derive(Default)]
+    struct A;
+    #[derive(Default)]
+    struct B;
+    #[derive(Default)]
+    struct C;
+    #[derive(Default)]
+    struct Alpha;
+    #[derive(Default)]
+    struct PlanDatabase;
+    #[derive(Default)]
+    struct Service;
+    #[derive(Default)]
+    struct Zeta;
 
     fn database_type_id() -> TypeId {
         TypeId::of::<Database>()
@@ -316,6 +352,38 @@ mod tests {
         TypeId::of::<AbsentZeta>()
     }
 
+    fn self_cycle_type_id() -> TypeId {
+        TypeId::of::<SelfCycle>()
+    }
+
+    fn a_type_id() -> TypeId {
+        TypeId::of::<A>()
+    }
+
+    fn b_type_id() -> TypeId {
+        TypeId::of::<B>()
+    }
+
+    fn c_type_id() -> TypeId {
+        TypeId::of::<C>()
+    }
+
+    fn alpha_type_id() -> TypeId {
+        TypeId::of::<Alpha>()
+    }
+
+    fn plan_database_type_id() -> TypeId {
+        TypeId::of::<PlanDatabase>()
+    }
+
+    fn service_type_id() -> TypeId {
+        TypeId::of::<Service>()
+    }
+
+    fn zeta_type_id() -> TypeId {
+        TypeId::of::<Zeta>()
+    }
+
     fn constructor<'a, T>(_: &'a ConstructionContext<'a>) -> ProviderFuture<'a>
     where
         T: Default + Send + Sync + 'static,
@@ -330,6 +398,20 @@ mod tests {
     static SECOND_MISSING_DEPENDENCIES: [DependencyDescriptor; 1] = [DependencyDescriptor::new(
         "fixture::AbsentAlpha",
         absent_alpha_type_id,
+    )];
+    static SELF_DEPENDENCIES: [DependencyDescriptor; 1] = [DependencyDescriptor::new(
+        "cycle::SelfCycle",
+        self_cycle_type_id,
+    )];
+    static A_DEPENDENCIES: [DependencyDescriptor; 1] =
+        [DependencyDescriptor::new("cycle::B", b_type_id)];
+    static B_DEPENDENCIES: [DependencyDescriptor; 1] =
+        [DependencyDescriptor::new("cycle::C", c_type_id)];
+    static C_DEPENDENCIES: [DependencyDescriptor; 1] =
+        [DependencyDescriptor::new("cycle::A", a_type_id)];
+    static SERVICE_DEPENDENCIES: [DependencyDescriptor; 1] = [DependencyDescriptor::new(
+        "plan::Database",
+        plan_database_type_id,
     )];
 
     static DATABASE_DESCRIPTOR: ProviderDescriptor = ProviderDescriptor::new(
@@ -367,6 +449,85 @@ mod tests {
         ProviderVisibility::Private,
         SourceLocation::new("second.rs", 1, 1),
         constructor::<SecondMissing>,
+    );
+
+    macro_rules! test_descriptor {
+        ($static_name:ident, $type:ty, $stable_name:literal, $type_id:ident, $dependencies:expr, $file:literal) => {
+            static $static_name: ProviderDescriptor = ProviderDescriptor::new(
+                ProviderKind::Provider,
+                $stable_name,
+                $type_id,
+                $dependencies,
+                ProviderVisibility::Private,
+                SourceLocation::new($file, 1, 1),
+                constructor::<$type>,
+            );
+        };
+    }
+
+    test_descriptor!(
+        SELF_CYCLE_DESCRIPTOR,
+        SelfCycle,
+        "cycle::SelfCycle",
+        self_cycle_type_id,
+        &SELF_DEPENDENCIES,
+        "cycle_SelfCycle.rs"
+    );
+    test_descriptor!(
+        A_DESCRIPTOR,
+        A,
+        "cycle::A",
+        a_type_id,
+        &A_DEPENDENCIES,
+        "cycle_A.rs"
+    );
+    test_descriptor!(
+        B_DESCRIPTOR,
+        B,
+        "cycle::B",
+        b_type_id,
+        &B_DEPENDENCIES,
+        "cycle_B.rs"
+    );
+    test_descriptor!(
+        C_DESCRIPTOR,
+        C,
+        "cycle::C",
+        c_type_id,
+        &C_DEPENDENCIES,
+        "cycle_C.rs"
+    );
+    test_descriptor!(
+        ALPHA_DESCRIPTOR,
+        Alpha,
+        "plan::Alpha",
+        alpha_type_id,
+        &[],
+        "plan_Alpha.rs"
+    );
+    test_descriptor!(
+        PLAN_DATABASE_DESCRIPTOR,
+        PlanDatabase,
+        "plan::Database",
+        plan_database_type_id,
+        &[],
+        "plan_Database.rs"
+    );
+    test_descriptor!(
+        SERVICE_DESCRIPTOR,
+        Service,
+        "plan::Service",
+        service_type_id,
+        &SERVICE_DEPENDENCIES,
+        "plan_Service.rs"
+    );
+    test_descriptor!(
+        ZETA_DESCRIPTOR,
+        Zeta,
+        "plan::Zeta",
+        zeta_type_id,
+        &[],
+        "plan_Zeta.rs"
     );
 
     #[test]
@@ -439,5 +600,79 @@ mod tests {
         );
         assert!(analysis.diagnostics()[1].to_string().contains("AbsentZeta"));
         assert!(analysis.construction_plan().is_none());
+    }
+
+    #[test]
+    fn self_cycle_renders_a_closed_path() {
+        let analysis = analyze_parts(&[&SELF_CYCLE_DESCRIPTOR], &[]);
+
+        assert_eq!(analysis.diagnostics()[0].code(), MADS005);
+        assert!(
+            analysis.diagnostics()[0]
+                .to_string()
+                .contains("cycle::SelfCycle -> cycle::SelfCycle")
+        );
+    }
+
+    #[test]
+    fn multi_node_cycle_is_canonical_regardless_of_input_order() {
+        let first = analyze_parts(&[&C_DESCRIPTOR, &A_DESCRIPTOR, &B_DESCRIPTOR], &[]);
+        let second = analyze_parts(&[&B_DESCRIPTOR, &C_DESCRIPTOR, &A_DESCRIPTOR], &[]);
+
+        assert_eq!(first.diagnostics(), second.diagnostics());
+        assert!(
+            first.diagnostics()[0]
+                .to_string()
+                .contains("cycle::A -> cycle::B -> cycle::C -> cycle::A")
+        );
+    }
+
+    #[test]
+    fn independent_nodes_use_stable_topological_tie_breaking() {
+        let analysis = analyze_parts(
+            &[
+                &SERVICE_DESCRIPTOR,
+                &ZETA_DESCRIPTOR,
+                &PLAN_DATABASE_DESCRIPTOR,
+                &ALPHA_DESCRIPTOR,
+            ],
+            &[],
+        );
+        let names: Vec<_> = analysis
+            .construction_plan()
+            .unwrap()
+            .steps()
+            .iter()
+            .map(ConstructionStep::type_name)
+            .collect();
+
+        assert_eq!(
+            names,
+            [
+                "plan::Alpha",
+                "plan::Database",
+                "plan::Service",
+                "plan::Zeta"
+            ]
+        );
+    }
+
+    #[test]
+    fn satisfied_nodes_are_inspectable_but_absent_from_the_plan() {
+        let satisfied = [
+            SatisfiedProvider::provided::<Alpha>(),
+            SatisfiedProvider::preconstructed::<PlanDatabase>(),
+        ];
+        let analysis = analyze_parts(&[&ALPHA_DESCRIPTOR, &PLAN_DATABASE_DESCRIPTOR], &satisfied);
+
+        assert!(analysis.construction_plan().unwrap().steps().is_empty());
+        assert_eq!(
+            analysis.graph().provider::<Alpha>().unwrap().state(),
+            ProviderState::Provided
+        );
+        assert_eq!(
+            analysis.graph().provider::<PlanDatabase>().unwrap().state(),
+            ProviderState::Preconstructed
+        );
     }
 }
