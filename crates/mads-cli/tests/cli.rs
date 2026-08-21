@@ -10,7 +10,7 @@ fn version_reports_the_workspace_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(contains("mads 0.2.0"));
+        .stdout(contains("mads 0.3.0"));
 }
 
 #[test]
@@ -22,7 +22,7 @@ fn foundation_check_reports_available_boundaries() {
         .success()
         .stdout(contains("core: available"))
         .stdout(contains("common contracts: available"))
-        .stdout(contains("common HTTP runtime: reserved"))
+        .stdout(contains("common HTTP runtime: available"))
         .stdout(contains("extra: reserved"));
 }
 

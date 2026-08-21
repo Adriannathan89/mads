@@ -27,7 +27,7 @@ fn prelude_exposes_the_http_runtime_surface() {
     let _ = std::any::TypeId::of::<Query<String>>();
     let _ = std::any::TypeId::of::<Request>();
     let _ = build_router;
-    let _ = serve;
+    let _ = |application: mads::core::Mads| serve(application, "127.0.0.1:0");
     let _ = framework_result;
     let _: mads::common::axum::Router = mads::common::axum::Router::new();
 }

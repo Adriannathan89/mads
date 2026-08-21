@@ -1,4 +1,8 @@
 //! Validated Axum router construction for managed controllers.
+//!
+//! Controllers are resolved from the application context once while the router
+//! is built. Generated handlers capture that application-scoped controller
+//! handle and use typed trait calls for each request.
 
 use crate::RouteCatalog;
 

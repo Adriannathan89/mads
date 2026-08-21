@@ -1,7 +1,55 @@
 //! Public MADS.rs facade and feature composition boundary.
 //!
-//! The facade enables standard integrations and the Tokio runtime by default;
-//! consumers can opt out of those defaults for a narrower dependency surface.
+//! The facade enables the v0.3 common HTTP integration and Tokio runtime by
+//! default; consumers can opt out of those defaults for a narrower core-only
+//! dependency surface.
+//!
+//! A controller implements a typed route contract. MADS validates the complete
+//! route catalog, resolves the application-scoped controller once, and builds
+//! an Axum router without requiring application state or a manual route list:
+//!
+//! ```
+//! use mads::prelude::*;
+//!
+//! #[derive(Clone, serde::Serialize)]
+//! struct User {
+//!     id: u64,
+//! }
+//!
+//! #[mads::routes(prefix = "/users")]
+//! trait UserRoutes {
+//!     #[mads::get("/:id")]
+//!     async fn get_user(&self, id: Path<u64>) -> HttpResult<Json<User>>;
+//! }
+//!
+//! #[mads::controller(routes = [UserRoutes])]
+//! struct UserController;
+//!
+//! impl UserRoutes for UserController {
+//!     async fn get_user(&self, Path(id): Path<u64>) -> HttpResult<Json<User>> {
+//!         Ok(Json(User { id }))
+//!     }
+//! }
+//!
+//! #[mads::main]
+//! async fn main() {
+//!     let application = Mads::builder().build().await.unwrap();
+//!     let _router = build_router(&application).unwrap();
+//! }
+//! ```
+//!
+//! Run an application with [`serve`]. Validation and router construction occur
+//! before lifecycle startup or listener binding:
+//!
+//! ```no_run
+//! use mads::prelude::*;
+//!
+//! #[mads::main]
+//! async fn main() {
+//!     let application = Mads::builder().build().await.unwrap();
+//!     serve(application, "127.0.0.1:3000").await.unwrap();
+//! }
+//! ```
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]

@@ -6,8 +6,10 @@
 //! metadata consumed by `mads_common::RouteCatalog` and the MADS dependency
 //! graph. Route traits also receive hidden, typed Axum registrars, and each
 //! controller descriptor stores a concrete registrar function pointer.
-//! Runtime bootstrap remains responsible for validating the complete catalog
-//! before any generated registrar is invoked.
+//! Runtime bootstrap validates the complete catalog before any generated
+//! registrar is invoked. The generated registrars resolve application-scoped
+//! controllers once and invoke handler trait methods through typed Rust calls,
+//! never through handler-name metadata.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]

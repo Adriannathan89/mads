@@ -1,4 +1,9 @@
 //! HTTP response types for MADS route handlers.
+//!
+//! [`HttpResult`] represents delivery failures as stable HTTP responses. It is
+//! intentionally separate from [`mads_core::Result`], which remains the result
+//! type for framework construction and bootstrap operations. Handlers may also
+//! return any native Axum [`IntoResponse`](axum::response::IntoResponse) type.
 
 use std::{error::Error, fmt};
 

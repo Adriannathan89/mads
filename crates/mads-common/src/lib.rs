@@ -1,12 +1,16 @@
 //! Standard integration contracts for MADS.rs.
 //!
 //! Version 0.3 provides compile-time controller and route contracts together
-//! with Axum-compatible HTTP adapters and extractors.
+//! with the Axum HTTP runtime. [`build_router`] validates every registered
+//! controller before it resolves a controller or invokes a typed registrar;
+//! [`serve`] performs that same validation before lifecycle startup or socket
+//! binding.
 //!
 //! Use [`routes`] to declare an abstract route contract and [`controller`] to
 //! bind one or more such contracts to a managed controller. The resulting
 //! descriptors can be inspected through [`RouteCatalog`] before the HTTP
-//! runtime installs handlers.
+//! runtime installs handlers. [`axum`] is deliberately re-exported for native
+//! extractors, response types, routers, middleware, and Tower composition.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]

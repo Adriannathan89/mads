@@ -23,6 +23,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --workspace --all-features
+      - name: Test documentation
+        run: cargo test --workspace --all-features --doc
       - name: Build documentation
         env:
           RUSTDOCFLAGS: -D warnings
@@ -36,7 +38,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.85.0
       - uses: Swatinem/rust-cache@v2
       - name: Test minimum supported Rust version
-        run: cargo test --workspace --all-features
+        run: cargo test --locked --workspace --all-features
 
   coverage:
     name: Coverage

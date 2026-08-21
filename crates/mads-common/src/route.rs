@@ -1,7 +1,7 @@
-//! Framework-neutral route metadata and validation.
+//! HTTP route metadata and validation for the common Axum adapter.
 //!
 //! The types in this module are the stable boundary between compile-time route
-//! macros and a future HTTP adapter. They contain only immutable, `'static`
+//! macros and the v0.3 HTTP adapter. They contain only immutable, `'static`
 //! metadata, so catalog inspection does not construct controllers or start a
 //! server. [`RouteCatalog`] provides deterministic lookup and conflict
 //! validation over the descriptors registered by `#[controller]`.

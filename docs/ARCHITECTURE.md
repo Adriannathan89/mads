@@ -1,921 +1,123 @@
-# MADS.rs — Architecture
+# MADS.rs 0.3 Architecture
 
-## 1. Architectural Goal
-
-MADS is an application framework layered on top of Axum.
-
-Its architecture must preserve a strict boundary:
+MADS.rs separates framework-neutral application semantics from HTTP delivery.
+The v0.3 runtime makes controller routes executable without making the core an
+HTTP framework.
 
 ```text
-┌──────────────────────────────────────────────┐
-│             Application Developer            │
-│                                              │
-│  Module · Service · Route · Input · Result   │
-└──────────────────────┬───────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────┐
-│                   MADS                       │
-│                                              │
-│ module metadata                              │
-│ service construction                         │
-│ route registration                           │
-│ application state                            │
-│ extraction / response adapters               │
-│ error mapping                                │
-│ lifecycle                                    │
-│ diagnostics                                  │
-└──────────────────────┬───────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────┐
-│                   Axum                       │
-│ routing · extractors · response · middleware │
-└──────────────────────┬───────────────────────┘
-                       │
-                       ▼
-                    Tower
-                       │
-                       ▼
-                    Hyper
-                       │
-                       ▼
-                    Tokio
+Application route traits and controllers
+                 |
+                 v
+        mads macros: metadata + typed registrars
+                 |
+                 v
+ mads-core: provider graph, Mads, lifecycle, diagnostics
+                 |
+                 v
+ mads-common: validation, Axum adapter, router, server
+                 |
+                 v
+         Axum + Tower + Hyper + Tokio
 ```
 
-MADS owns application semantics. Axum owns HTTP request routing and handling.
+## Crate boundary
 
----
+`mads-core` owns providers, construction order, lifecycle, diagnostics, and
+the application context. It remains HTTP-free: it has no Axum, Tower, Hyper,
+HTTP, or `mads-common` dependency and contains no HTTP behavior.
 
-## 2. Workspace Layout
+`mads-common` is the Axum adapter. It validates route metadata, translates
+validated MADS paths, resolves controllers, invokes typed registrars, and
+offers HTTP extractors, response wrappers, `build_router`, and `serve`.
+`mads-common-macros` generates metadata and typed adapters but does not link
+the HTTP runtime. `mads` is the facade that re-exports the standard v0.3 API.
 
-Recommended initial workspace:
+## Bootstrap sequence
 
 ```text
-mads/
-├── Cargo.toml
-├── README.md
-├── LICENSE
-│
-├── crates/
-│   ├── mads/
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       └── prelude.rs
-│   │
-│   ├── mads-core/
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── app.rs
-│   │       ├── module.rs
-│   │       ├── service.rs
-│   │       ├── registry.rs
-│   │       ├── error.rs
-│   │       └── lifecycle.rs
-│   │
-│   ├── mads-web/
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── router.rs
-│   │       ├── handler.rs
-│   │       ├── extract.rs
-│   │       ├── response.rs
-│   │       ├── state.rs
-│   │       └── server.rs
-│   │
-│   ├── mads-macros/
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── main.rs
-│   │       ├── module.rs
-│   │       ├── service.rs
-│   │       └── route.rs
-│   │
-│   └── mads-cli/
-│       └── src/
-│           ├── main.rs
-│           ├── dev.rs
-│           └── check.rs
-│
-├── examples/
-│   ├── hello-world/
-│   ├── basic-rest/
-│   └── modular-app/
-│
-└── docs/
-    ├── idea.md
-    ├── ARCHITECTURE.md
-    └── timeline.md
+Mads::builder().build().await
+        |
+        v
+provider graph validation and application-scoped construction
+        |
+        v
+build_router(&application) or serve(application, address)
+        |
+        v
+validate the complete RouteCatalog (MADS030 on failure)
+        |
+        v
+translate validated /:parameter segments to Axum /{parameter}
+        |
+        v
+resolve each controller once and invoke its typed registrar
+        |
+        +-- build_router: return Router<()> for composition/testing
+        |
+        +-- serve: start lifecycle, bind, serve, then shut down lifecycle
 ```
 
-Do not create many integration crates during the MVP. The architecture above gives separation without forcing the project to maintain a large ecosystem immediately.
-
----
-
-## 3. Crate Responsibilities
-
-### `mads`
-
-Public facade.
-
-Responsibilities:
-
-- re-export the stable application API;
-- expose `mads::prelude::*`;
-- re-export procedural macros;
-- keep most underlying implementation crates out of user-facing code.
-
-Expected usage:
-
-```toml
-[dependencies]
-mads = "0.x"
-```
-
-rather than asking users to manually select the normal Axum/Tokio/Tower integration set.
-
-### `mads-core`
-
-Framework-neutral application semantics.
-
-Responsibilities:
-
-- application builder;
-- module descriptors;
-- service descriptors;
-- dependency registry;
-- service lifecycle metadata;
-- application/framework errors;
-- future module graph representation.
-
-It should avoid depending directly on Axum wherever practical.
-
-### `mads-web`
-
-Axum adapter and HTTP-facing implementation.
-
-Responsibilities:
-
-- turn MADS routes into Axum routes;
-- own MADS application state representation;
-- bridge MADS extractors to Axum extractors;
-- bridge MADS results/responses to Axum responses;
-- server startup and shutdown defaults;
-- Tower/Axum escape hatches.
-
-### `mads-macros`
-
-Procedural macros.
-
-Initial macros:
-
-```text
-#[mads::main]
-#[module]
-#[service]
-#[routes]
-#[controller]
-#[get]
-#[post]
-#[put]
-#[patch]
-#[delete]
-```
-
-Macros should generate metadata/adapter code, not create a hidden runtime reflection system.
-
-### `mads-cli`
-
-Developer workflow tooling.
-
-Initial commands:
-
-```text
-mads dev
-mads check
-```
-
-Potential later commands:
-
-```text
-mads new
-mads routes
-mads graph
-mads inspect
-```
-
----
-
-## 4. Public Programming Model
-
-The application-facing API should remain intentionally compact.
-
-### Root application
-
-```rust
-#[mads::main]
-async fn main() {
-    Mads::new()
-        .module(AppModule)
-        .run()
-        .await;
-}
-```
-
-### Module
-
-Foundation:
-
-```rust
-#[module]
-pub struct UserModule;
-```
-
-Later module-graph milestones may add explicit imports and exports without
-requiring services or controllers to be listed twice:
-
-```rust
-#[module(
-    imports = [DatabaseModule],
-    exports = [UserService],
-)]
-pub struct UserModule;
-```
-
-### Service
-
-```rust
-#[service]
-pub struct UserService {
-    db: Database,
-}
-```
-
-### Route contract and controller
-
-```rust
-#[routes(prefix = "/users")]
-trait UserRoutes {
-    #[get("/:id")]
-    async fn get_user(&self, id: Path<u64>) -> Result<User>;
-}
-
-#[controller(routes = [UserRoutes])]
-struct UserController {
-    users: UserService,
-}
-
-impl UserRoutes for UserController {
-    async fn get_user(&self, id: Path<u64>) -> Result<User> {
-        self.users.find(*id).await
-    }
-}
-```
-
----
-
-## 5. Internal Registration Model
-
-Avoid full runtime reflection.
-
-Procedural macros should generate static registration descriptors that can be collected through module registration.
-
-Conceptual model:
-
-```rust
-pub struct RouteDescriptor {
-    pub method: Method,
-    pub path: &'static str,
-    pub register: fn(Router, &AppContext) -> Router,
-}
-
-pub struct ServiceDescriptor {
-    pub type_name: &'static str,
-    pub constructor: ServiceConstructor,
-}
-
-pub struct ModuleDescriptor {
-    pub name: &'static str,
-    pub services: &'static [ServiceDescriptor],
-    pub routes: &'static [RouteDescriptor],
-}
-```
-
-The exact Rust representation should be selected after experimentation; the key design requirement is that metadata remains explicit, deterministic, and debuggable.
-
----
-
-## 6. Application Boot Sequence
-
-MVP boot process:
-
-```text
-Mads::new()
-    ↓
-register root modules
-    ↓
-collect module descriptors
-    ↓
-collect service descriptors
-    ↓
-construct application-scoped services
-    ↓
-build MADS application state
-    ↓
-collect route descriptors
-    ↓
-build Axum Router
-    ↓
-apply framework defaults / configured layers
-    ↓
-start Axum server
-```
-
-Future boot process can add graph validation before construction:
-
-```text
-collect descriptors
-    ↓
-build application graph
-    ↓
-validate graph
-    ↓
-construct services
-```
-
----
-
-## 7. Service Storage
-
-### MVP lifecycle
-
-All framework-managed services are:
-
-```text
-application-scoped
-Send
-Sync
-'static
-```
-
-They are constructed once during application startup.
-
-Conceptually, internal storage may use:
-
-```rust
-Arc<T>
-```
-
-or a type-erased registry containing `Arc<T>` values.
-
-A possible MVP implementation:
-
-```rust
-HashMap<TypeId, Arc<dyn Any + Send + Sync>>
-```
-
-This is acceptable as a boot/runtime implementation if it keeps the initial design tractable, provided route invocation does not become unnecessarily expensive or opaque.
-
-A later version can replace or optimize this with generated/static wiring without changing the public API.
-
-### Important distinction
-
-`Arc<T>` is not itself the lifecycle.
-
-```text
-MADS lifecycle policy → service constructed once
-Arc<T>                → shared ownership mechanism
-```
-
-The developer sees `UserService`; MADS may internally carry `Arc<UserService>`.
-
----
-
-## 8. Service Resolution Strategy
-
-Recommended evolution:
-
-### Stage A — explicit constructors + startup registry
-
-```text
-metadata known at compile time
-construction at startup
-service lookup through MADS state
-```
-
-This provides fast implementation and clear behavior.
-
-### Stage B — graph validation
-
-Add knowledge of service dependencies and validate missing bindings/duplicates/cycles before server startup or through generated compile-time checks where practical.
-
-### Stage C — generated wiring optimization
-
-If profiling or diagnostics justify it, generate more concrete service wiring and reduce type-erased lookup.
-
-Do not start at Stage C merely for a “zero-cost” marketing statement.
-
----
-
-## 9. Handler Adapter
-
-A MADS route/controller contract should generate an Axum-compatible adapter in
-the HTTP runtime milestone.
-
-Application code:
-
-```rust
-#[routes(prefix = "/users")]
-trait UserRoutes {
-    #[get("/:id")]
-    async fn get_user(&self, id: Path<u64>) -> Result<User>;
-}
-
-#[controller(routes = [UserRoutes])]
-struct UserController {
-    users: UserService,
-}
-```
-
-Conceptual generated adapter:
-
-```text
-Axum request
-    ↓
-extract Path<u64>
-    ↓
-resolve UserController from MADS state
-    ↓
-call UserRoutes::get_user(...)
-    ↓
-map MADS Result<User>
-    ↓
-Axum IntoResponse
-```
-
-The adapter layer is where most of the complexity should live so the user-facing handler remains simple.
-
----
-
-## 10. Extractors
-
-MVP supported inputs:
-
-```text
-Json<T>
-Path<T>
-Query<T>
-Header<T>   (optional for first MVP cut)
-```
-
-MADS should reuse Axum extraction behavior when possible rather than reimplement request parsing.
-
-Possible implementation strategies:
-
-1. type aliases/re-exports where semantics match exactly;
-2. thin newtypes where MADS wants standardized error mapping;
-3. custom extractors only when MADS-specific behavior is required.
-
-Prefer 1 before 2, and 2 before 3.
-
----
-
-## 11. Response Model
-
-Common return types should work automatically:
-
-```text
-String
-&'static str
-Json<T>
-T where T satisfies the MADS JSON response contract
-Result<T>
-Result<Json<T>>
-```
-
-MADS should define a small application error vocabulary and map it to HTTP status codes.
-
-Example:
-
-```rust
-pub enum MadsError {
-    BadRequest(...),
-    Unauthorized(...),
-    Forbidden(...),
-    NotFound(...),
-    Conflict(...),
-    Internal(...),
-}
-```
-
-The design should allow custom error types to participate without forcing every handler to use a single framework enum.
-
----
-
-## 12. Module Graph — Later Architecture
-
-After the MVP, `ModuleDescriptor` can expand into an application graph.
-
-Node model:
-
-```text
-ModuleNode
-├── id
-├── imports
-├── services
-├── exports
-└── routes
-```
-
-Service model:
-
-```text
-ServiceNode
-├── type
-├── owner_module
-├── dependencies
-├── visibility
-└── lifecycle
-```
-
-Validation targets:
-
-```text
-missing dependency
-private dependency
-missing module import
-duplicate service
-module cycle
-service cycle
-invalid lifecycle dependency
-```
-
-Possible diagnostic:
-
-```text
-MADS003: unavailable service
-
-OrderService depends on UserRepository.
-UserRepository exists in UserModule but is not exported.
-
-OrderModule
-└── imports UserModule
-    ├── UserService       exported
-    └── UserRepository    private
-```
-
-This application-level diagnostic experience is strategically more valuable than exposing raw implementation trait failures.
-
----
-
-## 13. Lifecycles — Later Architecture
-
-Do not include multiple lifecycles in the first MVP.
-
-Future model:
-
-```text
-Application / Singleton
-Request
-Transient
-```
-
-Potential rule:
-
-```text
-longer-lived service cannot directly retain a shorter-lived service
-```
-
-Example invalid graph:
-
-```text
-AuditService [application]
-     ↓
-CurrentUser [request]
-```
-
-MADS should eventually detect this at registration/build time rather than allowing a confusing runtime failure.
-
----
-
-## 14. Middleware
-
-Do not invent a competing middleware ecosystem.
-
-Axum already integrates with Tower. MADS should provide:
-
-1. a simple common-path API;
-2. direct compatibility with Tower layers.
-
-Potential public API:
-
-```rust
-Mads::new()
-    .layer(CorsLayer::permissive())
-```
-
-or module-level layering later.
-
-MADS-specific guards/interceptors should only be introduced if they solve an application-level problem not already handled cleanly by Tower/Axum.
-
----
-
-## 15. Configuration
-
-MVP defaults should be usable without configuration:
-
-```text
-host = 127.0.0.1
-port = 3000
-development logging enabled in dev mode
-graceful shutdown enabled
-```
-
-Future configuration can support:
-
-```toml
-[server]
-host = "0.0.0.0"
-port = 8080
-```
-
-Avoid creating a large configuration abstraction until recurring use cases are clear.
-
----
-
-## 16. Diagnostics Architecture
-
-Diagnostics are a core subsystem, not polish.
-
-Framework-controlled errors should be represented internally as structured diagnostics:
-
-```text
-Diagnostic
-├── code        MADS003
-├── title       missing service dependency
-├── module      UserModule
-├── subject     UserService
-├── dependency  Database
-├── explanation
-└── suggestions
-```
-
-This representation can be rendered by:
-
-```text
-compiler macro errors
-mads check
-mads dev
-future IDE tooling
-```
-
-Prefer stable MADS diagnostic codes from early versions.
-
----
-
-## 17. CLI Architecture
-
-### `mads dev`
-
-Responsibilities:
-
-```text
-watch files
-invoke cargo build/run
-capture relevant compiler diagnostics
-restart application
-show MADS startup summary
-```
-
-Do not attempt true Node-style hot module replacement initially. Process restart over Rust incremental compilation is sufficient for the first implementation.
-
-### `mads check`
-
-Runs framework validation without intentionally starting the server.
-
-Long-term it can display:
-
-```text
-module graph
-service graph
-route conflicts
-lifecycle errors
-```
-
-### `mads routes`
-
-Potential later command:
-
-```text
-GET     /users
-POST    /users
-GET     /users/:id
-```
-
----
-
-## 18. Axum Escape Hatch
-
-MADS must preserve interoperability.
-
-Possible approaches:
-
-```rust
-Mads::new()
-    .axum_layer(...)
-```
-
-or:
-
-```rust
-fn configure(router: axum::Router) -> axum::Router
-```
-
-or exposing a controlled access point from a module.
-
-The exact API is secondary to the rule:
-
-> Do not force developers to abandon the Axum/Tower ecosystem to adopt MADS.
-
----
-
-## 19. Compile-Time Strategy
-
-MADS should use procedural macros for ergonomic declarations and static metadata, but should not make “everything compile-time” an MVP requirement.
-
-Recommended progression:
-
-```text
-v0.1
-macros generate descriptors and Axum adapters
-service construction validated at startup where necessary
-
-v0.2+
-module/service dependency metadata
-better static validation and diagnostics
-
-later
-more compile-time graph validation/generated wiring where it produces measurable DX or runtime benefits
-```
-
-This avoids turning an application-framework project into a compiler project before its product thesis is proven.
-
----
-
-## 20. Performance Model
-
-MADS should aim for:
-
-```text
-Axum-level request handling
-+ small framework overhead
-```
-
-Performance priorities:
-
-1. do expensive graph/service setup at startup, not per request;
-2. avoid unnecessary allocation in route adapters;
-3. use shared handles for application services;
-4. reuse Axum extractors and responses;
-5. benchmark real endpoints, not only hello-world;
-6. optimize only after profiling.
-
-A small amount of service-resolution overhead is acceptable for early releases if it produces dramatically better maintainability and can later be optimized without breaking application APIs.
-
----
-
-## 21. Example Application Structure
-
-Recommended feature-oriented structure:
-
-```text
-src/
-├── main.rs
-├── app.rs
-│
-├── users/
-│   ├── mod.rs
-│   ├── routes.rs
-│   ├── service.rs
-│   ├── repository.rs
-│   └── model.rs
-│
-├── auth/
-│   ├── mod.rs
-│   ├── routes.rs
-│   └── service.rs
-│
-└── infrastructure/
-    ├── mod.rs
-    └── database.rs
-```
-
-`users/mod.rs`:
-
-```rust
-#[module(
-    services = [UserRepository, UserService],
-    routes = [list_users, get_user],
-)]
-pub struct UserModule;
-```
-
-The module definition becomes a compact map of the feature without making the developer manually construct Axum state.
-
----
-
-## 22. Architecture Rules
-
-The following rules should be treated as design constraints.
-
-### Rule 1 — No custom HTTP stack
-
-MADS delegates HTTP behavior to Axum unless an application-level abstraction is required.
-
-### Rule 2 — No mandatory `Arc<T>` in normal application signatures
-
-MADS owns shared service plumbing.
-
-### Rule 3 — No mandatory `State<AppState>` in normal route signatures
-
-MADS owns application state plumbing.
-
-### Rule 4 — Explicit module registration first
-
-Avoid magical source scanning and registration until a robust need and implementation strategy exist.
-
-### Rule 5 — Application services default to singleton/application scope
-
-Additional scopes are later features.
-
-### Rule 6 — Keep generated code inspectable
-
-Macro expansion should be understandable and avoid unnecessary generic complexity.
-
-### Rule 7 — Axum interoperability is a feature
-
-Do not wall off the lower ecosystem.
-
-### Rule 8 — Errors at the MADS layer should mention MADS concepts
-
-A missing service should be described as a missing service, not only as an unrelated trait-bound failure.
-
-### Rule 9 — Do not optimize away the architecture too early
-
-A simple service registry is acceptable while the public programming model is being proven.
-
-### Rule 10 — Every major feature must reduce or justify cognitive load
-
-If a new abstraction introduces more concepts than it removes, reconsider it.
-
----
-
-## 23. First Technical Spike
-
-Before implementing the full MVP, build one end-to-end spike that supports exactly this:
-
-```rust
-#[service]
-struct GreetingService;
-
-impl GreetingService {
-    fn hello(&self, name: &str) -> String {
-        format!("Hello {name}")
-    }
-}
-
-#[routes(prefix = "/hello")]
-trait GreetingRoutes {
-    #[get("/:name")]
-    async fn hello(&self, name: Path<String>) -> String;
-}
-
-#[controller(routes = [GreetingRoutes])]
-struct GreetingController {
-    greeting: GreetingService,
-}
-
-impl GreetingRoutes for GreetingController {
-    async fn hello(&self, name: Path<String>) -> String {
-        self.greeting.hello(&name)
-    }
-}
-
-#[module]
-struct AppModule;
-
-#[mads::main]
-async fn main() {
-    Mads::run::<AppModule>().await;
-}
-```
-
-This spike should prove five things:
-
-1. route/controller contracts produce runtime registration in v0.3;
-2. service construction works;
-3. service injection works without application-visible `Arc`/`State`;
-4. handler inputs still use normal typed Rust;
-5. the application runs on Axum.
-
-If this spike requires a large amount of unstable magic, simplify the public model before expanding the project.
+`serve` never starts lifecycle hooks or opens a listener if validation or
+router construction fails. If startup succeeded, a later bind or serving error
+still triggers shutdown; operational and shutdown failures retain both error
+contexts.
+
+## Typed registration and ownership
+
+Route traits describe actual Rust method signatures. A generated registrar
+uses fully qualified trait calls, so two traits may use the same handler name
+without ambiguous dispatch. Handler names remain immutable inspection metadata;
+they never select executable code. The registrar resolves the managed
+controller while building the router and generated closures capture its
+application-scoped handle. There is no manual `State<AppState>` requirement,
+no string dispatch, and no per-request provider lookup.
+
+## Validation and routing policy
+
+The catalog validates all controllers before any `Router::route` call. It
+rejects malformed or inconsistent metadata, duplicate controller identities,
+empty contracts, conflicts, invalid source locations, missing registrars, and
+invalid route grammar with `MADS030`. This is a fail-closed boundary for macro
+output and manually constructed descriptors alike.
+
+MADS preserves `/:id` route syntax in metadata, translating only validated
+full paths to Axum 0.8 syntax. Axum path checks remain active. HTTP behavior is
+explicit:
+
+- GET handles HEAD, with Axum suppressing the response body.
+- OPTIONS is not synthesized; unsupported methods return Axum's 405 and
+  `Allow` header, including HEAD for GET routes.
+- Static routes take precedence over parameter routes.
+- `/users` and `/users/` remain distinct. Non-root trailing-slash declarations
+  are invalid, and v0.3 does not redirect or normalize.
+- Missing paths use Axum's 404 response.
+
+## Application-facing HTTP API
+
+The prelude exports `Path`, `Query`, `Json`, typed `Header`, `Request`,
+`HttpError`, `HttpResult`, `Created`, `NoContent`, `build_router`, and `serve`.
+Extractor semantics and rejections remain Axum/axum-extra semantics. Native
+extractors, `Router`, `IntoResponse`, middleware, and Tower composition remain
+available through the explicit `mads::common::axum` escape hatch.
+
+`HttpResult<T>` is a handler-delivery result whose error is `HttpError`.
+`mads::core::Result` remains the explicit result type for framework/bootstrap
+operations. `Created<T>` produces 201, `NoContent` produces empty 204, and
+`HttpError` produces stable JSON errors for 400, 404, 409, and 500.
+
+## Testing
+
+Use `build_router` with `tower::ServiceExt::oneshot` for in-process requests.
+This exercises generated adapters and routing policy without binding a socket.
+The runtime test suite covers CRUD verbs, all exported extractors, native Axum
+extractors, response wrappers, typed same-name trait calls, static precedence,
+HEAD/OPTIONS/405/Allow, strict trailing slashes, 404, conditional routes, and
+server validation before lifecycle or bind.
+
+## Deliberately deferred
+
+v0.3 does not add persistence, Diesel, database configuration, automatic input
+validation, application/domain error normalization, custom error registries,
+MADS middleware abstractions, generated OPTIONS handlers, trailing-slash
+redirects, request scopes, or auto-binding configuration. These are not part
+of the current runtime contract.

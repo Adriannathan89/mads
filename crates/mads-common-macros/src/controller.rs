@@ -123,6 +123,7 @@ fn expand_controller_with_common(
         fields,
         ..
     } = item;
+    let cfg_attrs: Vec<_> = attrs.iter().filter(is_cfg).collect();
     let inner_ident = format_ident!("__mads_controller_inner_{generated_suffix}");
     let constructor_ident = format_ident!("__mads_construct_controller_{generated_suffix}");
     let registrar_ident = format_ident!("__mads_register_controller_{generated_suffix}");
@@ -198,18 +199,21 @@ fn expand_controller_with_common(
     });
 
     Ok(quote! {
+        #(#cfg_attrs)*
         #[doc(hidden)]
         #vis struct #inner_ident #inner_fields
 
         #(#attrs)*
         #vis struct #ident(::std::sync::Arc<#inner_ident>);
 
+        #(#cfg_attrs)*
         impl ::core::clone::Clone for #ident {
             fn clone(&self) -> Self {
                 Self(::std::sync::Arc::clone(&self.0))
             }
         }
 
+        #(#cfg_attrs)*
         impl ::core::ops::Deref for #ident {
             type Target = #inner_ident;
 
@@ -218,10 +222,12 @@ fn expand_controller_with_common(
             }
         }
 
+        #(#cfg_attrs)*
         const _: () = {
             #(#route_assertions)*
         };
 
+        #(#cfg_attrs)*
         #[doc(hidden)]
         #[allow(non_snake_case)]
         fn #constructor_ident<'a>(
@@ -234,6 +240,7 @@ fn expand_controller_with_common(
             })
         }
 
+        #(#cfg_attrs)*
         #[doc(hidden)]
         #[allow(non_snake_case)]
         fn #registrar_ident(
@@ -250,6 +257,7 @@ fn expand_controller_with_common(
             Ok(__mads_router)
         }
 
+        #(#cfg_attrs)*
         #core::__private::inventory::submit! {
             #core::ProviderDescriptor::new(
                 #core::ProviderKind::Service,
@@ -262,6 +270,7 @@ fn expand_controller_with_common(
             )
         }
 
+        #(#cfg_attrs)*
         #core::__private::inventory::submit! {
             #common::ControllerRouteDescriptor::with_registrar(
                 concat!(module_path!(), "::", stringify!(#ident)),
@@ -298,8 +307,13 @@ fn is_doc(attribute: &&Attribute) -> bool {
     attribute.path().is_ident("doc")
 }
 
+fn is_cfg(attribute: &&Attribute) -> bool {
+    attribute.path().is_ident("cfg") || attribute.path().is_ident("cfg_attr")
+}
+
 fn is_supported_attribute(attribute: &&Attribute) -> bool {
     is_doc(attribute)
+        || is_cfg(attribute)
         || attribute.path().is_ident("allow")
         || attribute.path().is_ident("warn")
         || attribute.path().is_ident("deny")

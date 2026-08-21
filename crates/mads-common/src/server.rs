@@ -1,9 +1,11 @@
 //! Validated HTTP server startup and lifecycle coordination.
+//!
+//! [`serve`] validates route metadata and builds the complete router before it
+//! starts application lifecycle hooks or asks Tokio to bind a listener.
 
 use std::error::Error as StdError;
 use std::fmt;
 use std::future::Future;
-use std::net::SocketAddr;
 
 use mads_core::Mads;
 use tokio::net::TcpListener;
@@ -64,18 +66,21 @@ impl StdError for HttpRuntimeError {
 /// Route validation completes before lifecycle hooks start or the listener is
 /// bound. Once lifecycle startup succeeds, every exit path attempts shutdown.
 #[allow(clippy::result_large_err)]
-pub async fn serve(application: Mads, address: SocketAddr) -> Result<(), HttpRuntimeError> {
+pub async fn serve(
+    application: Mads,
+    address: impl tokio::net::ToSocketAddrs,
+) -> Result<(), HttpRuntimeError> {
     serve_with(application, address, TcpListener::bind, shutdown_signal()).await
 }
 
-async fn serve_with<B, BindFuture, Shutdown>(
+async fn serve_with<Address, B, BindFuture, Shutdown>(
     mut application: Mads,
-    address: SocketAddr,
+    address: Address,
     binder: B,
     shutdown: Shutdown,
 ) -> Result<(), HttpRuntimeError>
 where
-    B: FnOnce(SocketAddr) -> BindFuture,
+    B: FnOnce(Address) -> BindFuture,
     BindFuture: Future<Output = std::io::Result<TcpListener>>,
     Shutdown: Future<Output = ()> + Send + 'static,
 {
