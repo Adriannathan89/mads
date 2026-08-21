@@ -25,6 +25,8 @@ Target utama v1:
   ↓
 0.5.0  Auto Configuration
   ↓
+0.5.5  HTTP Browser + Authentication Features
+  ↓
 0.6.0  Modules + Visibility
   ↓
 0.7.0  Validation + Errors
@@ -382,6 +384,114 @@ FAILED
 - custom Database provider dapat override default;
 - auto-config activation deterministic;
 - reason dapat dipakai oleh `mads doctor` di milestone berikutnya.
+
+---
+
+# v0.5.5 — HTTP Browser and Authentication Features
+
+## Objective
+
+Melengkapi HTTP runtime untuk browser application dengan CORS, cookie parsing,
+dan JWT authentication yang dapat diaktifkan melalui feature flags tanpa
+membuat `mads-core` bergantung pada HTTP atau cryptography.
+
+### First-Class Browser CORS
+
+Add an opt-in CORS configuration to the HTTP runtime. The default development
+profile must support the common local frontend origin:
+
+```text
+http://localhost:5173
+```
+
+Target API shape:
+
+```rust
+let cors = CorsConfig::new()
+    .allow_origin("http://localhost:5173")
+    .allow_methods([GET, POST, PUT, PATCH, DELETE])
+    .allow_headers([CONTENT_TYPE, AUTHORIZATION])
+    .allow_credentials(true);
+
+Mads::builder()
+    .cors(cors)
+    .build()
+    .await?;
+```
+
+The implementation must cover configured origins, methods, request headers,
+exposed response headers, credentialed requests, OPTIONS preflight responses,
+`Access-Control-Max-Age`, and production-safe validation. Wildcard origins
+must never be combined with credentials. CORS must apply to generated MADS
+routes and native Axum routes while remaining composable with Axum/Tower
+layers.
+
+### Cookie Parser and Response Support
+
+Provide an HTTP-facing cookie API for reading and writing browser cookies:
+
+```rust
+async fn profile(cookies: CookieJar) -> HttpResult<Json<Profile>> {
+    let session = cookies.get("session");
+    // resolve the session and return the profile
+    # let _ = session;
+    # todo!()
+}
+```
+
+The cookie surface must support parsing request `Cookie` headers, emitting
+`Set-Cookie` headers, and configuring `Path`, `Domain`, `Max-Age`, `Expires`,
+`HttpOnly`, `Secure`, and `SameSite`. Cookie values must be validated and
+secrets must not appear in diagnostics or logs. The API should compose with
+Axum responses and support credentialed browser requests when CORS allows them.
+
+### JWT Service and Algorithm Features
+
+Add an application-scoped `JwtService` with explicit encode/decode and claims
+validation APIs. Algorithm selection must be an allowlist configured by the
+application, never inferred from an untrusted token header.
+
+Initial algorithm targets:
+
+```text
+HS256 / HS384 / HS512  (shared-secret deployments)
+RS256 / RS384 / RS512  (RSA key deployments)
+ES256 / ES384           (elliptic-curve key deployments)
+```
+
+The service must support expiration, not-before, issuer, audience, subject,
+clock-skew policy, key rotation, and actionable validation errors. It must
+reject algorithm confusion, invalid signatures, expired tokens, and malformed
+claims without exposing key material.
+
+### HTTP Feature Support
+
+Expose independent feature flags so applications can opt into only the HTTP
+capabilities they use:
+
+```text
+http / common runtime
+cors
+cookies
+jwt
+```
+
+Feature combinations must preserve the core-only dependency boundary. CORS,
+cookie, and JWT integrations belong in `mads-common`/`mads-extra` or dedicated
+integration crates; `mads-core` remains free of Axum, HTTP, cookie, and JWT
+dependencies.
+
+### Exit Criteria
+
+- browser clients can call the API from `http://localhost:5173` with tested
+  preflight and credentialed requests;
+- cookie parsing and `Set-Cookie` response behavior are covered by integration
+  tests;
+- `JwtService` validates explicitly allowed algorithms and standard claims;
+- key rotation and invalid-token diagnostics are tested without leaking secrets;
+- HTTP, CORS, cookie, and JWT features compile independently and in supported
+  combinations;
+- native Axum middleware and response composition remain available.
 
 ---
 
