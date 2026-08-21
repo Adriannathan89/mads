@@ -140,6 +140,25 @@ Provider declaration visibility is recorded as descriptive metadata: `pub`
 providers are public and inherited or restricted visibility is private. MADS.rs
 does not enforce visibility until module semantics are introduced.
 
+### Dependency ownership
+
+Fields on services, repositories, and controllers are resolved as concrete
+values and cloned into the managed provider. Consequently, every concrete field
+dependency must implement `Clone`. Prefer managed service, repository, or
+controller handles for shared application-scoped resources: these handles own
+their inner value through `Arc`, so cloning a handle only increments the shared
+allocation's reference count.
+
+Version 0.2 does not provide an `Inject<T>` wrapper, automatic trait injection,
+trait bindings, or qualified bindings. Applications that need an external or
+non-managed concrete dependency can insert a cloneable value explicitly with
+`MadsBuilder::provide`.
+
+Catalog allocation and indexing optimizations remain deferred until bootstrap
+benchmarks show a relevant cost. The current deterministic catalog behavior is
+preferred over adding a `TypeId` index or borrowed catalog iterator without
+measurement.
+
 The graph and construction diagnostics are stable:
 
 - `MADS001`: exact duplicate provider descriptor.
