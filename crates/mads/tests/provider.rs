@@ -97,7 +97,10 @@ async fn explicit_order_stores_direct_and_fallible_provider_outputs() {
         .construct::<CombinedValue>()
         .await
         .expect("the fallible provider should construct after its dependency");
-    let application = builder.build();
+    let application = builder
+        .build()
+        .await
+        .expect("the application graph should build");
 
     let configured = application
         .context()

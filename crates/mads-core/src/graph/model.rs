@@ -180,6 +180,14 @@ pub struct ConstructionStep {
 }
 
 impl ConstructionStep {
+    pub(crate) const fn type_id(&self) -> TypeId {
+        self.type_id
+    }
+
+    pub(crate) const fn descriptor(&self) -> &'static ProviderDescriptor {
+        self.descriptor
+    }
+
     /// Returns the stable output type name of the provider to construct.
     pub const fn type_name(&self) -> &str {
         self.type_name
@@ -234,6 +242,20 @@ impl GraphAnalysis {
     /// Reports whether analysis produced a construction plan without diagnostics.
     pub fn is_valid(&self) -> bool {
         self.diagnostics.is_empty() && self.construction_plan.is_some()
+    }
+
+    pub(crate) fn into_valid_parts(self) -> crate::Result<(ApplicationGraph, ConstructionPlan)> {
+        match (self.diagnostics.is_empty(), self.construction_plan) {
+            (true, Some(plan)) => Ok((self.graph, plan)),
+            (false, _) => {
+                let mut diagnostics = self.diagnostics.into_iter();
+                let primary = diagnostics
+                    .next()
+                    .expect("invalid analysis has diagnostics");
+                Err(crate::Error::from_diagnostics(primary, diagnostics))
+            }
+            (true, None) => unreachable!("valid analysis always has a plan"),
+        }
     }
 }
 

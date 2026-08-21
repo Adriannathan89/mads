@@ -1,8 +1,9 @@
 //! Explicit application construction and lifecycle ownership.
 
 use crate::{
-    ApplicationContext, Catalog, Config, ConstructionContext, GraphAnalysis, LifecycleHook,
-    LifecycleManager, LifecycleState, ProviderRegistry, Result,
+    ApplicationContext, ApplicationGraph, Catalog, Config, ConstructionContext, ConstructionPlan,
+    ConstructionStep, Diagnostic, Error, GraphAnalysis, LifecycleHook, LifecycleManager,
+    LifecycleState, MADS006, ProviderRegistry, Result,
     graph::{SatisfiedProvider, analyze_catalog},
 };
 
@@ -74,12 +75,28 @@ impl MadsBuilder {
         self
     }
 
-    /// Finishes construction and returns the application in the created state.
-    pub fn build(self) -> Mads {
-        Mads {
+    /// Validates and automatically constructs the complete application graph.
+    #[allow(clippy::result_large_err)]
+    pub async fn build(mut self) -> Result<Mads> {
+        let (graph, construction_plan) = self.analyze().into_valid_parts()?;
+
+        for step in construction_plan.steps() {
+            let value = {
+                let context = ConstructionContext::new(&self.registry, &self.config);
+                (step.descriptor().constructor())(&context)
+                    .await
+                    .map_err(|source| provider_construction_error(step, source))?
+            };
+            self.registry
+                .insert_erased(step.type_id(), step.type_name, value)?;
+        }
+
+        Ok(Mads {
             context: ApplicationContext::new(self.registry, self.config),
             lifecycle: self.lifecycle,
-        }
+            graph,
+            construction_plan,
+        })
     }
 }
 
@@ -87,6 +104,8 @@ impl MadsBuilder {
 pub struct Mads {
     context: ApplicationContext,
     lifecycle: LifecycleManager,
+    graph: ApplicationGraph,
+    construction_plan: ConstructionPlan,
 }
 
 impl Mads {
@@ -110,6 +129,16 @@ impl Mads {
         &self.context
     }
 
+    /// Returns the immutable graph validated before construction.
+    pub const fn graph(&self) -> &ApplicationGraph {
+        &self.graph
+    }
+
+    /// Returns the deterministic provider construction plan that was executed.
+    pub const fn construction_plan(&self) -> &ConstructionPlan {
+        &self.construction_plan
+    }
+
     /// Starts registered lifecycle hooks.
     #[allow(clippy::result_large_err)]
     pub async fn start(&mut self) -> Result<()> {
@@ -121,4 +150,17 @@ impl Mads {
     pub async fn shutdown(&mut self) -> Result<()> {
         self.lifecycle.shutdown(&self.context).await
     }
+}
+
+fn provider_construction_error(step: &ConstructionStep, source: Error) -> Error {
+    Error::with_source(
+        Diagnostic::new(
+            MADS006,
+            "provider construction failed",
+            "a provider constructor returned an error",
+        )
+        .with_subject(step.type_name())
+        .with_location(step.location()),
+        source,
+    )
 }

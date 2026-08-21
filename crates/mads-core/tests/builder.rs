@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use mads_core::{
     ApplicationContext, Catalog, ConstructionContext, ConstructionStep, DependencyDescriptor,
     ErasedProvider, LifecycleFuture, LifecycleHook, LifecycleState, MADS003, Mads,
-    ProviderDescriptor, ProviderFuture, ProviderKind, ProviderState, ProviderVisibility,
-    SourceLocation,
+    ProviderDescriptor, ProviderFuture, ProviderKind, ProviderOrigin, ProviderState,
+    ProviderVisibility, SourceLocation,
 };
 
 struct Database;
@@ -96,7 +96,10 @@ async fn explicitly_constructs_a_provider_after_its_dependency_is_provided() {
         .construct::<Repository>()
         .await
         .expect("explicit construction should work");
-    let app = builder.build();
+    let app = builder
+        .build()
+        .await
+        .expect("the application graph should build");
 
     let repository = app
         .context()
@@ -168,6 +171,41 @@ async fn explicit_and_preconstructed_values_have_distinct_states() {
     assert!(analysis.construction_plan().unwrap().steps().is_empty());
 }
 
+#[tokio::test]
+async fn build_constructs_the_complete_graph_in_dependency_order() {
+    reset_database_constructions();
+    let application = Mads::builder().build().await.unwrap();
+
+    assert_eq!(database_constructions(), 1);
+    assert!(application.context().resolve::<Database>().is_ok());
+    assert!(application.context().resolve::<Repository>().is_ok());
+    assert_eq!(
+        application
+            .construction_plan()
+            .steps()
+            .iter()
+            .map(ConstructionStep::type_name)
+            .collect::<Vec<_>>(),
+        ["builder::Database", "builder::Repository"],
+    );
+}
+
+#[tokio::test]
+async fn supplied_values_suppress_matching_constructors() {
+    reset_database_constructions();
+    let mut builder = Mads::builder();
+    builder.provide(Database::new()).unwrap();
+
+    let application = builder.build().await.unwrap();
+
+    assert_eq!(database_constructions(), 0);
+    assert_eq!(
+        application.graph().provider::<Database>().unwrap().origin(),
+        ProviderOrigin::Provided
+    );
+    assert!(application.context().resolve::<Repository>().is_ok());
+}
+
 struct ApplicationHook(Arc<Mutex<Vec<&'static str>>>);
 
 impl LifecycleHook for ApplicationHook {
@@ -198,11 +236,22 @@ impl LifecycleHook for ApplicationHook {
 
 #[tokio::test]
 async fn built_application_owns_and_runs_registered_lifecycle_hooks() {
+    reset_database_constructions();
     let events = Arc::new(Mutex::new(Vec::new()));
     let mut builder = Mads::builder();
     builder.lifecycle_hook(ApplicationHook(Arc::clone(&events)));
-    let mut application = builder.build();
+    let mut application = builder
+        .build()
+        .await
+        .expect("the application graph should build");
 
+    assert_eq!(database_constructions(), 1);
+    assert!(
+        events
+            .lock()
+            .expect("event lock should not be poisoned")
+            .is_empty()
+    );
     assert_eq!(application.state(), LifecycleState::Created);
     application.start().await.expect("application should start");
     assert_eq!(application.state(), LifecycleState::Running);
