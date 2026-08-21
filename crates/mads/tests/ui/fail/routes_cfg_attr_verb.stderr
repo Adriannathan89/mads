@@ -1,0 +1,5 @@
+error: route verb attributes inside `cfg_attr` are unsupported; use a direct route verb and gate the method with `#[cfg(...)]`
+ --> tests/ui/fail/routes_cfg_attr_verb.rs:5:5
+  |
+5 |     #[cfg_attr(feature = "conditional-route", mads::get("/conditional"))]
+  |     ^

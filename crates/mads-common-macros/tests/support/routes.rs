@@ -65,10 +65,10 @@ fn copies_conditional_attributes_to_method_metadata_and_registration() {
         quote!(),
         quote! {
             trait ConditionalRoutes {
-                #[cfg(any())]
-                #[cfg_attr(all(), cfg(any()))]
+                #[cfg(feature = "conditional-route")]
+                #[cfg_attr(docsrs, doc(cfg(feature = "conditional-route")))]
                 #[get("/conditional")]
-                async fn conditional(&self);
+                async fn conditional(&self) -> &'static str;
             }
         },
         &syn::parse_quote!(mads_common),
@@ -77,16 +77,40 @@ fn copies_conditional_attributes_to_method_metadata_and_registration() {
     let expanded = normalized(expanded);
 
     assert_eq!(
-        expanded.matches(&normalized(quote!(#[cfg(any())]))).count(),
+        expanded
+            .matches(&normalized(quote!(#[cfg(feature = "conditional-route")])))
+            .count(),
         3,
         "cfg must gate the trait method, descriptor, and registration block",
     );
     assert_eq!(
         expanded
-            .matches(&normalized(quote!(#[cfg_attr(all(), cfg(any()))])))
+            .matches(&normalized(
+                quote!(#[cfg_attr(docsrs, doc(cfg(feature = "conditional-route")))])
+            ))
             .count(),
         3,
         "cfg_attr must gate the trait method, descriptor, and registration block",
+    );
+}
+
+#[test]
+fn rejects_route_verbs_nested_in_cfg_attr() {
+    let error = expand_with_common(
+        quote!(),
+        quote! {
+            trait ConditionalRoutes {
+                #[cfg_attr(feature = "conditional-route", get("/conditional"))]
+                async fn conditional(&self) -> &'static str;
+            }
+        },
+        &syn::parse_quote!(mads_common),
+    )
+    .expect_err("route verbs nested in cfg_attr must be rejected");
+
+    assert_eq!(
+        error.to_string(),
+        "route verb attributes inside `cfg_attr` are unsupported; use a direct route verb and gate the method with `#[cfg(...)]`",
     );
 }
 

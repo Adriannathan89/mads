@@ -227,9 +227,19 @@ fn validate_method(
     }
 
     let mut route_attributes = Vec::new();
+    let mut conditional_attributes = Vec::new();
     for (index, attribute) in method.attrs.iter().enumerate() {
+        if attribute.path().is_ident("cfg_attr") && cfg_attr_contains_route_verb(attribute)? {
+            return Err(Error::new(
+                attribute.span(),
+                "route verb attributes inside `cfg_attr` are unsupported; use a direct route verb and gate the method with `#[cfg(...)]`",
+            ));
+        }
         if let Some(verb) = route_verb(attribute) {
             route_attributes.push((index, verb));
+        }
+        if is_conditional_attribute(attribute) {
+            conditional_attributes.push(attribute.clone());
         }
     }
     if route_attributes.len() != 1 {
@@ -254,12 +264,6 @@ fn validate_method(
         ));
     }
 
-    let conditional_attributes = method
-        .attrs
-        .iter()
-        .filter(|attribute| is_conditional_attribute(attribute))
-        .cloned()
-        .collect();
     method.attrs.remove(*attribute_index);
     let argument_types = method
         .sig
@@ -387,8 +391,20 @@ fn make_future_send(method: &mut TraitItemFn) {
 }
 
 fn route_verb(attribute: &Attribute) -> Option<&'static str> {
-    let ident = attribute.path().segments.last()?.ident.to_string();
+    route_verb_path(attribute.path())
+}
+
+fn route_verb_path(path: &syn::Path) -> Option<&'static str> {
+    let ident = path.segments.last()?.ident.to_string();
     VERBS.iter().copied().find(|verb| ident == *verb)
+}
+
+fn cfg_attr_contains_route_verb(attribute: &Attribute) -> syn::Result<bool> {
+    let nested = attribute.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+    Ok(nested
+        .iter()
+        .skip(1)
+        .any(|meta| route_verb_path(meta.path()).is_some()))
 }
 
 fn parse_route_path(attribute: &Attribute) -> syn::Result<LitStr> {
