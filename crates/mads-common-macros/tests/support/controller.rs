@@ -3,6 +3,57 @@
         use super::*;
         use quote::ToTokens;
 
+        fn normalized(tokens: impl ToTokens) -> String {
+            tokens
+                .to_token_stream()
+                .to_string()
+                .split_whitespace()
+                .collect()
+        }
+
+        #[test]
+        fn expands_a_concrete_controller_registrar_and_stores_its_pointer() {
+            let arguments: ControllerArguments =
+                syn::parse_str("routes = [UserRoutes, AdminRoutes]")
+                    .expect("controller arguments should parse");
+            let item: ItemStruct = syn::parse_str("pub struct Controller;")
+                .expect("controller should parse");
+            let expanded = expand_controller_with_common(
+                arguments,
+                item,
+                &syn::parse_quote!(mads_common),
+            )
+            .expect("controller should expand");
+            let expanded = normalized(expanded);
+
+            assert_eq!(
+                expanded
+                    .match_indices(&normalized(quote!(
+                        __mads_context.resolve::<Controller>()?
+                    )))
+                    .count(),
+                1,
+                "the registrar must resolve Controller exactly once",
+            );
+            assert!(expanded.contains(&normalized(quote! {
+                <Controller as UserRoutes>::__mads_register(
+                    __mads_router,
+                    __mads_controller.clone(),
+                    __mads_routes,
+                )?
+            })));
+            assert!(expanded.contains(&normalized(quote! {
+                <Controller as AdminRoutes>::__mads_register(
+                    __mads_router,
+                    __mads_controller.clone(),
+                    __mads_routes,
+                )?
+            })));
+            assert!(expanded.contains(&normalized(quote!(__mads_routes.finish()?))));
+            assert!(expanded.contains("ControllerRouteDescriptor::with_registrar"));
+            assert!(expanded.contains("__mads_register_controller_"));
+        }
+
         #[test]
         fn parses_controller_route_arguments_and_rejects_duplicates() {
             let arguments: ControllerArguments =
@@ -81,14 +132,21 @@
                 ),
                 quote!(
                     struct Controller {
-                        #[allow(dead_code)]
+                        #[derive(Clone)]
                         value: i32,
                     }
                 ),
             ];
             for item in cases {
-                let error =
-                    expand(arguments.clone(), item).expect_err("controller shape must fail");
+                let arguments = syn::parse2(arguments.clone())
+                    .expect("controller arguments should parse");
+                let item = syn::parse2(item).expect("controller should parse");
+                let error = expand_controller_with_common(
+                    arguments,
+                    item,
+                    &syn::parse_quote!(mads_common),
+                )
+                .expect_err("controller shape must fail");
                 assert!(
                     error.to_string().contains("controller")
                         || error.to_string().contains("attributes")

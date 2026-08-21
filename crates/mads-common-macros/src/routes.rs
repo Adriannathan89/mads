@@ -4,12 +4,12 @@
 //! attributes. Validation happens before metadata is emitted so malformed
 //! paths cannot reach a runtime adapter. The generated trait retains the
 //! developer's method documentation and gains hidden contract/metadata
-//! constants used by `#[controller]`.
+//! constants plus a typed Axum registrar used by `#[controller]`.
 
 use std::collections::BTreeSet;
 
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{
@@ -48,11 +48,19 @@ impl Parse for RoutesArguments {
 
 /// Expands a route trait after validating its endpoint contract.
 pub(crate) fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
+    let common = crate::path::common_path()?;
+    expand_with_common(arguments, item, &common)
+}
+
+fn expand_with_common(
+    arguments: TokenStream,
+    item: TokenStream,
+    common: &syn::Path,
+) -> syn::Result<TokenStream> {
     let arguments = syn::parse2::<RoutesArguments>(arguments)?;
     if let Some(prefix) = &arguments.prefix {
         validate_path(prefix, "route prefix", true)?;
     }
-    let common = crate::path::common_path()?;
     let prefix = arguments
         .prefix
         .unwrap_or_else(|| LitStr::new("", proc_macro2::Span::call_site()));
@@ -98,8 +106,8 @@ pub(crate) fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<T
     };
     item.items.insert(0, marker);
 
-    let descriptors = descriptors.iter().map(|descriptor| {
-        let method = descriptor.method.tokens(&common);
+    let descriptor_tokens = descriptors.iter().map(|descriptor| {
+        let method = descriptor.method.tokens(common);
         let path = &descriptor.path;
         let full_path = &descriptor.full_path;
         let handler = &descriptor.handler;
@@ -117,10 +125,33 @@ pub(crate) fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<T
     let metadata: TraitItem = parse_quote! {
         #[doc(hidden)]
         const __MADS_ROUTE_METADATA: &'static [#common::RouteDescriptor] = &[
-            #(#descriptors,)*
+            #(#descriptor_tokens,)*
         ];
     };
     item.items.insert(1, metadata);
+
+    let trait_ident = &item.ident;
+    let registrations = descriptors
+        .iter()
+        .map(|descriptor| descriptor.registration_tokens(common, trait_ident));
+    let registrar: TraitItem = parse_quote! {
+        #[doc(hidden)]
+        fn __mads_register(
+            mut __mads_router: #common::__private::Router,
+            __mads_controller: Self,
+            __mads_routes: &mut #common::__private::ValidatedRouteIter<'_>,
+        ) -> #common::core::Result<#common::__private::Router>
+        where
+            Self: ::core::clone::Clone
+                + ::core::marker::Send
+                + ::core::marker::Sync
+                + 'static,
+        {
+            #(#registrations)*
+            Ok(__mads_router)
+        }
+    };
+    item.items.insert(2, registrar);
 
     Ok(quote!(#item))
 }
@@ -222,12 +253,24 @@ fn validate_method(
     }
 
     method.attrs.remove(*attribute_index);
+    let argument_types = method
+        .sig
+        .inputs
+        .iter()
+        .skip(1)
+        .map(|argument| match argument {
+            FnArg::Typed(argument) => (*argument.ty).clone(),
+            FnArg::Receiver(_) => unreachable!("only the first route argument can be a receiver"),
+        })
+        .collect();
     make_future_send(method);
     Ok(RouteMetadata {
         method: HttpVerb::from_name(verb),
         path,
         full_path,
         handler: LitStr::new(&method.sig.ident.to_string(), method.sig.ident.span()),
+        handler_ident: method.sig.ident.clone(),
+        argument_types,
     })
 }
 
@@ -236,6 +279,40 @@ struct RouteMetadata {
     path: LitStr,
     full_path: LitStr,
     handler: LitStr,
+    handler_ident: syn::Ident,
+    argument_types: Vec<Type>,
+}
+
+impl RouteMetadata {
+    fn registration_tokens(&self, common: &syn::Path, trait_ident: &syn::Ident) -> TokenStream {
+        let method = self.method.tokens(common);
+        let routing = self.method.routing_tokens(common);
+        let handler = &self.handler;
+        let handler_ident = &self.handler_ident;
+        let argument_types = &self.argument_types;
+        let arguments = argument_types
+            .iter()
+            .enumerate()
+            .map(|(index, _)| format_ident!("__mads_argument_{index}"))
+            .collect::<Vec<_>>();
+
+        quote! {
+            let __mads_path = __mads_routes.next(#method, #handler)?;
+            let __mads_handler_controller = __mads_controller.clone();
+            __mads_router = __mads_router.route(
+                __mads_path,
+                #routing(move |#(#arguments: #argument_types),*| {
+                    let __mads_controller = __mads_handler_controller.clone();
+                    async move {
+                        <Self as #trait_ident>::#handler_ident(
+                            &__mads_controller,
+                            #(#arguments,)*
+                        ).await
+                    }
+                }),
+            );
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -266,6 +343,16 @@ impl HttpVerb {
             Self::Put => quote!(#common::HttpMethod::Put),
             Self::Patch => quote!(#common::HttpMethod::Patch),
             Self::Delete => quote!(#common::HttpMethod::Delete),
+        }
+    }
+
+    fn routing_tokens(self, common: &syn::Path) -> proc_macro2::TokenStream {
+        match self {
+            Self::Get => quote!(#common::__private::get),
+            Self::Post => quote!(#common::__private::post),
+            Self::Put => quote!(#common::__private::put),
+            Self::Patch => quote!(#common::__private::patch),
+            Self::Delete => quote!(#common::__private::delete),
         }
     }
 }

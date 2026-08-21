@@ -57,5 +57,8 @@ pub use route::{
 /// Implementation details used by generated HTTP route adapters.
 #[doc(hidden)]
 pub mod __private {
+    pub use axum::Router;
+    pub use axum::routing::{delete, get, patch, post, put};
+
     pub use crate::route::{ValidatedRouteIter, validate_descriptors};
 }

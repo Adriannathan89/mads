@@ -4,12 +4,10 @@
 //! `common` feature is enabled, by the `mads` facade. They validate the shape
 //! of route traits and controllers during compilation, then emit the static
 //! metadata consumed by `mads_common::RouteCatalog` and the MADS dependency
-//! graph.
-//!
-//! Route attributes are deliberately contract-only in v0.2: they do not start
-//! an HTTP server or select a runtime adapter. Runtime routing remains a later
-//! integration concern, while the generated metadata participates in graph
-//! validation and route-catalog inspection.
+//! graph. Route traits also receive hidden, typed Axum registrars, and each
+//! controller descriptor stores a concrete registrar function pointer.
+//! Runtime bootstrap remains responsible for validating the complete catalog
+//! before any generated registrar is invoked.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
@@ -29,7 +27,9 @@ mod verb;
 /// controller; otherwise compilation fails at the controller declaration.
 /// Named fields are treated as dependency edges and are resolved by the MADS
 /// construction context when the controller is built. The generated public
-/// handle is cheap to clone because its state is stored behind an `Arc`.
+/// handle is cheap to clone because its state is stored behind an `Arc`. A
+/// hidden registrar resolves that handle once and installs every declared
+/// route trait through typed dispatch.
 #[proc_macro_attribute]
 pub fn controller(arguments: TokenStream, item: TokenStream) -> TokenStream {
     controller::expand(arguments.into(), item.into())
@@ -47,7 +47,8 @@ pub fn controller(arguments: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// The macro rejects malformed or ambiguous paths, duplicate method/path
 /// pairs, generic traits, and default method implementations. It also emits
-/// static route descriptors for later catalog validation.
+/// static route descriptors for later catalog validation and a hidden typed
+/// registrar used after validation succeeds.
 #[proc_macro_attribute]
 pub fn routes(arguments: TokenStream, item: TokenStream) -> TokenStream {
     routes::expand(arguments.into(), item.into())

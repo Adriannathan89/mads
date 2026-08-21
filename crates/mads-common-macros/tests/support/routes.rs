@@ -15,6 +15,52 @@
             LitStr::new(value, proc_macro2::Span::call_site())
         }
 
+        fn normalized(tokens: impl ToTokens) -> String {
+            tokens
+                .to_token_stream()
+                .to_string()
+                .split_whitespace()
+                .collect()
+        }
+
+        #[test]
+        fn expands_a_typed_route_registrar_with_fresh_arguments_and_ufcs_dispatch() {
+            let expanded = expand_with_common(
+                quote!(prefix = "/users"),
+                quote! {
+                    pub trait UserRoutes {
+                        #[get("/:id")]
+                        async fn get_user(
+                            &self,
+                            user_id: Path<i64>,
+                            query: Query<UserQuery>,
+                        ) -> String;
+                    }
+                },
+                &syn::parse_quote!(mads_common),
+            )
+            .expect("route trait should expand");
+            let expanded = normalized(expanded);
+
+            assert!(expanded.contains("fn__mads_register"));
+            assert!(expanded.contains(&normalized(quote! {
+                __mads_router: mads_common::__private::Router
+            })));
+            assert!(expanded.contains(&normalized(quote!(
+                mads_common::__private::get
+            ))));
+            assert!(expanded.contains(
+                "move|__mads_argument_0:Path<i64>,__mads_argument_1:Query<UserQuery>|{"
+            ));
+            assert!(expanded.contains(&normalized(quote! {
+                <Self as UserRoutes>::get_user(
+                    &__mads_controller,
+                    __mads_argument_0,
+                    __mads_argument_1,
+                ).await
+            })));
+        }
+
         #[test]
         fn parses_route_arguments() {
             assert!(matches!(
@@ -80,6 +126,13 @@
                             _ => "Delete",
                         }
                     )
+                );
+                assert_eq!(
+                    metadata
+                        .method
+                        .routing_tokens(&syn::parse_quote!(common))
+                        .to_string(),
+                    format!("common :: __private :: {verb}")
                 );
             }
         }

@@ -2,8 +2,8 @@
 //!
 //! The expansion keeps the user's documented struct and field visibility while
 //! moving the actual fields into a private `Arc`-backed representation. It also
-//! registers dependency and route metadata without requiring a runtime-specific
-//! router.
+//! registers dependency and route metadata together with a typed Axum registrar
+//! that runtime bootstrap invokes only after validation.
 
 use std::collections::BTreeSet;
 
@@ -57,14 +57,19 @@ impl Parse for ControllerArguments {
     }
 }
 
-/// Expands a controller into a managed handle and route-contract assertions.
+/// Expands a controller into a managed handle and typed route registrar.
 pub(crate) fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let arguments = syn::parse2::<ControllerArguments>(arguments)?;
     let item: ItemStruct = syn::parse2(item)?;
-    expand_controller(arguments, item)
+    let common = common_path()?;
+    expand_controller_with_common(arguments, item, &common)
 }
 
-fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::Result<TokenStream> {
+fn expand_controller_with_common(
+    arguments: ControllerArguments,
+    item: ItemStruct,
+    common: &Path,
+) -> syn::Result<TokenStream> {
     if !item.generics.params.is_empty() || item.generics.where_clause.is_some() {
         return Err(Error::new(
             item.generics.span(),
@@ -90,7 +95,7 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
     {
         return Err(Error::new(
             attribute.span(),
-            "`#[controller]` structs support documentation and lint attributes only in v0.2",
+            "`#[controller]` structs support documentation and lint attributes only",
         ));
     }
     if let Fields::Named(fields) = &item.fields {
@@ -102,13 +107,12 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
             {
                 return Err(Error::new(
                     attribute.span(),
-                    "`#[controller]` fields support documentation and lint attributes only in v0.2",
+                    "`#[controller]` fields support documentation and lint attributes only",
                 ));
             }
         }
     }
 
-    let common = common_path()?;
     let core = quote!(#common::core);
     let provider_visibility = provider_visibility(&item.vis, &core);
     let generated_suffix = generated_suffix(&item, &item.ident);
@@ -121,6 +125,7 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
     } = item;
     let inner_ident = format_ident!("__mads_controller_inner_{generated_suffix}");
     let constructor_ident = format_ident!("__mads_construct_controller_{generated_suffix}");
+    let registrar_ident = format_ident!("__mads_register_controller_{generated_suffix}");
     let is_unit = matches!(fields, Fields::Unit);
 
     let (inner_fields, resolve_fields, dependencies) = match fields {
@@ -182,6 +187,15 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
             )
         }
     });
+    let route_registrations = arguments.routes.iter().map(|route| {
+        quote! {
+            __mads_router = <#ident as #route>::__mads_register(
+                __mads_router,
+                __mads_controller.clone(),
+                __mads_routes,
+            )?;
+        }
+    });
 
     Ok(quote! {
         #[doc(hidden)]
@@ -221,6 +235,22 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
             })
         }
 
+        #[doc(hidden)]
+        #[allow(non_snake_case)]
+        fn #registrar_ident(
+            mut __mads_router: #common::__private::Router,
+            __mads_context: &#core::ApplicationContext,
+            __mads_routes: &mut #common::__private::ValidatedRouteIter<'_>,
+        ) -> #core::Result<#common::__private::Router> {
+            let __mads_controller = __mads_context
+                .resolve::<#ident>()?
+                .as_ref()
+                .clone();
+            #(#route_registrations)*
+            __mads_routes.finish()?;
+            Ok(__mads_router)
+        }
+
         #core::__private::inventory::submit! {
             #core::ProviderDescriptor::new(
                 #core::ProviderKind::Service,
@@ -234,10 +264,11 @@ fn expand_controller(arguments: ControllerArguments, item: ItemStruct) -> syn::R
         }
 
         #core::__private::inventory::submit! {
-            #common::ControllerRouteDescriptor::new(
+            #common::ControllerRouteDescriptor::with_registrar(
                 concat!(module_path!(), "::", stringify!(#ident)),
                 || ::core::any::TypeId::of::<#ident>(),
                 &[#(#route_contracts,)*],
+                #registrar_ident,
             )
         }
     })
