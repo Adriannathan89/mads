@@ -30,12 +30,20 @@ pub(crate) fn analyze_parts(
 
     let mut diagnostics = Vec::new();
     let mut unique_descriptors: Vec<&'static ProviderDescriptor> = Vec::new();
+    let mut duplicate_identities: Vec<&'static ProviderDescriptor> = Vec::new();
     for descriptor in descriptors {
-        if unique_descriptors
+        if let Some(existing) = unique_descriptors
             .iter()
-            .any(|unique| exact_identity(unique, descriptor))
+            .copied()
+            .find(|unique| exact_identity(unique, descriptor))
         {
-            diagnostics.push(PendingDiagnostic::duplicate(descriptor));
+            if !duplicate_identities
+                .iter()
+                .any(|duplicate| exact_identity(duplicate, existing))
+            {
+                diagnostics.push(PendingDiagnostic::duplicate(existing));
+                duplicate_identities.push(existing);
+            }
         } else {
             unique_descriptors.push(descriptor);
         }
@@ -60,6 +68,9 @@ pub(crate) fn analyze_parts(
 
     let mut providers = Vec::new();
     for satisfied_provider in &satisfied {
+        if ambiguous_types.contains(&satisfied_provider.type_id) {
+            continue;
+        }
         if providers
             .iter()
             .any(|provider: &ProviderNode| provider.type_id == satisfied_provider.type_id)
@@ -381,12 +392,28 @@ mod tests {
 
         assert_eq!(analysis.diagnostics().len(), 1);
         assert_eq!(analysis.diagnostics()[0].code(), MADS002);
+        assert!(analysis.graph().provider::<Database>().is_none());
         assert!(analysis.construction_plan().is_none());
     }
 
     #[test]
     fn repeated_exact_identity_is_duplicate_not_ambiguous() {
         let analysis = analyze_parts(&[&DATABASE_DESCRIPTOR, &DATABASE_DESCRIPTOR], &[]);
+
+        assert_eq!(analysis.diagnostics().len(), 1);
+        assert_eq!(analysis.diagnostics()[0].code(), MADS001);
+    }
+
+    #[test]
+    fn repeated_identity_group_emits_one_duplicate_diagnostic() {
+        let analysis = analyze_parts(
+            &[
+                &DATABASE_DESCRIPTOR,
+                &DATABASE_DESCRIPTOR,
+                &DATABASE_DESCRIPTOR,
+            ],
+            &[],
+        );
 
         assert_eq!(analysis.diagnostics().len(), 1);
         assert_eq!(analysis.diagnostics()[0].code(), MADS001);
