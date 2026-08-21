@@ -129,17 +129,18 @@ graph is valid. After a successful build, use `application.graph()` and
 `application.construction_plan()` to inspect the validated graph and the plan
 that ran.
 
-Every discovered provider is included, even when no other provider references
-it. Values inserted with `provide` override one matching static provider and
-are recorded as public application-wide values. `construct::<T>()` remains a
-manual escape hatch; manually constructed providers are not constructed again
-by `build()`.
+Every unambiguous provider is included, even when no other provider references
+it. Invalid duplicate or ambiguous declarations are represented by diagnostics
+rather than individual effective provider nodes. Values inserted with `provide`
+override one matching static provider and are recorded as public
+application-wide values. `construct::<T>()` remains a manual escape hatch;
+manually constructed providers are not constructed again by `build()`.
 
 Provider declaration visibility is recorded as descriptive metadata: `pub`
 providers are public and inherited or restricted visibility is private. MADS.rs
 does not enforce visibility until module semantics are introduced.
 
-The graph diagnostics are stable:
+The graph and construction diagnostics are stable:
 
 - `MADS001`: exact duplicate provider descriptor.
 - `MADS002`: ambiguous provider binding.
