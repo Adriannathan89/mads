@@ -2,10 +2,35 @@
 
 use std::sync::Arc;
 
-use mads::common::{HttpMethod, RouteCatalog};
+use mads::common::{HttpMethod, Json, Path, RouteCatalog};
 use mads::core::{
     Catalog as CoreCatalog, Mads as CoreMads, ProviderKind, ProviderOrigin, ProviderVisibility,
 };
+
+fn framework_result() -> mads::core::Result<()> {
+    Ok(())
+}
+
+#[test]
+fn prelude_exposes_the_http_runtime_surface() {
+    use mads::prelude::{
+        Created, Header, HttpError, HttpResult, Json, NoContent, Path, Query, Request,
+        build_router, serve,
+    };
+
+    let _ = std::any::TypeId::of::<Created<NoContent>>();
+    let _ = std::any::TypeId::of::<Header<mads::common::headers::ContentType>>();
+    let _ = std::any::TypeId::of::<HttpError>();
+    let _ = std::any::TypeId::of::<HttpResult<NoContent>>();
+    let _ = std::any::TypeId::of::<Json<NoContent>>();
+    let _ = std::any::TypeId::of::<Path<String>>();
+    let _ = std::any::TypeId::of::<Query<String>>();
+    let _ = std::any::TypeId::of::<Request>();
+    let _ = build_router;
+    let _ = |application: mads::core::Mads| serve(application, "127.0.0.1:0");
+    let _ = framework_result;
+    let _: mads::common::axum::Router = mads::common::axum::Router::new();
+}
 
 #[test]
 fn prelude_exposes_core_types_and_bare_attributes() {
@@ -82,13 +107,13 @@ struct CommandUsecase;
 #[mads::routes(prefix = "/users")]
 trait QueryRoutes {
     #[mads::get("/:id")]
-    async fn get_user(&self, id: i64) -> i64;
+    async fn get_user(&self, id: Path<i64>) -> String;
 }
 
 #[mads::routes]
 trait CommandRoutes {
     #[mads::post("/users")]
-    async fn create_user(&self, id: i64) -> i64;
+    async fn create_user(&self, id: Json<i64>) -> String;
 }
 
 #[mads::controller(routes = [QueryRoutes, CommandRoutes])]
@@ -98,16 +123,16 @@ struct FacadeController {
 }
 
 impl QueryRoutes for FacadeController {
-    async fn get_user(&self, id: i64) -> i64 {
+    async fn get_user(&self, Path(id): Path<i64>) -> String {
         let _query = &self.query;
-        id
+        id.to_string()
     }
 }
 
 impl CommandRoutes for FacadeController {
-    async fn create_user(&self, id: i64) -> i64 {
+    async fn create_user(&self, Json(id): Json<i64>) -> String {
         let _command = &self.command;
-        id
+        id.to_string()
     }
 }
 
@@ -295,8 +320,8 @@ async fn controller_constructs_after_multiple_usecases() {
         .expect("the constructed controller should resolve");
     let cloned = controller.as_ref().clone();
 
-    assert_eq!(controller.get_user(7).await, 7);
-    assert_eq!(controller.create_user(8).await, 8);
+    assert_eq!(controller.get_user(Path(7)).await, "7");
+    assert_eq!(controller.create_user(Json(8)).await, "8");
     assert!(std::ptr::eq(&**controller, &*cloned));
 }
 

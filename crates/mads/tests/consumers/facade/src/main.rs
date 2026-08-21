@@ -1,22 +1,32 @@
 //! Verifies attribute expansion through a facade-only dependency.
 
-#[mads::module]
+use mads::prelude::*;
+
+#[module]
 struct AppModule;
 
-#[mads::repository]
+#[repository]
 struct Repository;
 
-#[mads::routes]
+#[routes]
 trait Routes {
-    #[mads::get("/")]
+    #[get("/")]
     async fn index(&self);
 }
 
-#[mads::controller(routes = [Routes])]
+#[controller(routes = [Routes])]
 struct Controller;
 
 impl Routes for Controller {
     async fn index(&self) {}
 }
 
-fn main() {}
+async fn build_application() -> mads::core::Result<()> {
+    let application = Mads::builder().build().await?;
+    let _router = build_router(&application)?;
+    Ok(())
+}
+
+fn main() {
+    let _ = build_application;
+}

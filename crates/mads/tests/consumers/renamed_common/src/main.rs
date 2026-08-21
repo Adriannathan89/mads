@@ -13,4 +13,12 @@ impl Routes for Controller {
     async fn index(&self) {}
 }
 
-fn main() {}
+async fn build_application() -> web::core::Result<()> {
+    let application = web::core::Mads::builder().build().await?;
+    let _router = web::build_router(&application)?;
+    Ok(())
+}
+
+fn main() {
+    let _ = build_application;
+}

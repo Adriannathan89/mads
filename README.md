@@ -1,214 +1,157 @@
 # MADS.rs
 
-MADS.rs is a layered Rust workspace for a clean-architecture application
-foundation. Version 0.2 provides deterministic, side-effect-free provider-graph
-analysis and automatic application-scoped construction.
+MADS.rs 0.3 is a Rust application framework with a framework-neutral core and
+an executable Axum HTTP runtime. It validates every declared route before it
+builds a router, starts application lifecycle hooks, or binds a socket.
 
-## Crate diagram
+## Crates and boundaries
 
-```text
-mads-cli ──> mads ──> mads-core ──> mads-core-macros
-                  ├─> mads-common (optional, contract macros)
-                  └─> mads-extra  (optional, reserved)
-
-mads-common ──> mads-common-macros
-```
-
-- `mads-core` provides framework-neutral application construction, lifecycle
-  contracts, configuration, provider metadata, and canonical core attributes.
-- `mads-core-macros` implements the core procedural attributes.
-- `mads-common` and `mads-common-macros` provide compile-time route contracts,
-  deterministic static route metadata, and managed controllers. HTTP execution
-  remains reserved for v0.3.
-- `mads-extra` reserves future post-v1 extension capabilities.
-- `mads` is the stable public facade; applications should depend on this crate.
-- `mads-cli` installs the `mads` development command.
-
-The facade enables `common` and `runtime-tokio` by default. Disable default
-features to depend on only the core boundary:
+- `mads-core` owns application construction, providers, lifecycle, diagnostics,
+  and route catalog inputs. It intentionally has no Axum, Tower, Hyper, HTTP,
+  or `mads-common` dependency.
+- `mads-common` is the v0.3 Axum adapter. It owns route validation, typed route
+  registration, extractors, response wrappers, router construction, and
+  serving.
+- `mads` is the stable facade. Its default `common` feature exposes the HTTP
+  runtime; disable default features for the core-only boundary.
 
 ```toml
 [dependencies]
-mads = { version = "0.2", default-features = false }
+mads = "0.3"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
 ```
 
-MADS.rs supports Rust 1.85 and uses the Rust 2024 edition.
+MADS.rs supports Rust 1.85 and uses Rust edition 2024.
 
-## Application construction
+## A typed HTTP route
 
-Use the facade-qualified attributes as the canonical macro syntax:
-`#[mads::main]`, `#[mads::module]`, `#[mads::provider]`,
-`#[mads::repository]`, and `#[mads::service]`. With the default `common`
-feature, it also exports `#[mads::routes]`, `#[mads::controller]`, and the HTTP
-verb attributes. The `mads::prelude` module collects these attributes with the
-application-facing core types for ergonomic imports.
+`#[mads::routes]` records immutable metadata and emits a typed registration
+adapter. `#[mads::controller]` resolves the managed controller from the
+application once while the router is built; handlers do not receive manual
+`State<AppState>` or perform per-request provider resolution.
 
-MADS.rs analyzes the complete static provider catalog before construction. It
-validates duplicate bindings, ambiguous outputs, unresolved dependencies, and
-cycles without invoking constructors. A valid graph is then constructed
-sequentially in deterministic dependency order.
-
-```rust,ignore
+```rust,no_run
 use mads::prelude::*;
 
-#[derive(Clone)]
-struct Greeting(String);
+#[derive(Clone, serde::Serialize)]
+struct User {
+    id: u64,
+}
 
-#[mads::service]
-struct Greeter {
-    greeting: Greeting,
+#[mads::routes(prefix = "/readme-users")]
+trait UserRoutes {
+    #[mads::get("/:id")]
+    async fn get_user(&self, id: Path<u64>) -> HttpResult<Json<User>>;
+}
+
+#[mads::controller(routes = [UserRoutes])]
+struct UserController;
+
+impl UserRoutes for UserController {
+    async fn get_user(&self, Path(id): Path<u64>) -> HttpResult<Json<User>> {
+        Ok(Json(User { id }))
+    }
 }
 
 #[mads::main]
-async fn main() {
-    let mut builder = Mads::builder();
+async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let application = Mads::builder().build().await?;
+    let router = build_router(&application)?;
 
-    builder
-        .provide(Greeting("hello".to_owned()))
-        .expect("the external value should be inserted");
-
-    let mut application = builder
-        .build()
-        .await
-        .expect("the complete provider graph should validate and build");
-    application.start().await.expect("the application should start");
-    application
-        .shutdown()
-        .await
-        .expect("the application should shut down");
+    // Compose `router` directly with Axum or Tower, or serve the application.
+    let _ = router;
+    serve(application, "127.0.0.1:3000").await?;
+    Ok::<(), Box<dyn std::error::Error>>(())
 }
 ```
 
-A controller can depend on any number of managed services or use cases. Route
-traits make the controller contract compiler-checked, retain canonical
-method/path metadata, and reject conflicts before controller construction:
+`build_router(&application)` is the entry point for in-process tests and
+native router composition. `serve(application, address)` validates, starts
+lifecycle hooks, binds the listener, serves requests, and attempts lifecycle
+shutdown on every path after startup.
 
-```rust,ignore
+## Extractors and responses
+
+The prelude exports the standard HTTP types:
+
+- `Path<T>`, `Query<T>`, `Json<T>`, `Header<T>`, and `Request` are direct Axum
+  or axum-extra extractors. Native extractors are also supported through
+  `mads::common::axum`.
+- `HttpResult<T>` is `Result<T, HttpError>` for handler delivery errors.
+  Framework construction and bootstrap continue to use `mads::core::Result`;
+  the bare core `Result` is deliberately not in the prelude.
+- `Created<T>` responds with 201, `NoContent` with an empty 204 response, and
+  `HttpError::{bad_request, not_found, conflict, internal}` return stable JSON
+  errors with 400, 404, 409, and 500 statuses respectively.
+
+The public `mads::common::axum` re-export is an intentional escape hatch for
+native `Router`, `IntoResponse`, extractors, middleware, and response APIs.
+Use Tower layers and services directly when a framework wrapper would get in
+the way.
+
+## Route and HTTP policy
+
+MADS route metadata uses `/:parameter`; the validated adapter translates it to
+Axum 0.8 syntax only while registering the route. The adapter keeps Axum path
+checks enabled. Invalid metadata and conflicts fail with `MADS030` before
+router construction.
+
+- GET also handles HEAD, with Axum removing the response body.
+- MADS does not synthesize OPTIONS handlers; unsupported methods use Axum's
+  405 response and `Allow` header, including HEAD when GET exists.
+- Static and parameter routes may coexist, and a static route wins.
+- `/users` and `/users/` are different request paths. Declarations with a
+  non-root trailing slash are rejected; v0.3 does not redirect or normalize.
+- Missing paths retain Axum's default 404 behavior.
+
+## Test a router in-process
+
+Use Tower's `ServiceExt::oneshot` against the state-complete router. This tests
+the real generated adapter without opening a TCP listener:
+
+```rust,no_run
+use mads::axum::{body::Body, http::{Request, StatusCode}};
 use mads::prelude::*;
+use tower::ServiceExt;
 
-#[service]
-struct GetUserUsecase;
-
-#[service]
-struct DeleteUserUsecase;
-
-#[routes(prefix = "/users")]
-trait UserRoutes {
-    #[get("/:id")]
-    async fn get_user(&self, id: i64) -> Result<i64>;
-
-    #[delete("/:id")]
-    async fn delete_user(&self, id: i64) -> Result<()>;
+#[mads::main]
+async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let application = Mads::builder().build().await?;
+    let response = build_router(&application)?
+        .oneshot(Request::builder().uri("/readme-users/7").body(Body::empty())?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    Ok(())
 }
-
-#[controller(routes = [UserRoutes])]
-struct UserController {
-    get_user: GetUserUsecase,
-    delete_user: DeleteUserUsecase,
-}
-
-impl UserRoutes for UserController {
-    async fn get_user(&self, id: i64) -> Result<i64> {
-        Ok(id)
-    }
-
-    async fn delete_user(&self, _id: i64) -> Result<()> {
-        Ok(())
-    }
-}
-
-// `build().await` constructs these providers in dependency order.
 ```
 
-## Graph analysis and inspection
+## Current scope
 
-Call `builder.analyze()` to inspect the complete catalog without running a
-constructor. `GraphAnalysis` exposes immutable provider nodes, resolved
-dependency edges, diagnostics, and a deterministic `ConstructionPlan` when the
-graph is valid. After a successful build, use `application.graph()` and
-`application.construction_plan()` to inspect the validated graph and the plan
-that ran.
-
-Every unambiguous provider is included, even when no other provider references
-it. Invalid duplicate or ambiguous declarations are represented by diagnostics
-rather than individual effective provider nodes. Values inserted with `provide`
-override one matching static provider and are recorded as public
-application-wide values. `construct::<T>()` remains a manual escape hatch;
-manually constructed providers are not constructed again by `build()`.
-
-Provider declaration visibility is recorded as descriptive metadata: `pub`
-providers are public and inherited or restricted visibility is private. MADS.rs
-does not enforce visibility until module semantics are introduced.
-
-### Dependency ownership
-
-Fields on services, repositories, and controllers are resolved as concrete
-values and cloned into the managed provider. Consequently, every concrete field
-dependency must implement `Clone`. Prefer managed service, repository, or
-controller handles for shared application-scoped resources: these handles own
-their inner value through `Arc`, so cloning a handle only increments the shared
-allocation's reference count.
-
-Version 0.2 does not provide an `Inject<T>` wrapper, automatic trait injection,
-trait bindings, or qualified bindings. Applications that need an external or
-non-managed concrete dependency can insert a cloneable value explicitly with
-`MadsBuilder::provide`.
-
-Catalog allocation and indexing optimizations remain deferred until bootstrap
-benchmarks show a relevant cost. The current deterministic catalog behavior is
-preferred over adding a `TypeId` index or borrowed catalog iterator without
-measurement.
-
-The graph and construction diagnostics are stable:
-
-- `MADS001`: exact duplicate provider descriptor.
-- `MADS002`: ambiguous provider binding.
-- `MADS003`: unresolved dependency.
-- `MADS005`: dependency cycle.
-- `MADS006`: provider construction failure.
-
-## CLI foundation
-
-Use the CLI to report the implemented and reserved boundaries:
-
-```bash
-mads foundation
-```
-
-The command reports the core and common contract surfaces as available. The
-graph data model and runtime analysis are implemented, but final `mads graph`
-rendering is deferred. The common HTTP runtime and `extra` remain reserved. Run
-`mads --help` for the complete foundation command surface.
-
-## Deferred features
-
-Version 0.2 does not yet provide HTTP execution, Axum registration, extractors,
-Diesel or other database integrations, module imports or exports, trait
-bindings, qualifiers, additional scopes, or final CLI graph rendering. Route
-metadata is available through `mads::common::RouteCatalog`; runtime routing
-remains reserved for v0.3.
+Version 0.3 provides executable HTTP routing, the basic response model, and
+direct Axum/Tower composition. It does not provide persistence, Diesel
+integration, database configuration, request validation/error normalization,
+custom domain-error registries, middleware abstractions, automatic
+trailing-slash redirects, or generated OPTIONS handlers. Persistence and the
+broader error policy remain future work rather than available behavior.
 
 ## Development
 
-CI uses stable Rust for formatting, linting, tests, documentation, and coverage.
-Before submitting a change, run the same stable checks locally:
+Run the release checks locally:
 
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
-cargo tree -p mads-core --edges normal
+cargo test --workspace --all-features --doc
 cargo llvm-cov --workspace --all-features --ignore-filename-regex '(^|/)tests/ui/' --fail-under-lines 85
 ```
 
-The coverage command requires `cargo-llvm-cov` and the
-`llvm-tools-preview` Rust component. It enforces at least 85 percent line
-coverage while excluding only trybuild UI fixtures.
-
-CI separately verifies the minimum supported Rust version (MSRV), Rust 1.85.0.
-When that toolchain is installed locally, run:
+The MSRV gate uses the lockfile resolution:
 
 ```sh
-rustup run 1.85.0 cargo test --workspace --all-features
+cargo +1.85.0 test --locked --workspace --all-features
 ```

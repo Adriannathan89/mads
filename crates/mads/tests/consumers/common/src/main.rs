@@ -13,4 +13,12 @@ impl Routes for Controller {
     async fn index(&self) {}
 }
 
-fn main() {}
+async fn build_application() -> mads_common::core::Result<()> {
+    let application = mads_common::core::Mads::builder().build().await?;
+    let _router = mads_common::build_router(&application)?;
+    Ok(())
+}
+
+fn main() {
+    let _ = build_application;
+}

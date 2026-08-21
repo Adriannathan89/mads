@@ -1,22 +1,32 @@
 //! Verifies attribute expansion through a renamed facade-only dependency.
 
-#[framework::module]
+use framework::prelude::*;
+
+#[module]
 struct AppModule;
 
-#[framework::repository]
+#[repository]
 struct Repository;
 
-#[framework::routes]
+#[routes]
 trait Routes {
-    #[framework::get("/")]
+    #[get("/")]
     async fn index(&self);
 }
 
-#[framework::controller(routes = [Routes])]
+#[controller(routes = [Routes])]
 struct Controller;
 
 impl Routes for Controller {
     async fn index(&self) {}
 }
 
-fn main() {}
+async fn build_application() -> framework::core::Result<()> {
+    let application = Mads::builder().build().await?;
+    let _router = build_router(&application)?;
+    Ok(())
+}
+
+fn main() {
+    let _ = build_application;
+}

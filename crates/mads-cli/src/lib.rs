@@ -41,6 +41,6 @@ fn print_help(to_stderr: bool) {
 
 fn print_foundation() {
     println!(
-        "core: available\ncommon contracts: available\ncommon HTTP runtime: reserved\nextra: reserved"
+        "core: available\ncommon contracts: available\ncommon HTTP runtime: available\nextra: reserved"
     );
 }

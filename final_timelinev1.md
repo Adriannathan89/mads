@@ -406,7 +406,7 @@ root AppModule
 Target:
 
 ```rust
-#[module(path = "/users")]
+#[module]
 pub struct UserModule;
 
 #[module(imports = [UserModule])]

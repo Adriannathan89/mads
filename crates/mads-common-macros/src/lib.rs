@@ -4,12 +4,12 @@
 //! `common` feature is enabled, by the `mads` facade. They validate the shape
 //! of route traits and controllers during compilation, then emit the static
 //! metadata consumed by `mads_common::RouteCatalog` and the MADS dependency
-//! graph.
-//!
-//! Route attributes are deliberately contract-only in v0.2: they do not start
-//! an HTTP server or select a runtime adapter. Runtime routing remains a later
-//! integration concern, while the generated metadata participates in graph
-//! validation and route-catalog inspection.
+//! graph. Route traits also receive hidden, typed Axum registrars, and each
+//! controller descriptor stores a concrete registrar function pointer.
+//! Runtime bootstrap validates the complete catalog before any generated
+//! registrar is invoked. The generated registrars resolve application-scoped
+//! controllers once and invoke handler trait methods through typed Rust calls,
+//! never through handler-name metadata.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
@@ -29,7 +29,32 @@ mod verb;
 /// controller; otherwise compilation fails at the controller declaration.
 /// Named fields are treated as dependency edges and are resolved by the MADS
 /// construction context when the controller is built. The generated public
-/// handle is cheap to clone because its state is stored behind an `Arc`.
+/// handle is cheap to clone because its state is stored behind an `Arc`. A
+/// hidden registrar resolves that handle once and installs every declared
+/// route trait through typed dispatch.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// #[mads_common::routes]
+/// trait HealthRoutes {
+///     #[mads_common::get("/health")]
+///     async fn health(&self) -> mads_common::HttpResult<&'static str>;
+/// }
+///
+/// #[mads_common::controller(routes = [HealthRoutes])]
+/// struct HealthController;
+///
+/// impl HealthRoutes for HealthController {
+///     async fn health(&self) -> mads_common::HttpResult<&'static str> {
+///         Ok("ok")
+///     }
+/// }
+/// ```
+///
+/// The example is marked `ignore` because procedural-macro documentation is
+/// compiled in the macro crate itself, while the attributes require a
+/// downstream consumer crate and the `mads-common` runtime dependency.
 #[proc_macro_attribute]
 pub fn controller(arguments: TokenStream, item: TokenStream) -> TokenStream {
     controller::expand(arguments.into(), item.into())
@@ -47,7 +72,25 @@ pub fn controller(arguments: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// The macro rejects malformed or ambiguous paths, duplicate method/path
 /// pairs, generic traits, and default method implementations. It also emits
-/// static route descriptors for later catalog validation.
+/// static route descriptors for later catalog validation and a hidden typed
+/// registrar used after validation succeeds.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// #[mads_common::routes(prefix = "/users")]
+/// trait UserRoutes {
+///     #[mads_common::get("/:id")]
+///     async fn get_user(
+///         &self,
+///         id: mads_common::Path<u64>,
+///     ) -> mads_common::HttpResult<mads_common::Json<User>>;
+/// }
+/// # struct User;
+/// ```
+///
+/// The example is marked `ignore` for the same downstream-consumer reason as
+/// [`controller`].
 #[proc_macro_attribute]
 pub fn routes(arguments: TokenStream, item: TokenStream) -> TokenStream {
     routes::expand(arguments.into(), item.into())
@@ -61,6 +104,16 @@ pub fn routes(arguments: TokenStream, item: TokenStream) -> TokenStream {
 /// It is only valid on an abstract async route-contract method; using it on a
 /// free function, an inherent method, or a trait without [`routes`] produces a
 /// compile-time diagnostic.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// #[mads_common::routes]
+/// trait HealthRoutes {
+///     #[mads_common::get("/health")]
+///     async fn health(&self);
+/// }
+/// ```
 #[proc_macro_attribute]
 pub fn get(arguments: TokenStream, item: TokenStream) -> TokenStream {
     verb::outside_contract("get", arguments.into(), item.into()).into()

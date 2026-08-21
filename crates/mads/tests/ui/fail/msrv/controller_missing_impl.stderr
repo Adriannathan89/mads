@@ -1,0 +1,11 @@
+error[E0277]: the trait bound `Controller: Route` is not satisfied
+ --> tests/ui/fail/msrv/controller_missing_impl.rs:8:8
+  |
+8 | struct Controller;
+  |        ^^^^^^^^^^ the trait `Route` is not implemented for `Controller`
+  |
+help: this trait has no implementations, consider adding one
+ --> tests/ui/fail/msrv/controller_missing_impl.rs:2:1
+  |
+2 | trait Route {
+  | ^^^^^^^^^^^

@@ -6,4 +6,10 @@ struct AppModule;
 #[runtime::repository]
 struct Repository;
 
-fn main() {}
+fn framework_result() -> runtime::Result<()> {
+    Ok(())
+}
+
+fn main() {
+    let _ = framework_result;
+}

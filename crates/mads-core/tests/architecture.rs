@@ -4,7 +4,15 @@ use std::collections::{HashMap, HashSet};
 
 use cargo_metadata::{CargoOpt, DependencyKind, MetadataCommand, PackageId};
 
-const FORBIDDEN_DEPENDENCY_FRAGMENTS: [&str; 4] = ["mads-common", "mads-extra", "axum", "diesel"];
+const FORBIDDEN_DEPENDENCY_FRAGMENTS: [&str; 7] = [
+    "mads-common",
+    "mads-extra",
+    "axum",
+    "diesel",
+    "http",
+    "hyper",
+    "tower",
+];
 
 fn is_forbidden_dependency(name: &str) -> bool {
     FORBIDDEN_DEPENDENCY_FRAGMENTS
