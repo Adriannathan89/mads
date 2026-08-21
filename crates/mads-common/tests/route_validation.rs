@@ -71,6 +71,79 @@ const BAD_LOCATION: RouteDescriptor = RouteDescriptor::new(
     SourceLocation::new("", 0, 0),
 );
 
+const BAD_QUERY: RouteDescriptor = RouteDescriptor::new(
+    HttpMethod::Get,
+    "",
+    "/users?active=true",
+    "/users?active=true",
+    "list_users",
+    SourceLocation::new("tests/route_validation.rs", 50, 5),
+);
+const BAD_CONTROL: RouteDescriptor = RouteDescriptor::new(
+    HttpMethod::Get,
+    "",
+    "/users\n",
+    "/users\n",
+    "list_users",
+    SourceLocation::new("tests/route_validation.rs", 60, 5),
+);
+const BAD_ENCODING: RouteDescriptor = RouteDescriptor::new(
+    HttpMethod::Get,
+    "",
+    "/users%20all",
+    "/users%20all",
+    "list_users",
+    SourceLocation::new("tests/route_validation.rs", 70, 5),
+);
+const BAD_EMPTY_SEGMENT: RouteDescriptor = RouteDescriptor::new(
+    HttpMethod::Get,
+    "",
+    "/users//all",
+    "/users//all",
+    "list_users",
+    SourceLocation::new("tests/route_validation.rs", 80, 5),
+);
+const BAD_EMPTY_PARAMETER: RouteDescriptor = RouteDescriptor::new(
+    HttpMethod::Get,
+    "",
+    "/users/:",
+    "/users/:",
+    "list_users",
+    SourceLocation::new("tests/route_validation.rs", 90, 5),
+);
+const BAD_PARAMETER_NAME: RouteDescriptor = RouteDescriptor::new(
+    HttpMethod::Get,
+    "",
+    "/users/:1id",
+    "/users/:1id",
+    "list_users",
+    SourceLocation::new("tests/route_validation.rs", 100, 5),
+);
+const BAD_REPEATED_PARAMETER: RouteDescriptor = RouteDescriptor::new(
+    HttpMethod::Get,
+    "",
+    "/users/:id/:id",
+    "/users/:id/:id",
+    "list_users",
+    SourceLocation::new("tests/route_validation.rs", 110, 5),
+);
+const BAD_EMBEDDED_PARAMETER: RouteDescriptor = RouteDescriptor::new(
+    HttpMethod::Get,
+    "",
+    "/users/id:tail",
+    "/users/id:tail",
+    "list_users",
+    SourceLocation::new("tests/route_validation.rs", 120, 5),
+);
+const ROOT_ROUTE: RouteDescriptor = RouteDescriptor::new(
+    HttpMethod::Get,
+    "/",
+    "/",
+    "/",
+    "root",
+    SourceLocation::new("tests/route_validation.rs", 130, 5),
+);
+
 const FIRST_ROUTES: &[RouteDescriptor] = &[VALID_ROUTE];
 const FIRST_CONTRACTS: &[RouteContractDescriptor] =
     &[RouteContractDescriptor::new("UserRoutes", FIRST_ROUTES)];
@@ -82,6 +155,34 @@ const BAD_JOIN_CONTRACTS: &[RouteContractDescriptor] =
     &[RouteContractDescriptor::new("Routes", &[BAD_JOIN])];
 const BAD_LOCATION_CONTRACTS: &[RouteContractDescriptor] =
     &[RouteContractDescriptor::new("Routes", &[BAD_LOCATION])];
+const BAD_QUERY_CONTRACTS: &[RouteContractDescriptor] =
+    &[RouteContractDescriptor::new("Routes", &[BAD_QUERY])];
+const BAD_CONTROL_CONTRACTS: &[RouteContractDescriptor] =
+    &[RouteContractDescriptor::new("Routes", &[BAD_CONTROL])];
+const BAD_ENCODING_CONTRACTS: &[RouteContractDescriptor] =
+    &[RouteContractDescriptor::new("Routes", &[BAD_ENCODING])];
+const BAD_EMPTY_SEGMENT_CONTRACTS: &[RouteContractDescriptor] =
+    &[RouteContractDescriptor::new("Routes", &[BAD_EMPTY_SEGMENT])];
+const BAD_EMPTY_PARAMETER_CONTRACTS: &[RouteContractDescriptor] = &[RouteContractDescriptor::new(
+    "Routes",
+    &[BAD_EMPTY_PARAMETER],
+)];
+const BAD_PARAMETER_NAME_CONTRACTS: &[RouteContractDescriptor] = &[RouteContractDescriptor::new(
+    "Routes",
+    &[BAD_PARAMETER_NAME],
+)];
+const BAD_REPEATED_PARAMETER_CONTRACTS: &[RouteContractDescriptor] =
+    &[RouteContractDescriptor::new(
+        "Routes",
+        &[BAD_REPEATED_PARAMETER],
+    )];
+const BAD_EMBEDDED_PARAMETER_CONTRACTS: &[RouteContractDescriptor] =
+    &[RouteContractDescriptor::new(
+        "Routes",
+        &[BAD_EMBEDDED_PARAMETER],
+    )];
+const ROOT_CONTRACTS: &[RouteContractDescriptor] =
+    &[RouteContractDescriptor::new("Routes", &[ROOT_ROUTE])];
 const EMPTY_ROUTE_CONTRACTS: &[RouteContractDescriptor] =
     &[RouteContractDescriptor::new("Routes", &[])];
 const UNNAMED_CONTRACTS: &[RouteContractDescriptor] =
@@ -112,6 +213,20 @@ fn rejects_invalid_route_paths_and_source_coordinates() {
         BAD_PATH_CONTRACTS,
         BAD_JOIN_CONTRACTS,
         BAD_LOCATION_CONTRACTS,
+    ] {
+        let descriptor = controller("test::Controller", first_type_id, contracts);
+        assert_invalid(&[&descriptor]);
+    }
+
+    for contracts in [
+        BAD_QUERY_CONTRACTS,
+        BAD_CONTROL_CONTRACTS,
+        BAD_ENCODING_CONTRACTS,
+        BAD_EMPTY_SEGMENT_CONTRACTS,
+        BAD_EMPTY_PARAMETER_CONTRACTS,
+        BAD_PARAMETER_NAME_CONTRACTS,
+        BAD_REPEATED_PARAMETER_CONTRACTS,
+        BAD_EMBEDDED_PARAMETER_CONTRACTS,
     ] {
         let descriptor = controller("test::Controller", first_type_id, contracts);
         assert_invalid(&[&descriptor]);
@@ -166,4 +281,29 @@ fn validated_routes_translate_parameters_for_axum() {
     routes
         .finish()
         .expect("all validated routes must be consumed");
+}
+
+#[test]
+fn validates_root_routes_and_reports_registrar_metadata_mismatches() {
+    let descriptor = controller("test::RootController", first_type_id, ROOT_CONTRACTS);
+    let controllers = mads_common::__private::validate_descriptors(&[&descriptor])
+        .expect("root route metadata is valid");
+    let mut routes = controllers[0].routes();
+    assert_eq!(
+        routes.next(HttpMethod::Get, "root").expect("root path"),
+        "/"
+    );
+    routes.finish().expect("root route consumed");
+
+    let descriptor = controller("test::Controller", first_type_id, FIRST_CONTRACTS);
+    let controllers = mads_common::__private::validate_descriptors(&[&descriptor])
+        .expect("valid metadata must produce validated routes");
+    let mut routes = controllers[0].routes();
+    assert!(routes.next(HttpMethod::Post, "get_user").is_err());
+
+    let mut routes = controllers[0].routes();
+    assert!(routes.next(HttpMethod::Get, "wrong_handler").is_err());
+
+    let mut routes = controllers[0].routes();
+    assert!(routes.finish().is_err());
 }
