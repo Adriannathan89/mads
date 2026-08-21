@@ -449,6 +449,7 @@ dependencies = [
  "mads-core",
  "mads-extra",
  "tokio",
+ "tower",
  "trybuild",
 ]
 

@@ -13,6 +13,7 @@ mads-extra = { path = "../mads-extra", optional = true }
 
 [dev-dependencies]
 tokio.workspace = true
+tower.workspace = true
 trybuild.workspace = true
 
 [features]

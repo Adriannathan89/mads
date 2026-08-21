@@ -228,7 +228,6 @@ fn expand_controller_with_common(
             context: &'a #core::ConstructionContext<'a>,
         ) -> #core::ProviderFuture<'a> {
             ::std::boxed::Box::pin(async move {
-                #common::RouteCatalog::validate_controller::<#ident>()?;
                 let value = #ident(::std::sync::Arc::new(#inner_value));
                 let erased: #core::ErasedProvider = ::std::sync::Arc::new(value);
                 Ok(erased)

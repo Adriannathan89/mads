@@ -203,7 +203,7 @@ impl ControllerRouteDescriptor {
 /// Registers the validated routes for one controller on an Axum router.
 ///
 /// This function-pointer type is used by generated controller adapters. Normal
-/// applications should use the forthcoming router builder instead of calling a
+/// Applications should use [`crate::build_router`] instead of calling a
 /// registrar directly.
 pub type ControllerRegistrar = fn(
     axum::Router,

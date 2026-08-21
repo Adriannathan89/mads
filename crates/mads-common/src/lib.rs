@@ -14,6 +14,7 @@
 mod extract;
 mod response;
 mod route;
+mod router;
 
 /// Re-exports Axum for native runtime integration.
 pub use axum;
@@ -23,6 +24,9 @@ pub use extract::{Header, Json, Path, Query, Request, headers};
 
 /// Standard Axum-compatible HTTP response types.
 pub use response::{Created, HttpError, HttpResult, NoContent};
+
+/// Builds an Axum router from the application's validated controllers.
+pub use router::build_router;
 
 /// Exposes the framework-neutral core boundary to future integrations.
 pub use mads_core as core;
