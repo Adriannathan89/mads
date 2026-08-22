@@ -166,7 +166,17 @@ impl ConfigSource for TomlSource {
                 .with_subject(&self.name),
             )
         })?;
-        if let Some(key) = inline_table_key(&input) {
+        let document = input.parse::<toml_edit::DocumentMut>().map_err(|_| {
+            Error::new(
+                Diagnostic::new(
+                    MADS020,
+                    "configuration file could not be parsed",
+                    format!("configuration file `{}` is not valid TOML", self.name),
+                )
+                .with_subject(&self.name),
+            )
+        })?;
+        if let Some(key) = inline_table_key("", document.as_table()) {
             return Err(unsupported_value(&key, "inline table"));
         }
         let mut output = BTreeMap::new();
@@ -175,27 +185,23 @@ impl ConfigSource for TomlSource {
     }
 }
 
-fn inline_table_key(input: &str) -> Option<String> {
-    let mut section = String::new();
-    for line in input.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        if trimmed.starts_with('[') && trimmed.ends_with(']') && !trimmed.starts_with("[[") {
-            section = trimmed[1..trimmed.len() - 1].trim().to_owned();
-            continue;
-        }
-        let Some((key, value)) = trimmed.split_once('=') else {
-            continue;
+fn inline_table_key(prefix: &str, table: &toml_edit::Table) -> Option<String> {
+    for (segment, item) in table {
+        let key = if prefix.is_empty() {
+            segment.to_owned()
+        } else {
+            format!("{prefix}.{segment}")
         };
-        if value.trim_start().starts_with('{') {
-            let key = key.trim().trim_matches(['\'', '"']);
-            return Some(if section.is_empty() {
-                key.to_owned()
-            } else {
-                format!("{section}.{key}")
-            });
+        match item {
+            toml_edit::Item::Value(toml_edit::Value::InlineTable(_)) => return Some(key),
+            toml_edit::Item::Table(nested) => {
+                if let Some(key) = inline_table_key(&key, nested) {
+                    return Some(key);
+                }
+            }
+            toml_edit::Item::None
+            | toml_edit::Item::Value(_)
+            | toml_edit::Item::ArrayOfTables(_) => {}
         }
     }
     None

@@ -201,6 +201,55 @@ fn unsupported_toml_values_name_the_key_without_exposing_secrets() {
 }
 
 #[test]
+fn toml_inline_table_detection_respects_quoted_keys_and_multiline_strings() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("mads.toml");
+    fs::write(
+        &path,
+        r#"
+[database]
+"url=primary" = "postgres://valid"
+description = '''
+this scalar contains = { inline-looking text }
+'''
+"#,
+    )
+    .unwrap();
+
+    let config = ConfigBuilder::new()
+        .source(TomlSource::file(path))
+        .build()
+        .unwrap();
+
+    assert_eq!(config.get("database.url=primary"), Some("postgres://valid"));
+    assert_eq!(
+        config.get("database.description"),
+        Some("this scalar contains = { inline-looking text }\n")
+    );
+}
+
+#[test]
+fn inline_table_after_commented_header_reports_complete_flattened_subject() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("mads.toml");
+    fs::write(
+        &path,
+        "[database.connection] # production connection\nsettings = { mode = \"secret\" }\n",
+    )
+    .unwrap();
+
+    let error = ConfigBuilder::new()
+        .source(TomlSource::file(path))
+        .build()
+        .unwrap_err();
+    let report = error.to_string();
+
+    assert_eq!(error.code(), MADS020);
+    assert!(report.contains("database.connection.settings"));
+    assert!(!report.contains("secret"));
+}
+
+#[test]
 fn missing_optional_dotenv_is_ignored() {
     let directory = tempfile::tempdir().unwrap();
     let config = ConfigBuilder::new()
