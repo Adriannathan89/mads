@@ -1,8 +1,9 @@
 //! Public MADS.rs facade and feature composition boundary.
 //!
-//! The facade enables the v0.3 common HTTP integration and Tokio runtime by
-//! default; consumers can opt out of those defaults for a narrower core-only
-//! dependency surface.
+//! The facade enables the v0.4 common HTTP integration, explicit Diesel
+//! persistence, and Tokio runtime by default; consumers can opt out of those
+//! defaults for a narrower core-only dependency surface. Database provisioning
+//! remains explicit in v0.4; v0.5 will own automatic provisioning.
 //!
 //! A controller implements a typed route contract. MADS validates the complete
 //! route catalog, resolves the application-scoped controller once, and builds
@@ -50,6 +51,29 @@
 //!     serve(application, "127.0.0.1:3000").await.unwrap();
 //! }
 //! ```
+//!
+//! Configure persistence explicitly before building the application:
+//!
+//! ```no_run
+//! use mads::prelude::*;
+//!
+//! #[mads::main]
+//! async fn main() {
+//!     let config = ConfigBuilder::new()
+//!         .source(mads::core::MapSource::new(
+//!             "application",
+//!             [("database.url", "postgres://localhost/mads")],
+//!         ))
+//!         .build()
+//!         .unwrap();
+//!     let database_config = DatabaseConfig::from_config(&config).unwrap();
+//!     let mut builder = Mads::builder();
+//!     builder
+//!         .database(DatabaseBootstrap::new(database_config))
+//!         .unwrap();
+//!     let _application = builder.build().await.unwrap();
+//! }
+//! ```
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
@@ -80,6 +104,22 @@ pub use mads_common as common;
 /// Re-exports Axum for native HTTP runtime integration.
 #[cfg(feature = "common")]
 pub use mads_common::axum;
+
+/// Re-exports Diesel for native persistence integration.
+#[cfg(feature = "common")]
+pub use mads_common::diesel;
+
+/// Re-exports Diesel migrations for native persistence integration.
+#[cfg(feature = "common")]
+pub use mads_common::diesel_migrations;
+
+/// Re-exports database configuration, runtime, migration, and error contracts.
+#[cfg(feature = "common")]
+pub use mads_common::{
+    Database, DatabaseBootstrap, DatabaseConfig, DatabaseError, DatabaseErrorKind,
+    DatabasePoolStatus, DatabaseResult, MADS100, MadsBuilderDatabaseExt, MigrationReport,
+    MigrationStatus,
+};
 
 /// Re-exports HTTP request extractors and their typed-header support.
 #[cfg(feature = "common")]
@@ -161,6 +201,14 @@ pub mod prelude {
     /// Re-exports HTTP router construction and runtime startup functions.
     #[cfg(feature = "common")]
     pub use mads_common::{HttpRuntimeError, build_router, serve};
+
+    /// Re-exports application-facing database configuration and runtime types.
+    #[cfg(feature = "common")]
+    pub use mads_common::{
+        Database, DatabaseBootstrap, DatabaseConfig, DatabaseError, DatabaseErrorKind,
+        DatabasePoolStatus, DatabaseResult, MadsBuilderDatabaseExt, MigrationReport,
+        MigrationStatus,
+    };
 
     /// Re-exports types used to build, run, and inspect an application.
     pub use mads_core::{
