@@ -33,6 +33,37 @@ fn prelude_exposes_the_http_runtime_surface() {
 }
 
 #[test]
+fn prelude_exposes_the_database_runtime_surface() {
+    use mads::diesel_migrations;
+    use mads::prelude::{
+        Database, DatabaseBootstrap, DatabaseConfig, DatabaseError, DatabaseErrorKind,
+        DatabasePoolStatus, DatabaseResult, MadsBuilderDatabaseExt, MigrationReport,
+        MigrationStatus,
+    };
+
+    let _ = std::any::TypeId::of::<Database>();
+    let _ = std::any::TypeId::of::<DatabaseBootstrap>();
+    let _ = std::any::TypeId::of::<DatabaseConfig>();
+    let _ = std::any::TypeId::of::<DatabaseError>();
+    let _ = std::any::TypeId::of::<DatabaseErrorKind>();
+    let _ = std::any::TypeId::of::<DatabasePoolStatus>();
+    let _ = std::any::TypeId::of::<DatabaseResult<()>>();
+    let _ = std::any::TypeId::of::<MigrationReport>();
+    let _ = std::any::TypeId::of::<MigrationStatus>();
+
+    fn needs_extension<T: MadsBuilderDatabaseExt>() {}
+    needs_extension::<mads::core::MadsBuilder>();
+
+    let _: std::marker::PhantomData<mads::diesel::pg::Pg> = std::marker::PhantomData;
+    const MIGRATIONS: mads::diesel_migrations::EmbeddedMigrations =
+        mads::diesel_migrations::embed_migrations!("tests/fixtures/empty_migrations");
+    let _: mads::diesel_migrations::EmbeddedMigrations = MIGRATIONS;
+
+    let _ = std::any::TypeId::of::<mads::Database>();
+    assert_eq!(mads::MADS100.as_str(), "MADS100");
+}
+
+#[test]
 fn prelude_exposes_core_types_and_bare_attributes() {
     use mads::prelude::*;
 

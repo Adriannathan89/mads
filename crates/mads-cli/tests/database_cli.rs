@@ -1,0 +1,144 @@
+//! Real PostgreSQL process evidence for the MADS database CLI.
+
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
+
+use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
+use predicates::str::contains;
+use tempfile::{TempDir, tempdir};
+
+static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+const OVERRIDE_URL: &str = "postgres://user:cli-secret@127.0.0.1:1/mads";
+
+#[test]
+#[ignore = "requires PostgreSQL through MADS_TEST_DATABASE_URL"]
+fn database_migration_commands_are_real_and_redact_overrides() {
+    let _lock = TEST_LOCK
+        .lock()
+        .expect("CLI PostgreSQL test lock should not poison");
+    let _database_url = std::env::var("MADS_TEST_DATABASE_URL")
+        .expect("MADS_TEST_DATABASE_URL is required for ignored PostgreSQL tests");
+    let project = temporary_project();
+    let mut cleanup = MigrationCleanup::new(project.path());
+    cleanup.arm();
+
+    project_command(project.path(), ["db", "migrate"])
+        .assert()
+        .success()
+        .stdout(contains("applied 202608220201"));
+
+    project_command(project.path(), ["db", "migrate"])
+        .assert()
+        .success()
+        .stdout(contains("database is up to date"));
+
+    project_command(project.path(), ["db", "status"])
+        .assert()
+        .success()
+        .stdout(contains("applied 202608220201"))
+        .stdout(contains("summary: 1 applied, 0 pending"));
+
+    project_command(project.path(), ["db", "rollback"])
+        .assert()
+        .success()
+        .stdout(contains("reverted 202608220201"));
+    cleanup.disarm();
+
+    project_command(project.path(), ["db", "status"])
+        .assert()
+        .success()
+        .stdout(contains("pending 202608220201"))
+        .stdout(contains("summary: 0 applied, 1 pending"));
+
+    project_command(project.path(), ["db", "rollback"])
+        .assert()
+        .code(1)
+        .stderr(contains("no migration is available to revert"));
+
+    project_command(project.path(), ["db", "migrate"])
+        .env("MADS_DATABASE__URL", OVERRIDE_URL)
+        .assert()
+        .code(1)
+        .stderr(contains("cli-secret").not())
+        .stderr(contains(OVERRIDE_URL).not());
+}
+
+fn temporary_project() -> TempDir {
+    let project = tempdir().expect("temporary project should be created");
+    fs::write(
+        project.path().join("mads.toml"),
+        "[database]\nurl = \"${MADS_TEST_DATABASE_URL}\"\npool_size = 2\nmigrate = false\n",
+    )
+    .expect("project TOML should be written");
+    copy_directory(&fixture_directory(), &project.path().join("migrations"))
+        .expect("migration fixture should be copied");
+    project
+}
+
+fn fixture_directory() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/migrations")
+}
+
+fn copy_directory(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_directory(&source_path, &destination_path)?;
+        } else {
+            fs::copy(source_path, destination_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn project_command<I, S>(project: &Path, arguments: I) -> Command
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let mut command = Command::cargo_bin("mads").expect("binary should build");
+    command
+        .current_dir(project)
+        .env_remove("DATABASE_URL")
+        .env_remove("MADS_DATABASE__URL")
+        .args(arguments);
+    command
+}
+
+struct MigrationCleanup<'a> {
+    project: &'a Path,
+    armed: bool,
+}
+
+impl<'a> MigrationCleanup<'a> {
+    fn new(project: &'a Path) -> Self {
+        Self {
+            project,
+            armed: false,
+        }
+    }
+
+    fn arm(&mut self) {
+        self.armed = true;
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for MigrationCleanup<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = project_command(self.project, ["db", "rollback"]).output();
+        }
+    }
+}

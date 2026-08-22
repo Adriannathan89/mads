@@ -156,6 +156,7 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use std::any::TypeId;
+    use std::error::Error as StdError;
     use std::io;
     use std::net::{Ipv4Addr, SocketAddr};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -165,9 +166,16 @@ mod tests {
         ApplicationContext, Diagnostic, Error, LifecycleFuture, LifecycleHook, MADS011, MADS020,
         Mads, SourceLocation,
     };
+    use tokio::net::TcpListener;
 
     use super::{HttpRuntimeError, serve_with};
-    use crate::{ControllerRouteDescriptor, HttpMethod, RouteContractDescriptor, RouteDescriptor};
+    use crate::{
+        ControllerRouteDescriptor, Database, DatabaseBootstrap, DatabaseConfig, DatabaseErrorKind,
+        HttpMethod, MADS100, MadsBuilderDatabaseExt, RouteContractDescriptor, RouteDescriptor,
+    };
+
+    const FAILING_MIGRATIONS: diesel_migrations::EmbeddedMigrations =
+        diesel_migrations::embed_migrations!("tests/fixtures/failing_migrations");
 
     static STARTS: AtomicUsize = AtomicUsize::new(0);
     static BINDS: AtomicUsize = AtomicUsize::new(0);
@@ -284,6 +292,115 @@ mod tests {
         assert_eq!(STARTS.load(Ordering::SeqCst), 0);
         assert_eq!(BINDS.load(Ordering::SeqCst), 0);
         assert!(events.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn database_start_failure_prevents_listener_binding() {
+        let _guard = TEST_LOCK.lock().await;
+        let database_url = "postgres://127.0.0.1:1/mads";
+        let mut builder = Mads::builder();
+        builder.provide(PreflightPermit).unwrap();
+        builder
+            .database(DatabaseBootstrap::new(
+                DatabaseConfig::new(database_url).unwrap(),
+            ))
+            .unwrap();
+        let application = builder.build().await.unwrap();
+        BINDS.store(0, Ordering::SeqCst);
+
+        let error = serve_with(
+            application,
+            address(),
+            |_| async {
+                BINDS.fetch_add(1, Ordering::SeqCst);
+                tokio::net::TcpListener::bind(address()).await
+            },
+            async {},
+        )
+        .await
+        .unwrap_err();
+
+        match &error {
+            HttpRuntimeError::Lifecycle(error) => {
+                assert_eq!(error.code(), MADS011);
+                let source = std::error::Error::source(error)
+                    .unwrap()
+                    .downcast_ref::<Error>()
+                    .unwrap();
+                assert_eq!(source.code(), MADS100);
+            }
+            other => panic!("expected lifecycle failure, got {other:?}"),
+        }
+        assert_eq!(BINDS.load(Ordering::SeqCst), 0);
+        let output = format!("{error}\n{error:?}");
+        assert!(!output.contains(database_url));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL through MADS_TEST_DATABASE_URL"]
+    async fn database_migration_failure_prevents_listener_binding() {
+        let _guard = TEST_LOCK.lock().await;
+        STARTS.store(0, Ordering::SeqCst);
+        BINDS.store(0, Ordering::SeqCst);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let database_url = std::env::var("MADS_TEST_DATABASE_URL")
+            .expect("MADS_TEST_DATABASE_URL is required for ignored PostgreSQL tests");
+        let config = DatabaseConfig::new(database_url.clone())
+            .unwrap()
+            .with_migrate_on_startup(true);
+        let mut builder = Mads::builder();
+        builder.provide(PreflightPermit).unwrap();
+        builder
+            .database(DatabaseBootstrap::new(config).with_migrations(FAILING_MIGRATIONS))
+            .unwrap();
+        builder.lifecycle_hook(RecordingHook {
+            events: Arc::clone(&events),
+            fail_shutdown: false,
+        });
+        let application = builder.build().await.unwrap();
+        let database = application.context().resolve::<Database>().unwrap();
+
+        let error = serve_with(
+            application,
+            address(),
+            |address| async move {
+                BINDS.fetch_add(1, Ordering::SeqCst);
+                TcpListener::bind(address).await
+            },
+            async {},
+        )
+        .await
+        .unwrap_err();
+
+        match &error {
+            HttpRuntimeError::Lifecycle(error) => {
+                assert_eq!(error.code(), MADS011);
+                let bootstrap_error = StdError::source(error)
+                    .expect("MADS011 lifecycle errors retain their database bootstrap source")
+                    .downcast_ref::<Error>()
+                    .expect("MADS011 source is the database bootstrap error");
+                assert_eq!(bootstrap_error.code(), MADS100);
+                let database_source = StdError::source(bootstrap_error)
+                    .expect("MADS100 errors retain their database error source");
+                assert_eq!(
+                    database_source.to_string(),
+                    "database migration failed",
+                    "the source chain must retain DatabaseErrorKind::{:?}",
+                    DatabaseErrorKind::Migration,
+                );
+                assert!(
+                    format!("{database_source:?}")
+                        .contains(&format!("{:?}", DatabaseErrorKind::Migration))
+                );
+            }
+            other => panic!("expected lifecycle failure, got {other:?}"),
+        }
+        assert_eq!(STARTS.load(Ordering::SeqCst), 0);
+        assert_eq!(BINDS.load(Ordering::SeqCst), 0);
+        assert!(events.lock().unwrap().is_empty());
+        assert!(database.is_closed());
+        let output = format!("{error}\n{error:?}");
+        assert!(!output.contains(&database_url));
     }
 
     #[tokio::test]

@@ -6,7 +6,19 @@ use framework::prelude::*;
 struct AppModule;
 
 #[repository]
-struct Repository;
+struct RenamedRepository {
+    database: Database,
+}
+
+fn consume_repository(repository: &RenamedRepository) {
+    let _ = &repository.database;
+}
+
+fn database_config() -> framework::common::DatabaseResult<DatabaseConfig> {
+    DatabaseConfig::new("postgres://localhost/renamed")
+}
+
+fn diesel_backend(_: std::marker::PhantomData<framework::diesel::pg::Pg>) {}
 
 #[routes]
 trait Routes {
@@ -29,4 +41,7 @@ async fn build_application() -> framework::core::Result<()> {
 
 fn main() {
     let _ = build_application;
+    let _ = database_config;
+    let _ = diesel_backend;
+    let _ = consume_repository;
 }

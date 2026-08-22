@@ -1,9 +1,12 @@
 //! Framework-neutral runtime contracts for MADS.rs.
 //!
-//! Version 0.2 provides framework-neutral application construction, lifecycle
-//! management, configuration, provider metadata, and deterministic dependency
-//! graph analysis. It re-exports the core procedural macros without introducing
-//! HTTP or database integrations.
+//! MADS core provides framework-neutral application construction, lifecycle
+//! management, deterministic scalar TOML configuration, optional dotenv
+//! interpolation, programmatic and environment sources, provider metadata, and
+//! dependency graph analysis. Dotenv values only participate in interpolation:
+//! they do not mutate process state, and real process variables take
+//! precedence. It re-exports the core procedural macros without introducing
+//! integration dependencies.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
@@ -22,7 +25,10 @@ pub mod runtime;
 
 pub use builder::{Mads, MadsBuilder};
 pub use catalog::Catalog;
-pub use config::{Config, ConfigBuilder, ConfigSource, ConfigValue, EnvSource, MapSource};
+pub use config::{
+    Config, ConfigBuilder, ConfigSource, ConfigValue, DotenvSource, EnvSource, MapSource,
+    TomlSource,
+};
 pub use context::{ApplicationContext, ConstructionContext};
 pub use descriptor::{
     DependencyDescriptor, ModuleDescriptor, ProviderConstructor, ProviderDescriptor,

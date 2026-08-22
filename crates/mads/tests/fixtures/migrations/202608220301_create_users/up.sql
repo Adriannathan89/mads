@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS mads_v040_users (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR NOT NULL
+);

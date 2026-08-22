@@ -9,6 +9,9 @@ repository.workspace = true
 [dependencies]
 axum.workspace = true
 axum-extra.workspace = true
+deadpool-diesel.workspace = true
+diesel.workspace = true
+diesel_migrations.workspace = true
 mads-common-macros = { path = "../mads-common-macros" }
 mads-core = { path = "../mads-core" }
 serde.workspace = true

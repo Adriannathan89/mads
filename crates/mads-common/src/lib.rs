@@ -1,10 +1,16 @@
 //! Standard integration contracts for MADS.rs.
 //!
-//! Version 0.3 provides compile-time controller and route contracts together
-//! with the Axum HTTP runtime. [`build_router`] validates every registered
-//! controller before it resolves a controller or invokes a typed registrar;
-//! [`serve`] performs that same validation before lifecycle startup or socket
-//! binding.
+//! Version 0.4 provides compile-time controller and route contracts, the Axum
+//! HTTP runtime, and explicit PostgreSQL/Diesel persistence. [`build_router`]
+//! validates every registered controller before it resolves a controller or
+//! invokes a typed registrar; [`serve`] performs that same validation before
+//! database lifecycle startup or socket binding.
+//!
+//! Configure persistence with [`DatabaseConfig`] and register it through
+//! [`DatabaseBootstrap`] and [`MadsBuilderDatabaseExt`]. A managed [`Database`]
+//! runs synchronous Diesel queries through its blocking pool boundary. The
+//! [`diesel`] and [`diesel_migrations`] re-exports are deliberate native escape
+//! hatches; MADS does not replace Diesel's query API.
 //!
 //! Use [`routes`] to declare an abstract route contract and [`controller`] to
 //! bind one or more such contracts to a managed controller. The resulting
@@ -21,8 +27,24 @@ mod route;
 mod router;
 mod server;
 
+/// Database configuration and normalized persistence errors.
+pub mod database;
+
 /// Re-exports Axum for native runtime integration.
 pub use axum;
+
+/// Re-exports Diesel for native persistence integration.
+pub use diesel;
+
+/// Re-exports Diesel migrations for native persistence integration.
+pub use diesel_migrations;
+
+/// Database configuration, managed persistence, and normalized errors.
+pub use database::{
+    Database, DatabaseBootstrap, DatabaseConfig, DatabaseError, DatabaseErrorKind,
+    DatabasePoolStatus, DatabaseResult, MADS100, MadsBuilderDatabaseExt, MigrationReport,
+    MigrationStatus,
+};
 
 /// Standard Axum-compatible HTTP request extractors.
 pub use extract::{Header, Json, Path, Query, Request, headers};

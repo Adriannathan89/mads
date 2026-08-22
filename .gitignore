@@ -2,8 +2,12 @@
 /.worktrees/
 /.superpowers/
 /target/
+crates/mads/tests/**/target/
 /coverage/
 /docs/proposed/
 /.codex/
+.env
+.env.*
+!.env.example
 *.profraw
 .DS_Store
