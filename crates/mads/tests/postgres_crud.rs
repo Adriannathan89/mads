@@ -354,8 +354,15 @@ where
 {
     assert!(application.graph().dependencies().iter().any(|edge| {
         edge.provider_type_name() == std::any::type_name::<Provider>()
-            && edge.dependency_type_name() == std::any::type_name::<Dependency>()
+            && edge.dependency_type_name() == stable_type_name::<Dependency>()
     }));
+}
+
+fn stable_type_name<T: 'static>() -> &'static str {
+    std::any::type_name::<T>()
+        .rsplit("::")
+        .next()
+        .expect("a Rust type name always has a final segment")
 }
 
 fn json_request(method: Method, uri: &str, body: &'static str) -> Request<Body> {
