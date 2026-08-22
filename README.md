@@ -35,7 +35,7 @@ Commit configuration shape, never a connection secret:
 [database]
 url = "${DATABASE_URL}"
 pool_size = 10 # default: 10
-migrate = false # default: false
+migrate = true # default: false
 ```
 
 Use the tracked [`.env.example`](.env.example) as a local template, copy it to

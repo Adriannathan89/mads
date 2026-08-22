@@ -10,6 +10,10 @@ struct RenamedRepository {
     database: Database,
 }
 
+fn consume_repository(repository: &RenamedRepository) {
+    let _ = &repository.database;
+}
+
 fn database_config() -> framework::common::DatabaseResult<DatabaseConfig> {
     DatabaseConfig::new("postgres://localhost/renamed")
 }
@@ -39,4 +43,5 @@ fn main() {
     let _ = build_application;
     let _ = database_config;
     let _ = diesel_backend;
+    let _ = consume_repository;
 }
