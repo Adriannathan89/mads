@@ -3,8 +3,10 @@
 //! MADS core provides framework-neutral application construction, lifecycle
 //! management, deterministic scalar TOML configuration, optional dotenv
 //! interpolation, programmatic and environment sources, provider metadata, and
-//! dependency graph analysis. It re-exports the core procedural macros without
-//! introducing integration dependencies.
+//! dependency graph analysis. Dotenv values only participate in interpolation:
+//! they do not mutate process state, and real process variables take
+//! precedence. It re-exports the core procedural macros without introducing
+//! integration dependencies.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]

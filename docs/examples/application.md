@@ -1,147 +1,111 @@
-# MADS.rs 0.3 User CRUD Example
+# MADS.rs 0.4 PostgreSQL User Slice
 
-This is a complete HTTP slice for the API available in v0.3. It uses an
-in-memory controller to keep the example focused on typed routing, extraction,
-responses, and the runtime. Persistence, Diesel, request validation, and
-domain-error policy are deliberately not implied by this example.
+This v0.4 example keeps persistence explicit: the composition root loads
+configuration, registers one `DatabaseBootstrap`, and a repository uses native
+Diesel through `Database::run`. Database errors below are deliberately mapped
+by the controller; MADS does not normalize them into HTTP responses.
 
-## Dependencies
+## Configuration
 
 ```toml
-[package]
-name = "user-api"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-mads = "0.3"
-serde = { version = "1", features = ["derive"] }
-
-[dev-dependencies]
-tower = { version = "0.5", features = ["util"] }
+# mads.toml (tracked)
+[database]
+url = "${DATABASE_URL}"
+pool_size = 10
+migrate = false
 ```
+
+Copy `.env.example` to the ignored `.env` for local use. In production or CI,
+set `DATABASE_URL` as a process variable. To override the config key itself,
+set `MADS_DATABASE__URL`; that final `MADS_` source wins over TOML and dotenv.
 
 ## `src/main.rs`
 
 ```rust,no_run
-use mads::prelude::*;
-use serde::{Deserialize, Serialize};
+use mads::diesel::prelude::*;
+use mads::{
+    core::{ConfigBuilder, DotenvSource, EnvSource, TomlSource},
+    diesel,
+    prelude::*,
+};
 
-#[derive(Clone, Serialize)]
+diesel::table! {
+    users (id) {
+        id -> Int8,
+        name -> Varchar,
+    }
+}
+
+#[derive(serde::Serialize, diesel::Queryable, diesel::Selectable)]
+#[diesel(table_name = users)]
 struct User {
-    id: u64,
+    id: i64,
     name: String,
 }
 
-#[derive(Deserialize)]
-struct CreateUser {
-    name: String,
+#[mads::repository]
+struct UserRepository {
+    database: Database,
 }
 
-#[derive(Deserialize)]
-struct UpdateUser {
-    name: String,
-}
-
-#[derive(Deserialize)]
-struct UserQuery {
-    page: Option<u64>,
+impl UserRepository {
+    async fn find(&self, id: i64) -> DatabaseResult<Option<User>> {
+        self.database
+            .run(move |connection| {
+                users::table
+                    .find(id)
+                    .select(User::as_select())
+                    .first(connection)
+                    .optional()
+            })
+            .await
+    }
 }
 
 #[mads::routes(prefix = "/users")]
 trait UserRoutes {
-    #[mads::get("/")]
-    async fn list_users(&self, query: Query<UserQuery>) -> Json<Vec<User>>;
-
     #[mads::get("/:id")]
-    async fn get_user(&self, id: Path<u64>) -> HttpResult<Json<User>>;
-
-    #[mads::post("/")]
-    async fn create_user(&self, input: Json<CreateUser>) -> Created<Json<User>>;
-
-    #[mads::put("/:id")]
-    async fn replace_user(&self, id: Path<u64>, input: Json<UpdateUser>) -> Json<User>;
-
-    #[mads::delete("/:id")]
-    async fn delete_user(&self, id: Path<u64>) -> NoContent;
+    async fn get_user(&self, id: Path<i64>) -> HttpResult<Json<User>>;
 }
 
 #[mads::controller(routes = [UserRoutes])]
-struct UserController;
+struct UserController {
+    users: UserRepository,
+}
 
 impl UserRoutes for UserController {
-    async fn list_users(&self, Query(query): Query<UserQuery>) -> Json<Vec<User>> {
-        let page = query.page.unwrap_or(1);
-        Json(vec![User {
-            id: page,
-            name: "Ada".to_owned(),
-        }])
-    }
-
-    async fn get_user(&self, Path(id): Path<u64>) -> HttpResult<Json<User>> {
-        if id == 0 {
-            return Err(HttpError::not_found("user was not found"));
-        }
-        Ok(Json(User { id, name: "Ada".to_owned() }))
-    }
-
-    async fn create_user(&self, Json(input): Json<CreateUser>) -> Created<Json<User>> {
-        Created(Json(User { id: 1, name: input.name }))
-    }
-
-    async fn replace_user(&self, Path(id): Path<u64>, Json(input): Json<UpdateUser>) -> Json<User> {
-        Json(User { id, name: input.name })
-    }
-
-    async fn delete_user(&self, Path(_id): Path<u64>) -> NoContent {
-        NoContent
+    async fn get_user(&self, Path(id): Path<i64>) -> HttpResult<Json<User>> {
+        self.users
+            .find(id)
+            .await
+            .map_err(|_| HttpError::internal(std::io::Error::other("database query failed")))?
+            .map(Json)
+            .ok_or_else(|| HttpError::not_found("user was not found"))
     }
 }
 
 #[mads::main]
-async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let application = Mads::builder().build().await?;
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = ConfigBuilder::new()
+        .dotenv(DotenvSource::optional(".env"))
+        .source(TomlSource::file("mads.toml"))
+        .source(EnvSource::new("MADS_"))
+        .build()?;
+    let database = DatabaseConfig::from_config(&config)?;
+    let mut builder = Mads::builder_with_config(config);
+    builder.database(DatabaseBootstrap::new(database))?;
+    let application = builder.build().await?;
     serve(application, "127.0.0.1:3000").await?;
     Ok(())
 }
 ```
 
-The controller is application-scoped. The generated registrar captures it
-while building the router, so route methods have only their HTTP arguments and
-no framework state parameter. `HttpResult` is for expected HTTP delivery
-errors; construction and server bootstrap retain `mads::core::Result`-based
-framework errors internally.
+For startup migrations, declare an `EmbeddedMigrations` constant with
+`mads::diesel_migrations::embed_migrations!("migrations")` and pass it to
+`DatabaseBootstrap::with_migrations`; set `database.migrate = true` only when
+that source is registered. File-based migration management is available through
+`mads db migrate`, `mads db rollback`, and `mads db status`.
 
-## Test it without a listener
-
-`build_router` validates every route and returns an Axum router. Test the full
-generated path in-process with Tower:
-
-```rust,no_run
-use mads::axum::{body::Body, http::{Request, StatusCode}};
-use mads::prelude::*;
-use tower::ServiceExt;
-
-#[mads::main]
-async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let application = Mads::builder().build().await?;
-    let response = build_router(&application)?
-        .oneshot(Request::builder().uri("/users/7").body(Body::empty())?)
-        .await?;
-    assert_eq!(response.status(), StatusCode::OK);
-    Ok(())
-}
-```
-
-Use `mads::common::axum` when a native extractor, response, router operation,
-or Tower layer is preferable. MADS forwards these primitives rather than
-wrapping their behavior.
-
-## Runtime policy relevant to this API
-
-MADS uses `/:id` declarations and translates only validated paths to Axum 0.8
-syntax. GET also answers HEAD, OPTIONS is not synthesized, unsupported methods
-use Axum's 405 and `Allow` behavior, static paths win over parameter paths,
-and trailing slashes are strict: `/users` and `/users/` differ. Missing paths
-use Axum's default 404 response. Invalid or conflicting catalog metadata
-returns `MADS030` before a router is constructed or a listener is bound.
+Use `mads::diesel` (or the direct `diesel` dependency shown above) for native
+queries, schema macros, and Diesel traits. `Database::run` is the required
+asynchronous boundary for synchronous PostgreSQL work.

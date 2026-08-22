@@ -5,5 +5,8 @@
 /coverage/
 /docs/proposed/
 /.codex/
+.env
+.env.*
+!.env.example
 *.profraw
 .DS_Store

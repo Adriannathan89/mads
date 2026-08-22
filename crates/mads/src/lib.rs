@@ -67,7 +67,7 @@
 //!         .build()
 //!         .unwrap();
 //!     let database_config = DatabaseConfig::from_config(&config).unwrap();
-//!     let mut builder = Mads::builder();
+//!     let mut builder = Mads::builder_with_config(config);
 //!     builder
 //!         .database(DatabaseBootstrap::new(database_config))
 //!         .unwrap();

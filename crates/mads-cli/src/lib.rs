@@ -1,8 +1,10 @@
-//! Development commands for inspecting MADS.rs and managing migrations.
+//! Development commands for inspecting MADS.rs 0.4 and managing migrations.
 //!
 //! The `mads` executable accepts fixed help, version, foundation, and database
-//! migration commands. Database commands load project configuration from the
-//! current directory and return an explicit process exit code.
+//! migration commands. `mads db migrate`, `mads db rollback`, and `mads db
+//! status` load project configuration from the current directory and return an
+//! explicit process exit code. Database command syntax failures exit with 2;
+//! configuration, pool, and migration failures exit with 1.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
