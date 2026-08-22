@@ -5,6 +5,6 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
-fn main() {
-    mads_cli::run();
+fn main() -> std::process::ExitCode {
+    mads_cli::run()
 }
