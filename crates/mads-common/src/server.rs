@@ -167,7 +167,10 @@ mod tests {
     };
 
     use super::{HttpRuntimeError, serve_with};
-    use crate::{ControllerRouteDescriptor, HttpMethod, RouteContractDescriptor, RouteDescriptor};
+    use crate::{
+        ControllerRouteDescriptor, DatabaseBootstrap, DatabaseConfig, HttpMethod, MADS100,
+        MadsBuilderDatabaseExt, RouteContractDescriptor, RouteDescriptor,
+    };
 
     static STARTS: AtomicUsize = AtomicUsize::new(0);
     static BINDS: AtomicUsize = AtomicUsize::new(0);
@@ -284,6 +287,48 @@ mod tests {
         assert_eq!(STARTS.load(Ordering::SeqCst), 0);
         assert_eq!(BINDS.load(Ordering::SeqCst), 0);
         assert!(events.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn database_start_failure_prevents_listener_binding() {
+        let _guard = TEST_LOCK.lock().await;
+        let database_url = "postgres://127.0.0.1:1/mads";
+        let mut builder = Mads::builder();
+        builder.provide(PreflightPermit).unwrap();
+        builder
+            .database(DatabaseBootstrap::new(
+                DatabaseConfig::new(database_url).unwrap(),
+            ))
+            .unwrap();
+        let application = builder.build().await.unwrap();
+        BINDS.store(0, Ordering::SeqCst);
+
+        let error = serve_with(
+            application,
+            address(),
+            |_| async {
+                BINDS.fetch_add(1, Ordering::SeqCst);
+                tokio::net::TcpListener::bind(address()).await
+            },
+            async {},
+        )
+        .await
+        .unwrap_err();
+
+        match &error {
+            HttpRuntimeError::Lifecycle(error) => {
+                assert_eq!(error.code(), MADS011);
+                let source = std::error::Error::source(error)
+                    .unwrap()
+                    .downcast_ref::<Error>()
+                    .unwrap();
+                assert_eq!(source.code(), MADS100);
+            }
+            other => panic!("expected lifecycle failure, got {other:?}"),
+        }
+        assert_eq!(BINDS.load(Ordering::SeqCst), 0);
+        let output = format!("{error}\n{error:?}");
+        assert!(!output.contains(database_url));
     }
 
     #[tokio::test]

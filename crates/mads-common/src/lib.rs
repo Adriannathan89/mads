@@ -35,8 +35,9 @@ pub use diesel_migrations;
 
 /// Database configuration, managed persistence, and normalized errors.
 pub use database::{
-    Database, DatabaseConfig, DatabaseError, DatabaseErrorKind, DatabasePoolStatus, DatabaseResult,
-    MADS100, MigrationReport, MigrationStatus,
+    Database, DatabaseBootstrap, DatabaseConfig, DatabaseError, DatabaseErrorKind,
+    DatabasePoolStatus, DatabaseResult, MADS100, MadsBuilderDatabaseExt, MigrationReport,
+    MigrationStatus,
 };
 
 /// Standard Axum-compatible HTTP request extractors.
