@@ -20,6 +20,7 @@ repository = "https://github.com/Adriannathan89/mads"
 [workspace.dependencies]
 axum = { version = "0.8.9", features = ["http1", "json", "tokio"] }
 axum-extra = { version = "0.12.6", default-features = false, features = ["typed-header"] }
+dotenvy = "=0.15.7"
 inventory = "0.3"
 proc-macro-crate = "3"
 proc-macro2 = "1"
@@ -28,6 +29,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 syn = { version = "2", features = ["full", "extra-traits"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
+toml = "=0.8.23"
 tower = { version = "0.5", features = ["util"] }
 trybuild = "1"
 

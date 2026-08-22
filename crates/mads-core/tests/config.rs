@@ -3,11 +3,13 @@
 use std::collections::BTreeMap;
 #[cfg(unix)]
 use std::ffi::OsString;
+use std::fs;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
 
 use mads_core::{
-    ConfigBuilder, ConfigSource, Diagnostic, EnvSource, Error, MADS020, MapSource, Result,
+    ConfigBuilder, ConfigSource, Diagnostic, DotenvSource, EnvSource, Error, MADS020, MapSource,
+    Result, TomlSource,
 };
 
 #[test]
@@ -99,4 +101,244 @@ fn environment_source_ignores_non_unicode_names_and_values() {
 
     assert_eq!(config.get("valid"), Some("value"));
     assert_eq!(config.len(), 1);
+}
+
+#[test]
+fn toml_source_flattens_scalar_tables_and_allows_environment_override() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("mads.toml");
+    fs::write(
+        &path,
+        r#"
+[database]
+url = "postgres://file-value"
+pool_size = 10
+migrate = false
+ratio = 1.5
+"#,
+    )
+    .unwrap();
+
+    let config = ConfigBuilder::new()
+        .source(TomlSource::file(&path))
+        .source(EnvSource::from_iter(
+            "MADS_",
+            [("MADS_DATABASE__POOL_SIZE", "12")],
+        ))
+        .build()
+        .unwrap();
+
+    assert_eq!(config.get("database.url"), Some("postgres://file-value"));
+    assert_eq!(config.get("database.pool_size"), Some("12"));
+    assert_eq!(config.get("database.migrate"), Some("false"));
+    assert_eq!(config.get("database.ratio"), Some("1.5"));
+    assert_eq!(config.source_of("database.url"), path.to_str());
+    assert_eq!(config.source_of("database.pool_size"), Some("environment"));
+    assert_eq!(
+        config.iter().map(|(key, _)| key).collect::<Vec<_>>(),
+        [
+            "database.migrate",
+            "database.pool_size",
+            "database.ratio",
+            "database.url"
+        ]
+    );
+}
+
+#[test]
+fn missing_toml_reports_only_its_path() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("missing.toml");
+    let error = ConfigBuilder::new()
+        .source(TomlSource::file(&path))
+        .build()
+        .unwrap_err();
+    let report = error.to_string();
+
+    assert_eq!(error.code(), MADS020);
+    assert!(report.contains(path.to_str().unwrap()));
+    assert!(report.contains("configuration file could not be read"));
+}
+
+#[test]
+fn malformed_toml_is_redacted_and_has_no_parser_source() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("mads.toml");
+    let sentinel = "postgres://malformed-secret";
+    fs::write(&path, format!("[database\nurl = \"{sentinel}\"\n")).unwrap();
+    let error = ConfigBuilder::new()
+        .source(TomlSource::file(&path))
+        .build()
+        .unwrap_err();
+
+    assert_eq!(error.code(), MADS020);
+    assert!(error.to_string().contains(path.to_str().unwrap()));
+    assert!(!error.to_string().contains(sentinel));
+    assert!(std::error::Error::source(&error).is_none());
+}
+
+#[test]
+fn unsupported_toml_values_name_the_key_without_exposing_secrets() {
+    for (value, kind) in [
+        ("[5432]", "array"),
+        ("1979-05-27T07:32:00Z", "datetime"),
+        ("{ url = \"postgres://inline-secret\" }", "inline table"),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("mads.toml");
+        fs::write(&path, format!("[database]\nports = {value}\n")).unwrap();
+        let error = ConfigBuilder::new()
+            .source(TomlSource::file(&path))
+            .build()
+            .unwrap_err();
+        let report = error.to_string();
+
+        assert_eq!(error.code(), MADS020, "{kind}");
+        assert!(report.contains("database.ports"), "{kind}");
+        assert!(report.contains("unsupported configuration value"), "{kind}");
+        assert!(!report.contains("postgres://inline-secret"), "{kind}");
+    }
+}
+
+#[test]
+fn missing_optional_dotenv_is_ignored() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = ConfigBuilder::new()
+        .dotenv(DotenvSource::optional(directory.path().join(".env")))
+        .source(MapSource::new("test", [("server.port", "3000")]))
+        .build()
+        .unwrap();
+
+    assert_eq!(config.get("server.port"), Some("3000"));
+}
+
+#[test]
+fn required_dotenv_and_present_directory_fail_safely() {
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("missing.env");
+    let error = ConfigBuilder::new()
+        .dotenv(DotenvSource::required(&missing))
+        .build()
+        .unwrap_err();
+    assert_eq!(error.code(), MADS020);
+    assert!(error.to_string().contains(missing.to_str().unwrap()));
+
+    let error = ConfigBuilder::new()
+        .dotenv(DotenvSource::required(directory.path()))
+        .build()
+        .unwrap_err();
+    assert_eq!(error.code(), MADS020);
+    assert!(
+        error
+            .to_string()
+            .contains(directory.path().to_str().unwrap())
+    );
+}
+
+#[test]
+fn malformed_dotenv_does_not_expose_the_line_or_parser_source() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join(".env");
+    let sentinel = "postgres://dotenv-secret";
+    fs::write(&path, format!("BROKEN='unterminated {sentinel}\n")).unwrap();
+    let error = ConfigBuilder::new()
+        .dotenv(DotenvSource::required(&path))
+        .build()
+        .unwrap_err();
+
+    assert_eq!(error.code(), MADS020);
+    assert!(error.to_string().contains(path.to_str().unwrap()));
+    assert!(!error.to_string().contains(sentinel));
+    assert!(std::error::Error::source(&error).is_none());
+}
+
+#[test]
+fn later_dotenv_wins_and_variables_do_not_become_configuration() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = directory.path().join("first.env");
+    let second = directory.path().join("second.env");
+    fs::write(&first, "DATABASE_URL=postgres://first\n").unwrap();
+    fs::write(&second, "DATABASE_URL=postgres://second\n").unwrap();
+
+    let config = ConfigBuilder::new()
+        .dotenv(DotenvSource::required(first))
+        .dotenv(DotenvSource::required(second))
+        .source(MapSource::new(
+            "test",
+            [("database.url", "${DATABASE_URL}")],
+        ))
+        .build()
+        .unwrap();
+
+    assert_eq!(config.get("database.url"), Some("postgres://second"));
+    assert_eq!(config.get("DATABASE_URL"), None);
+    assert_eq!(config.source_of("database.url"), Some("test"));
+}
+
+#[test]
+fn missing_exact_variable_names_key_and_variable_without_config_value() {
+    let sentinel = "postgres://must-not-leak";
+    let error = ConfigBuilder::new()
+        .source(MapSource::new(
+            "test",
+            [
+                ("database.url", "${MISSING_DATABASE_URL}"),
+                ("secret", sentinel),
+            ],
+        ))
+        .build()
+        .unwrap_err();
+    let report = error.to_string();
+
+    assert_eq!(error.code(), MADS020);
+    assert!(report.contains("database.url"));
+    assert!(report.contains("MISSING_DATABASE_URL"));
+    assert!(!report.contains(sentinel));
+    assert!(!report.contains("${MISSING_DATABASE_URL}"));
+}
+
+#[test]
+fn interpolation_is_exact_and_non_recursive() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join(".env");
+    fs::write(&path, "NAME=value\nNESTED='${SECOND}'\nSECOND=resolved\n").unwrap();
+    let config = ConfigBuilder::new()
+        .dotenv(DotenvSource::required(path))
+        .source(MapSource::new(
+            "test",
+            [
+                ("embedded", "prefix-${NAME}"),
+                ("fallback", "${NAME:-fallback}"),
+                ("nested", "${NESTED}"),
+            ],
+        ))
+        .build()
+        .unwrap();
+
+    assert_eq!(config.get("embedded"), Some("prefix-${NAME}"));
+    assert_eq!(config.get("fallback"), Some("${NAME:-fallback}"));
+    assert_eq!(config.get("nested"), Some("${SECOND}"));
+}
+
+#[test]
+fn debug_redacts_all_configuration_values() {
+    let sentinel = "sentinel-database-secret";
+    let map = MapSource::new("defaults", [("database.url", sentinel)]);
+    let environment = EnvSource::from_iter("MADS_", [("MADS_DATABASE__URL", sentinel)]);
+    let config = ConfigBuilder::new()
+        .source(map.clone())
+        .source(environment.clone())
+        .build()
+        .unwrap();
+    let value = config.iter().next().unwrap().1;
+
+    for rendered in [
+        format!("{map:?}"),
+        format!("{environment:?}"),
+        format!("{config:?}"),
+        format!("{value:?}"),
+    ] {
+        assert!(!rendered.contains(sentinel));
+        assert!(rendered.contains("[REDACTED]"));
+    }
 }
