@@ -34,7 +34,7 @@ pub use diesel;
 pub use diesel_migrations;
 
 /// Database configuration and normalized persistence errors.
-pub use database::{DatabaseConfig, DatabaseError, DatabaseErrorKind, DatabaseResult};
+pub use database::{DatabaseConfig, DatabaseError, DatabaseErrorKind, DatabaseResult, MADS100};
 
 /// Standard Axum-compatible HTTP request extractors.
 pub use extract::{Header, Json, Path, Query, Request, headers};

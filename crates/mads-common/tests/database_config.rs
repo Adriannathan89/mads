@@ -1,6 +1,6 @@
 //! Public database configuration contracts.
 
-use mads_common::{DatabaseConfig, DatabaseErrorKind};
+use mads_common::{DatabaseConfig, DatabaseErrorKind, MADS100};
 use mads_core::{ConfigBuilder, DotenvSource, MapSource};
 
 #[test]
@@ -125,6 +125,11 @@ fn database_config_debug_redacts_the_url() {
     let debug = format!("{config:?}");
     assert!(debug.contains("[REDACTED]"));
     assert!(!debug.contains("top-secret"));
+}
+
+#[test]
+fn database_diagnostic_is_available_from_the_crate_root() {
+    assert_eq!(MADS100.as_str(), "MADS100");
 }
 
 fn config_with<const N: usize>(values: [(&str, &str); N]) -> mads_core::Config {
