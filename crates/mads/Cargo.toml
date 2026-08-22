@@ -12,7 +12,10 @@ mads-core = { path = "../mads-core" }
 mads-extra = { path = "../mads-extra", optional = true }
 
 [dev-dependencies]
+diesel.workspace = true
+diesel_migrations.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 tower.workspace = true
 trybuild.workspace = true

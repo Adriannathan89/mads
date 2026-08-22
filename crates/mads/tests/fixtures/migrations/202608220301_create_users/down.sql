@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS mads_v040_users;
