@@ -2,10 +2,12 @@
 
 mod config;
 mod error;
+mod migration;
 mod pool;
 
 pub use config::DatabaseConfig;
 pub use error::{DatabaseError, DatabaseErrorKind, DatabaseResult};
+pub use migration::{MigrationReport, MigrationStatus};
 pub use pool::{Database, DatabasePoolStatus};
 
 /// Database configuration or persistence integration failure.
