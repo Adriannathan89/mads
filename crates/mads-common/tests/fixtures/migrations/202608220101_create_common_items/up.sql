@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS mads_common_v040_items (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR NOT NULL
+);

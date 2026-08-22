@@ -1,0 +1,1 @@
+SELECT definitely_missing_function_for_mads_v040();
