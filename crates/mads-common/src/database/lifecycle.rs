@@ -188,33 +188,64 @@ impl LifecycleHook for DatabaseLifecycle {
 fn database_core_error(operation: &'static str, source: DatabaseError) -> Error {
     Error::with_source(
         Diagnostic::new(MADS100, "database bootstrap failed", operation),
-        DatabaseCoreSource::new(source),
+        DatabaseCoreSource::from(source),
     )
 }
 
-/// Retains a redacted database-error summary for core error sources.
+/// Retains the core-safe parts of a database error for core error sources.
 ///
 /// `deadpool_diesel::InteractError` deliberately stores a `Send` panic payload
-/// that is not `Sync`. Core error sources are `Send + Sync`, so this adapter
-/// preserves a stable kind and redacted display message without weakening
-/// either public boundary or exposing that payload.
-struct DatabaseCoreSource {
-    kind: DatabaseErrorKind,
-    message: String,
+/// that is not `Sync`. Core error sources are `Send + Sync`, so this type
+/// retains every other variant's safe underlying source and omits only that
+/// interaction payload.
+enum DatabaseCoreSource {
+    Configuration {
+        message: String,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
+    Pool(deadpool_diesel::postgres::PoolError),
+    Query(diesel::result::Error),
+    Migration(Box<dyn std::error::Error + Send + Sync>),
+    Interaction,
+}
+
+impl From<DatabaseError> for DatabaseCoreSource {
+    fn from(source: DatabaseError) -> Self {
+        match source {
+            DatabaseError::Configuration { message, source } => {
+                Self::Configuration { message, source }
+            }
+            DatabaseError::Pool(source) => Self::Pool(source),
+            DatabaseError::Interaction(_) => Self::Interaction,
+            DatabaseError::Query(source) => Self::Query(source),
+            DatabaseError::Migration(source) => Self::Migration(source),
+        }
+    }
 }
 
 impl DatabaseCoreSource {
-    fn new(source: DatabaseError) -> Self {
-        Self {
-            kind: source.kind(),
-            message: source.to_string(),
+    const fn kind(&self) -> DatabaseErrorKind {
+        match self {
+            Self::Configuration { .. } => DatabaseErrorKind::Configuration,
+            Self::Pool(_) => DatabaseErrorKind::Pool,
+            Self::Query(_) => DatabaseErrorKind::Query,
+            Self::Migration(_) => DatabaseErrorKind::Migration,
+            Self::Interaction => DatabaseErrorKind::Interaction,
         }
     }
 }
 
 impl fmt::Display for DatabaseCoreSource {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
+        match self {
+            Self::Configuration { message, .. } => {
+                write!(formatter, "database configuration is invalid: {message}")
+            }
+            Self::Pool(_) => formatter.write_str("database connection could not be acquired"),
+            Self::Query(_) => formatter.write_str("database query failed"),
+            Self::Migration(_) => formatter.write_str("database migration failed"),
+            Self::Interaction => formatter.write_str("database blocking operation failed"),
+        }
     }
 }
 
@@ -222,9 +253,119 @@ impl fmt::Debug for DatabaseCoreSource {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("DatabaseCoreSource")
-            .field("kind", &self.kind)
+            .field("kind", &self.kind())
             .finish()
     }
 }
 
-impl std::error::Error for DatabaseCoreSource {}
+impl std::error::Error for DatabaseCoreSource {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Configuration { source, .. } => source
+                .as_deref()
+                .map(|source| source as &(dyn std::error::Error + 'static)),
+            Self::Pool(source) => Some(source),
+            Self::Query(source) => Some(source),
+            Self::Migration(source) => Some(source.as_ref()),
+            Self::Interaction => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as StdError;
+
+    use super::*;
+
+    #[test]
+    fn core_error_preserves_safe_configuration_cause() {
+        let error = database_core_error(
+            "database configuration failed",
+            DatabaseError::Configuration {
+                message: "database.url is invalid".to_owned(),
+                source: Some(Box::new(std::io::Error::other("configuration cause"))),
+            },
+        );
+
+        let database_source = StdError::source(&error).unwrap();
+        assert_eq!(
+            database_source.to_string(),
+            "database configuration is invalid: database.url is invalid"
+        );
+        assert_eq!(
+            StdError::source(database_source).unwrap().to_string(),
+            "configuration cause"
+        );
+    }
+
+    #[test]
+    fn core_error_preserves_query_cause() {
+        let error = database_core_error(
+            "database query failed",
+            DatabaseError::Query(diesel::result::Error::NotFound),
+        );
+
+        let database_source = StdError::source(&error).unwrap();
+        assert_eq!(database_source.to_string(), "database query failed");
+        assert!(
+            StdError::source(database_source)
+                .unwrap()
+                .downcast_ref::<diesel::result::Error>()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn core_error_preserves_migration_cause() {
+        let error = database_core_error(
+            "database migration failed",
+            DatabaseError::Migration(Box::new(std::io::Error::other("migration cause"))),
+        );
+
+        let database_source = StdError::source(&error).unwrap();
+        assert_eq!(database_source.to_string(), "database migration failed");
+        assert_eq!(
+            StdError::source(database_source).unwrap().to_string(),
+            "migration cause"
+        );
+    }
+
+    #[tokio::test]
+    async fn core_error_preserves_pool_cause() {
+        let database =
+            Database::from_config(&DatabaseConfig::new("postgres://localhost/mads").unwrap())
+                .unwrap();
+        database.close();
+        let database_error = database.check().await.unwrap_err();
+
+        assert_eq!(database_error.kind(), DatabaseErrorKind::Pool);
+        let error = database_core_error("database readiness check failed", database_error);
+        let database_source = StdError::source(&error).unwrap();
+        assert_eq!(
+            database_source.to_string(),
+            "database connection could not be acquired"
+        );
+        assert!(StdError::source(database_source).is_some());
+    }
+
+    #[test]
+    fn interaction_payload_is_redacted_from_core_error_sources() {
+        let secret = "mads-lifecycle-interaction-secret";
+        let error = database_core_error(
+            "database query failed",
+            DatabaseError::Interaction(deadpool_diesel::InteractError::Panic(Box::new(
+                secret.to_owned(),
+            ))),
+        );
+
+        let database_source = StdError::source(&error).unwrap();
+        assert_eq!(
+            database_source.to_string(),
+            "database blocking operation failed"
+        );
+        assert!(StdError::source(database_source).is_none());
+        let output = format!("{error}\n{error:?}\n{database_source}\n{database_source:?}");
+        assert!(!output.contains(secret));
+    }
+}
