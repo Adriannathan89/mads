@@ -48,7 +48,6 @@ impl DatabaseError {
         }
     }
 
-    #[allow(dead_code)]
     pub(super) fn configuration_with_source<E>(message: impl Into<String>, source: E) -> Self
     where
         E: std::error::Error + Send + Sync + 'static,
