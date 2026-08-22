@@ -21,8 +21,20 @@ mod route;
 mod router;
 mod server;
 
+/// Database configuration and normalized persistence errors.
+pub mod database;
+
 /// Re-exports Axum for native runtime integration.
 pub use axum;
+
+/// Re-exports Diesel for native persistence integration.
+pub use diesel;
+
+/// Re-exports Diesel migrations for native persistence integration.
+pub use diesel_migrations;
+
+/// Database configuration and normalized persistence errors.
+pub use database::{DatabaseConfig, DatabaseError, DatabaseErrorKind, DatabaseResult};
 
 /// Standard Axum-compatible HTTP request extractors.
 pub use extract::{Header, Json, Path, Query, Request, headers};
