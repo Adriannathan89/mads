@@ -387,13 +387,22 @@ FAILED
 
 ---
 
-# v0.5.5 — HTTP Browser and Authentication Features
+# v0.5.5 — HTTP Auto-Binding, Browser, and Authentication Features
 
 ## Objective
 
 Melengkapi HTTP runtime untuk browser application dengan CORS, cookie parsing,
 dan JWT authentication yang dapat diaktifkan melalui feature flags tanpa
 membuat `mads-core` bergantung pada HTTP atau cryptography.
+
+### HTTP Auto-Binding
+
+Host/port configuration and automatic listener binding deferred from the v0.3
+HTTP runtime belong to this milestone, not the v0.5.0 auto-configuration
+engine. Before implementation, the v0.5.5 design must explicitly resolve its
+configuration keys and defaults, source precedence, activation conditions,
+explicit-binding back-off behavior, diagnostics, and lifecycle/bind ordering.
+This timeline placement intentionally does not decide those contracts.
 
 ### First-Class Browser CORS
 
@@ -483,6 +492,8 @@ dependencies.
 
 ### Exit Criteria
 
+- the separately approved HTTP auto-binding contract is implemented and
+  covered by configuration, override, diagnostic, and runtime tests;
 - browser clients can call the API from `http://localhost:5173` with tested
   preflight and credentialed requests;
 - cookie parsing and `Set-Cookie` response behavior are covered by integration
