@@ -109,6 +109,7 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
     } = item;
     let inner_ident = format_ident!("__Mads{}Inner", ident);
     let constructor_ident = format_ident!("__mads_construct_{}", ident);
+    let type_id_ident = format_ident!("__mads_type_id_{}", ident);
     let is_unit = matches!(fields, Fields::Unit);
 
     let (inner_fields, resolve_fields, dependencies) = match fields {
@@ -192,11 +193,17 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
             })
         }
 
+        #[doc(hidden)]
+        #[allow(non_snake_case)]
+        fn #type_id_ident() -> ::core::any::TypeId {
+            ::core::any::TypeId::of::<#ident>()
+        }
+
         #core::__private::inventory::submit! {
             #core::ProviderDescriptor::new(
                 #provider_kind,
                 concat!(module_path!(), "::", stringify!(#ident)),
-                || ::core::any::TypeId::of::<#ident>(),
+                #type_id_ident,
                 #dependencies,
                 #provider_visibility,
                 #core::SourceLocation::new(file!(), line!(), column!()),

@@ -42,7 +42,7 @@ pub use diesel_migrations;
 /// Database configuration, managed persistence, and normalized errors.
 pub use database::{
     Database, DatabaseBootstrap, DatabaseConfig, DatabaseError, DatabaseErrorKind,
-    DatabasePoolStatus, DatabaseResult, MADS100, MadsBuilderDatabaseExt, MigrationReport,
+    DatabasePoolStatus, DatabaseResult, MADS100, MADS101, MadsBuilderDatabaseExt, MigrationReport,
     MigrationStatus,
 };
 
