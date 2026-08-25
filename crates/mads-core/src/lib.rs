@@ -5,12 +5,21 @@
 //! interpolation, programmatic and environment sources, provider metadata, and
 //! dependency graph analysis. Dotenv values only participate in interpolation:
 //! they do not mutate process state, and real process variables take
-//! precedence. It re-exports the core procedural macros without introducing
-//! integration dependencies.
+//! precedence. Applications construct configuration explicitly; [`Mads::builder`]
+//! does not load files, dotenv variables, or process environment variables.
+//!
+//! Core also owns deterministic evaluation of official conditional defaults and
+//! the public, retained [`AutoConfigurationReport`] records that explain their
+//! decisions. Reports retain only stable identifiers, reason codes, and redacted
+//! configuration evidence; they never retain resolved configuration values. The
+//! v0.5 catalog is complete across statically discovered providers. Module-scoped
+//! reachability is deferred to v0.6. Core re-exports the procedural macros
+//! without introducing integration dependencies.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+mod auto_configuration;
 mod builder;
 mod catalog;
 mod config;
@@ -23,6 +32,10 @@ mod registry;
 #[cfg(feature = "runtime-tokio")]
 pub mod runtime;
 
+pub use auto_configuration::{
+    AutoConfigurationConfigEvidence, AutoConfigurationReasonCode, AutoConfigurationReport,
+    AutoConfigurationRequirement, AutoConfigurationStatus,
+};
 pub use builder::{Mads, MadsBuilder};
 pub use catalog::Catalog;
 pub use config::{
@@ -36,7 +49,7 @@ pub use descriptor::{
 };
 pub use diagnostic::{
     Diagnostic, DiagnosticCode, Error, MADS001, MADS002, MADS003, MADS004, MADS005, MADS006,
-    MADS010, MADS011, MADS020, MADS030, Result, SourceLocation,
+    MADS007, MADS010, MADS011, MADS020, MADS030, Result, SourceLocation,
 };
 pub use graph::{
     ApplicationGraph, ConstructionPlan, ConstructionStep, DependencyEdge, GraphAnalysis,
@@ -50,5 +63,9 @@ pub use mads_core_macros::{main, module, provider, repository, service};
 /// Implementation details used by MADS.rs procedural macro expansions.
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::auto_configuration::{
+        AutoConfigurationApplyContext, AutoConfigurationContext, AutoConfigurationContribution,
+        AutoConfigurationDescriptor, AutoConfigurationEvaluation,
+    };
     pub use inventory;
 }

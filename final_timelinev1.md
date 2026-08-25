@@ -378,22 +378,43 @@ OVERRIDDEN
 FAILED
 ```
 
+Configuration loading tetap explicit: `Mads::builder()` tidak memuat `.env`,
+`mads.toml`, atau `MADS_*` secara otomatis. Requirements memakai complete
+statically discovered provider catalog pada v0.5; v0.6 menggantinya dengan
+reachability dari root `AppModule`.
+
+v0.5 tidak menambahkan chained defaults, priority selection, module scoping,
+third-party registration API, migration generation, proactive schema checks,
+atau `mads doctor`. Reports hanya menyimpan evidence yang sudah di-redact,
+tidak pernah resolved configuration values atau credentials.
+
 ### Exit Criteria
 
 - default database wiring membutuhkan zero bootstrap code di `main`;
 - custom Database provider dapat override default;
 - auto-config activation deterministic;
-- reason dapat dipakai oleh `mads doctor` di milestone berikutnya.
+- reason dapat dipakai oleh `mads doctor` di milestone v0.8.
+- `DatabaseBootstrap` tetap merupakan explicit override; embedded migrations
+  didaftarkan secara terpisah dan tidak pernah dihasilkan otomatis.
 
 ---
 
-# v0.5.5 — HTTP Browser and Authentication Features
+# v0.5.5 — HTTP Auto-Binding, Browser, and Authentication Features
 
 ## Objective
 
 Melengkapi HTTP runtime untuk browser application dengan CORS, cookie parsing,
 dan JWT authentication yang dapat diaktifkan melalui feature flags tanpa
 membuat `mads-core` bergantung pada HTTP atau cryptography.
+
+### HTTP Auto-Binding
+
+Host/port configuration and automatic listener binding deferred from the v0.3
+HTTP runtime belong to this milestone, not the v0.5.0 auto-configuration
+engine. Before implementation, the v0.5.5 design must explicitly resolve its
+configuration keys and defaults, source precedence, activation conditions,
+explicit-binding back-off behavior, diagnostics, and lifecycle/bind ordering.
+This timeline placement intentionally does not decide those contracts.
 
 ### First-Class Browser CORS
 
@@ -483,6 +504,8 @@ dependencies.
 
 ### Exit Criteria
 
+- the separately approved HTTP auto-binding contract is implemented and
+  covered by configuration, override, diagnostic, and runtime tests;
 - browser clients can call the API from `http://localhost:5173` with tested
   preflight and credentialed requests;
 - cookie parsing and `Set-Cookie` response behavior are covered by integration

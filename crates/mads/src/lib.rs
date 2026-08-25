@@ -1,9 +1,23 @@
 //! Public MADS.rs facade and feature composition boundary.
 //!
-//! The facade enables the v0.4 common HTTP integration, explicit Diesel
-//! persistence, and Tokio runtime by default; consumers can opt out of those
-//! defaults for a narrower core-only dependency surface. Database provisioning
-//! remains explicit in v0.4; v0.5 will own automatic provisioning.
+//! The facade enables the v0.5 common HTTP integration, conditional Diesel
+//! database provisioning, and Tokio runtime by default; consumers can opt out
+//! of those defaults for a narrower core-only dependency surface. Database
+//! configuration remains explicit: when a linked provider requires
+//! [`Database`] and no application provider supplies one, MADS configures the
+//! default database provider from the builder's resolved [`core::Config`].
+//! Applications must construct that configuration explicitly: [`core::Mads::builder`]
+//! does not load configuration files, dotenv values, or environment variables.
+//! The public [`AutoConfigurationReport`] records retained by analysis and a
+//! built application expose redacted decision evidence only. The v0.5 engine
+//! uses the complete provider catalog; module-scoped reachability is a v0.6
+//! boundary.
+//!
+//! [`DatabaseBootstrap`] remains the explicit database override. Otherwise an
+//! enabled database default may use one separately registered embedded migration
+//! source through [`MadsBuilderDatabaseExt::database_migrations`]; MADS neither
+//! generates migrations nor auto-loads them. HTTP listener addresses remain
+//! explicit, because HTTP auto-binding is deferred to v0.5.5.
 //!
 //! A controller implements a typed route contract. MADS validates the complete
 //! route catalog, resolves the application-scoped controller once, and builds
@@ -52,7 +66,31 @@
 //! }
 //! ```
 //!
-//! Configure persistence explicitly before building the application:
+//! Configure the database explicitly while leaving provider provisioning to
+//! the conditional default:
+//!
+//! ```no_run
+//! use mads::{
+//!     core::{ConfigBuilder, MapSource},
+//!     prelude::*,
+//! };
+//!
+//! #[mads::main]
+//! async fn main() {
+//!     let config = ConfigBuilder::new()
+//!         .source(MapSource::new(
+//!             "application",
+//!             [("database.url", "postgres://localhost/mads")],
+//!         ))
+//!         .build()
+//!         .unwrap();
+//!     let _application = Mads::builder_with_config(config).build().await.unwrap();
+//! }
+//! ```
+//!
+//! [`DatabaseBootstrap`] remains the explicit native Diesel escape hatch. It
+//! overrides the conditional default and retains direct control of the
+//! database lifecycle:
 //!
 //! ```no_run
 //! use mads::prelude::*;
@@ -91,6 +129,12 @@ pub use mads_core::module;
 /// Re-exports the general-purpose provider declaration attribute.
 pub use mads_core::provider;
 
+/// Re-exports auto-configuration inspection records.
+pub use mads_core::{
+    AutoConfigurationConfigEvidence, AutoConfigurationReasonCode, AutoConfigurationReport,
+    AutoConfigurationRequirement, AutoConfigurationStatus,
+};
+
 /// Re-exports the repository declaration attribute.
 pub use mads_core::repository;
 
@@ -117,7 +161,7 @@ pub use mads_common::diesel_migrations;
 #[cfg(feature = "common")]
 pub use mads_common::{
     Database, DatabaseBootstrap, DatabaseConfig, DatabaseError, DatabaseErrorKind,
-    DatabasePoolStatus, DatabaseResult, MADS100, MadsBuilderDatabaseExt, MigrationReport,
+    DatabasePoolStatus, DatabaseResult, MADS100, MADS101, MadsBuilderDatabaseExt, MigrationReport,
     MigrationStatus,
 };
 
@@ -212,7 +256,9 @@ pub mod prelude {
 
     /// Re-exports types used to build, run, and inspect an application.
     pub use mads_core::{
-        ApplicationContext, ApplicationGraph, Catalog, Config, ConfigBuilder, ConstructionPlan,
+        ApplicationContext, ApplicationGraph, AutoConfigurationConfigEvidence,
+        AutoConfigurationReasonCode, AutoConfigurationReport, AutoConfigurationRequirement,
+        AutoConfigurationStatus, Catalog, Config, ConfigBuilder, ConstructionPlan,
         ConstructionStep, DependencyEdge, Diagnostic, Error, GraphAnalysis, LifecycleHook,
         LifecycleState, Mads, MadsBuilder, ProviderNode, ProviderOrigin, ProviderState,
         ProviderVisibility, SourceLocation,

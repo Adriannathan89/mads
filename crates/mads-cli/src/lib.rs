@@ -1,4 +1,4 @@
-//! Development commands for inspecting MADS.rs 0.4 and managing migrations.
+//! Development commands for inspecting MADS.rs 0.5 and managing migrations.
 //!
 //! The `mads` executable accepts fixed help, version, foundation, and database
 //! migration commands. `mads db migrate`, `mads db rollback`, and `mads db

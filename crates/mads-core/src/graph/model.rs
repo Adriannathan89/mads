@@ -3,8 +3,8 @@
 use std::any::TypeId;
 
 use crate::{
-    DependencyDescriptor, Diagnostic, ProviderDescriptor, ProviderKind, ProviderVisibility,
-    SourceLocation,
+    AutoConfigurationReport, DependencyDescriptor, Diagnostic, ProviderDescriptor, ProviderKind,
+    ProviderVisibility, SourceLocation,
 };
 
 /// Describes how a provider enters an application graph.
@@ -12,6 +12,8 @@ use crate::{
 pub enum ProviderOrigin {
     /// A value supplied directly by the application.
     Provided,
+    /// A value supplied by an official auto-configuration integration.
+    AutoConfiguration,
     /// A service declaration.
     Service,
     /// A repository declaration.
@@ -37,6 +39,8 @@ pub enum ProviderState {
     Provided,
     /// A value manually constructed before automatic construction.
     Preconstructed,
+    /// A value selected from an official auto-configuration integration.
+    AutoConfigured,
     /// A statically declared provider awaiting construction.
     Planned,
 }
@@ -70,6 +74,14 @@ impl SatisfiedProvider {
             type_id: TypeId::of::<T>(),
             type_name: std::any::type_name::<T>(),
             state: ProviderState::Preconstructed,
+        }
+    }
+
+    pub(crate) fn auto_configured(type_id: TypeId, type_name: &'static str) -> Self {
+        Self {
+            type_id,
+            type_name,
+            state: ProviderState::AutoConfigured,
         }
     }
 }
@@ -221,6 +233,7 @@ pub struct GraphAnalysis {
     pub(crate) graph: ApplicationGraph,
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) construction_plan: Option<ConstructionPlan>,
+    pub(crate) auto_configurations: Vec<AutoConfigurationReport>,
 }
 
 impl GraphAnalysis {
@@ -234,6 +247,11 @@ impl GraphAnalysis {
         &self.diagnostics
     }
 
+    /// Returns reports for official auto-configurations evaluated during analysis.
+    pub fn auto_configurations(&self) -> &[AutoConfigurationReport] {
+        &self.auto_configurations
+    }
+
     /// Returns the deterministic construction plan when the graph is valid.
     pub const fn construction_plan(&self) -> Option<&ConstructionPlan> {
         self.construction_plan.as_ref()
@@ -244,9 +262,15 @@ impl GraphAnalysis {
         self.diagnostics.is_empty() && self.construction_plan.is_some()
     }
 
-    pub(crate) fn into_valid_parts(self) -> crate::Result<(ApplicationGraph, ConstructionPlan)> {
+    pub(crate) fn into_valid_parts(
+        self,
+    ) -> crate::Result<(
+        ApplicationGraph,
+        ConstructionPlan,
+        Vec<AutoConfigurationReport>,
+    )> {
         match (self.diagnostics.is_empty(), self.construction_plan) {
-            (true, Some(plan)) => Ok((self.graph, plan)),
+            (true, Some(plan)) => Ok((self.graph, plan, self.auto_configurations)),
             (false, _) => {
                 let mut diagnostics = self.diagnostics.into_iter();
                 let primary = diagnostics
@@ -293,6 +317,7 @@ mod tests {
             graph,
             diagnostics: Vec::new(),
             construction_plan: Some(ConstructionPlan { steps: Vec::new() }),
+            auto_configurations: Vec::new(),
         };
 
         assert!(analysis.is_valid());

@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+use std::any::TypeId;
 use std::cmp::Ordering;
 
 use crate::{
@@ -17,6 +18,7 @@ use super::{cycle, plan};
 pub(crate) fn analyze_parts(
     descriptors: &[&'static ProviderDescriptor],
     satisfied: &[SatisfiedProvider],
+    covered_missing: &[TypeId],
 ) -> GraphAnalysis {
     let mut descriptors = descriptors.to_vec();
     descriptors.sort_by(|left, right| descriptor_order(left, right));
@@ -83,10 +85,12 @@ pub(crate) fn analyze_parts(
             .copied()
             .find(|descriptor| descriptor.type_id() == satisfied_provider.type_id);
         let origin = match (satisfied_provider.state, matching_descriptor) {
+            (ProviderState::AutoConfigured, _) => ProviderOrigin::AutoConfiguration,
             (ProviderState::Provided, _) | (_, None) => ProviderOrigin::Provided,
             (_, Some(descriptor)) => descriptor.kind().into(),
         };
         let visibility = match (satisfied_provider.state, matching_descriptor) {
+            (ProviderState::AutoConfigured, _) => ProviderVisibility::Public,
             (ProviderState::Provided, _) | (_, None) => ProviderVisibility::Public,
             (_, Some(descriptor)) => descriptor.visibility(),
         };
@@ -142,7 +146,7 @@ pub(crate) fn analyze_parts(
                     dependency_type_id,
                     dependency_type_name: dependency.type_name(),
                 });
-            } else {
+            } else if !covered_missing.contains(&dependency_type_id) {
                 diagnostics.push(PendingDiagnostic::missing(provider, dependency));
             }
         }
@@ -171,6 +175,7 @@ pub(crate) fn analyze_parts(
         graph,
         diagnostics,
         construction_plan,
+        auto_configurations: Vec::new(),
     }
 }
 
@@ -199,7 +204,8 @@ fn provider_state_order(state: ProviderState) -> u8 {
     match state {
         ProviderState::Provided => 0,
         ProviderState::Preconstructed => 1,
-        ProviderState::Planned => 2,
+        ProviderState::AutoConfigured => 2,
+        ProviderState::Planned => 3,
     }
 }
 
@@ -537,7 +543,7 @@ mod tests {
     #[test]
     fn provided_values_override_one_descriptor_and_remain_public() {
         let satisfied = [SatisfiedProvider::provided::<Database>()];
-        let analysis = analyze_parts(&[&DATABASE_DESCRIPTOR], &satisfied);
+        let analysis = analyze_parts(&[&DATABASE_DESCRIPTOR], &satisfied, &[]);
 
         assert!(analysis.is_valid());
         let node = analysis.graph().provider::<Database>().unwrap();
@@ -553,6 +559,7 @@ mod tests {
         let analysis = analyze_parts(
             &[&DATABASE_DESCRIPTOR, &ALTERNATE_DATABASE_DESCRIPTOR],
             &satisfied,
+            &[],
         );
 
         assert_eq!(analysis.diagnostics().len(), 1);
@@ -563,7 +570,7 @@ mod tests {
 
     #[test]
     fn repeated_exact_identity_is_duplicate_not_ambiguous() {
-        let analysis = analyze_parts(&[&DATABASE_DESCRIPTOR, &DATABASE_DESCRIPTOR], &[]);
+        let analysis = analyze_parts(&[&DATABASE_DESCRIPTOR, &DATABASE_DESCRIPTOR], &[], &[]);
 
         assert_eq!(analysis.diagnostics().len(), 1);
         assert_eq!(analysis.diagnostics()[0].code(), MADS001);
@@ -578,6 +585,7 @@ mod tests {
                 &DATABASE_DESCRIPTOR,
             ],
             &[],
+            &[],
         );
 
         assert_eq!(analysis.diagnostics().len(), 1);
@@ -588,6 +596,7 @@ mod tests {
     fn unresolved_dependencies_are_aggregated_in_stable_type_order() {
         let analysis = analyze_parts(
             &[&FIRST_MISSING_DESCRIPTOR, &SECOND_MISSING_DESCRIPTOR],
+            &[],
             &[],
         );
         let codes: Vec<_> = analysis
@@ -607,8 +616,25 @@ mod tests {
     }
 
     #[test]
+    fn covered_missing_dependencies_suppress_only_their_own_diagnostic() {
+        let analysis = analyze_parts(
+            &[&FIRST_MISSING_DESCRIPTOR, &SECOND_MISSING_DESCRIPTOR],
+            &[],
+            &[absent_alpha_type_id()],
+        );
+
+        assert_eq!(analysis.diagnostics().len(), 1);
+        assert_eq!(analysis.diagnostics()[0].code(), MADS003);
+        assert!(
+            analysis.diagnostics()[0]
+                .to_string()
+                .contains("subject: fixture::AbsentZeta")
+        );
+    }
+
+    #[test]
     fn self_cycle_renders_a_closed_path() {
-        let analysis = analyze_parts(&[&SELF_CYCLE_DESCRIPTOR], &[]);
+        let analysis = analyze_parts(&[&SELF_CYCLE_DESCRIPTOR], &[], &[]);
 
         assert_eq!(analysis.diagnostics()[0].code(), MADS005);
         assert!(
@@ -620,8 +646,8 @@ mod tests {
 
     #[test]
     fn multi_node_cycle_is_canonical_regardless_of_input_order() {
-        let first = analyze_parts(&[&C_DESCRIPTOR, &A_DESCRIPTOR, &B_DESCRIPTOR], &[]);
-        let second = analyze_parts(&[&B_DESCRIPTOR, &C_DESCRIPTOR, &A_DESCRIPTOR], &[]);
+        let first = analyze_parts(&[&C_DESCRIPTOR, &A_DESCRIPTOR, &B_DESCRIPTOR], &[], &[]);
+        let second = analyze_parts(&[&B_DESCRIPTOR, &C_DESCRIPTOR, &A_DESCRIPTOR], &[], &[]);
 
         assert_eq!(first.diagnostics(), second.diagnostics());
         assert!(
@@ -640,6 +666,7 @@ mod tests {
                 &PLAN_DATABASE_DESCRIPTOR,
                 &ALPHA_DESCRIPTOR,
             ],
+            &[],
             &[],
         );
         let names: Vec<_> = analysis
@@ -667,7 +694,11 @@ mod tests {
             SatisfiedProvider::provided::<Alpha>(),
             SatisfiedProvider::preconstructed::<PlanDatabase>(),
         ];
-        let analysis = analyze_parts(&[&ALPHA_DESCRIPTOR, &PLAN_DATABASE_DESCRIPTOR], &satisfied);
+        let analysis = analyze_parts(
+            &[&ALPHA_DESCRIPTOR, &PLAN_DATABASE_DESCRIPTOR],
+            &satisfied,
+            &[],
+        );
 
         assert!(analysis.construction_plan().unwrap().steps().is_empty());
         assert_eq!(

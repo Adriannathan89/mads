@@ -75,6 +75,8 @@ fn expand_provider(item: ItemFn) -> syn::Result<TokenStream> {
     let core = core_path()?;
     let provider_visibility = provider_visibility(&item.vis, &core);
     let ident = &item.sig.ident;
+    let type_id_ident = format_ident!("__mads_type_id_{ident}");
+    let runtime_type_name_ident = format_ident!("__mads_runtime_type_name_{ident}");
     let return_type = match &item.sig.output {
         ReturnType::Type(_, return_type) => return_type.as_ref(),
         ReturnType::Default => unreachable!("provider return type was validated"),
@@ -142,16 +144,29 @@ fn expand_provider(item: ItemFn) -> syn::Result<TokenStream> {
                 })
             }
 
+            #[doc(hidden)]
+            #[allow(non_snake_case)]
+            fn #type_id_ident() -> ::core::any::TypeId {
+                ::core::any::TypeId::of::<#output_type>()
+            }
+
+            #[doc(hidden)]
+            #[allow(non_snake_case)]
+            fn #runtime_type_name_ident() -> &'static str {
+                ::core::any::type_name::<#output_type>()
+            }
+
             #core::__private::inventory::submit! {
                 #core::ProviderDescriptor::new(
                     #core::ProviderKind::Provider,
                     stringify!(#output_type),
-                    || ::core::any::TypeId::of::<#output_type>(),
+                    #type_id_ident,
                     &[#(#dependency_descriptors,)*],
                     #provider_visibility,
                     #core::SourceLocation::new(file!(), line!(), column!()),
                     __mads_construct,
                 )
+                .with_runtime_type_name(#runtime_type_name_ident)
             }
         };
     })

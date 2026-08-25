@@ -196,3 +196,67 @@ async fn reports_rollback_failures_without_replacing_the_startup_cause() {
         ["start:database", "start:worker", "stop:database"]
     );
 }
+
+#[tokio::test]
+async fn infrastructure_sorts_by_owner_before_application_registration_order() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let context = ApplicationContext::new(Default::default(), Config::empty());
+    let mut lifecycle = LifecycleManager::new();
+    lifecycle.add_hook(RecordingHook::new("app-first", Arc::clone(&events)));
+    lifecycle.add_infrastructure_hook(
+        "zeta.infrastructure",
+        RecordingHook::new("zeta", Arc::clone(&events)),
+    );
+    lifecycle.add_infrastructure_hook(
+        "alpha.infrastructure",
+        RecordingHook::new("alpha", Arc::clone(&events)),
+    );
+    lifecycle.add_hook(RecordingHook::new("app-second", Arc::clone(&events)));
+
+    lifecycle.start(&context).await.unwrap();
+    lifecycle.shutdown(&context).await.unwrap();
+
+    assert_eq!(
+        *events.lock().unwrap(),
+        [
+            "start:alpha",
+            "start:zeta",
+            "start:app-first",
+            "start:app-second",
+            "stop:app-second",
+            "stop:app-first",
+            "stop:zeta",
+            "stop:alpha",
+        ],
+    );
+}
+
+#[tokio::test]
+async fn failed_application_start_rolls_back_application_then_infrastructure() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let context = ApplicationContext::new(Default::default(), Config::empty());
+    let mut lifecycle = LifecycleManager::new();
+    lifecycle.add_hook(RecordingHook::new("app-ok", Arc::clone(&events)));
+    lifecycle.add_infrastructure_hook(
+        "mads.infrastructure",
+        RecordingHook::new("database", Arc::clone(&events)),
+    );
+    lifecycle.add_hook(RecordingHook::failing_start(
+        "app-fail",
+        Arc::clone(&events),
+    ));
+
+    let error = lifecycle.start(&context).await.unwrap_err();
+
+    assert_eq!(error.code(), MADS011);
+    assert_eq!(
+        *events.lock().unwrap(),
+        [
+            "start:database",
+            "start:app-ok",
+            "start:app-fail",
+            "stop:app-ok",
+            "stop:database",
+        ],
+    );
+}

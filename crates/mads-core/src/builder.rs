@@ -2,10 +2,13 @@
 
 use std::collections::VecDeque;
 
+use crate::auto_configuration::{
+    self, AutoConfigurationApplyContext, AutoConfigurationDescriptor, AutoConfigurationInputs,
+};
 use crate::{
-    ApplicationContext, ApplicationGraph, Catalog, Config, ConstructionContext, ConstructionPlan,
-    ConstructionStep, Diagnostic, Error, GraphAnalysis, LifecycleHook, LifecycleManager,
-    LifecycleState, MADS006, ProviderRegistry, Result,
+    ApplicationContext, ApplicationGraph, AutoConfigurationReport, Catalog, Config,
+    ConstructionContext, ConstructionPlan, ConstructionStep, Diagnostic, Error, GraphAnalysis,
+    LifecycleHook, LifecycleManager, LifecycleState, MADS006, ProviderRegistry, Result,
     graph::{SatisfiedProvider, analyze_catalog},
 };
 
@@ -14,6 +17,7 @@ pub struct MadsBuilder {
     config: Config,
     registry: ProviderRegistry,
     satisfied: Vec<SatisfiedProvider>,
+    auto_configuration_inputs: AutoConfigurationInputs,
     lifecycle: LifecycleManager,
 }
 
@@ -29,6 +33,7 @@ impl MadsBuilder {
             config,
             registry,
             satisfied: vec![SatisfiedProvider::provided::<Config>()],
+            auto_configuration_inputs: AutoConfigurationInputs::default(),
             lifecycle: LifecycleManager::new(),
         }
     }
@@ -65,7 +70,17 @@ impl MadsBuilder {
 
     /// Analyzes the complete provider graph without invoking constructors.
     pub fn analyze(&self) -> GraphAnalysis {
-        analyze_catalog(&self.satisfied)
+        self.analyze_builder().public
+    }
+
+    /// Registers a private input for an official auto-configuration integration.
+    #[doc(hidden)]
+    pub fn __auto_configuration_input<T: Send + Sync + 'static>(
+        &mut self,
+        identifier: &'static str,
+        input: T,
+    ) -> bool {
+        self.auto_configuration_inputs.insert(identifier, input)
     }
 
     /// Registers a hook that runs when the completed application starts and stops.
@@ -77,10 +92,47 @@ impl MadsBuilder {
         self
     }
 
+    /// Registers a framework-owned infrastructure lifecycle hook.
+    #[doc(hidden)]
+    pub fn __infrastructure_lifecycle_hook<H>(&mut self, owner: &'static str, hook: H) -> &mut Self
+    where
+        H: LifecycleHook + 'static,
+    {
+        self.lifecycle.add_infrastructure_hook(owner, hook);
+        self
+    }
+
     /// Validates and automatically constructs the complete application graph.
     #[allow(clippy::result_large_err)]
     pub async fn build(mut self) -> Result<Mads> {
-        let (graph, construction_plan) = self.analyze().into_valid_parts()?;
+        let BuilderAnalysis {
+            public,
+            selected,
+            failure,
+        } = self.analyze_builder();
+        if !public.is_valid() {
+            return Err(build_analysis_error(public, failure));
+        }
+        let (graph, construction_plan, auto_configurations) = public.into_valid_parts()?;
+
+        for descriptor in selected {
+            let context = AutoConfigurationApplyContext::new(
+                descriptor.identifier(),
+                &self.config,
+                &self.auto_configuration_inputs,
+            );
+            let contribution = (descriptor.applier())(&context)?;
+            let (provider, hooks) = contribution.into_parts();
+            self.registry.insert_erased(
+                descriptor.output_type_id(),
+                descriptor.output_type_name(),
+                provider,
+            )?;
+            for hook in hooks {
+                self.lifecycle
+                    .add_boxed_infrastructure_hook(descriptor.identifier(), hook);
+            }
+        }
 
         for step in construction_plan.steps() {
             let value = {
@@ -98,8 +150,38 @@ impl MadsBuilder {
             lifecycle: self.lifecycle,
             graph,
             construction_plan,
+            auto_configurations,
         })
     }
+
+    fn analyze_builder(&self) -> BuilderAnalysis {
+        let providers = Catalog::providers();
+        let auto_configuration = auto_configuration::analyze_parts(
+            &auto_configuration::descriptors(),
+            &providers,
+            &self.satisfied,
+            &self.config,
+            &self.auto_configuration_inputs,
+        );
+        let mut satisfied = self.satisfied.clone();
+        satisfied.extend(auto_configuration.virtual_satisfied);
+
+        let mut public = analyze_catalog(&satisfied, &auto_configuration.covered_missing);
+        public.auto_configurations = auto_configuration.reports;
+        public.diagnostics.extend(auto_configuration.diagnostics);
+
+        BuilderAnalysis {
+            public,
+            selected: auto_configuration.selected,
+            failure: auto_configuration.failure,
+        }
+    }
+}
+
+struct BuilderAnalysis {
+    public: GraphAnalysis,
+    selected: Vec<&'static AutoConfigurationDescriptor>,
+    failure: Option<Error>,
 }
 
 /// An explicitly constructed application and its lifecycle state.
@@ -108,6 +190,7 @@ pub struct Mads {
     lifecycle: LifecycleManager,
     graph: ApplicationGraph,
     construction_plan: ConstructionPlan,
+    auto_configurations: Vec<AutoConfigurationReport>,
 }
 
 impl Mads {
@@ -141,6 +224,11 @@ impl Mads {
         &self.construction_plan
     }
 
+    /// Returns reports for official auto-configurations evaluated before the build.
+    pub fn auto_configurations(&self) -> &[AutoConfigurationReport] {
+        &self.auto_configurations
+    }
+
     /// Starts registered lifecycle hooks.
     #[allow(clippy::result_large_err)]
     pub async fn start(&mut self) -> Result<()> {
@@ -152,6 +240,29 @@ impl Mads {
     pub async fn shutdown(&mut self) -> Result<()> {
         self.lifecycle.shutdown(&self.context).await
     }
+}
+
+fn build_analysis_error(public: GraphAnalysis, failure: Option<Error>) -> Error {
+    let GraphAnalysis { diagnostics, .. } = public;
+    if let Some(failure) = failure {
+        let primary = failure.diagnostic().clone();
+        let mut primary_removed = false;
+        let related = diagnostics.into_iter().filter(|diagnostic| {
+            if !primary_removed && *diagnostic == primary {
+                primary_removed = true;
+                false
+            } else {
+                true
+            }
+        });
+        return failure.with_related_diagnostics(related);
+    }
+
+    let mut diagnostics = diagnostics.into_iter();
+    let primary = diagnostics
+        .next()
+        .expect("invalid analysis has diagnostics");
+    Error::from_diagnostics(primary, diagnostics)
 }
 
 fn provider_construction_error(

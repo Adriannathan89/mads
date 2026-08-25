@@ -36,9 +36,10 @@ fn prelude_exposes_the_http_runtime_surface() {
 fn prelude_exposes_the_database_runtime_surface() {
     use mads::diesel_migrations;
     use mads::prelude::{
-        Database, DatabaseBootstrap, DatabaseConfig, DatabaseError, DatabaseErrorKind,
-        DatabasePoolStatus, DatabaseResult, MadsBuilderDatabaseExt, MigrationReport,
-        MigrationStatus,
+        AutoConfigurationConfigEvidence, AutoConfigurationReasonCode, AutoConfigurationReport,
+        AutoConfigurationRequirement, AutoConfigurationStatus, Database, DatabaseBootstrap,
+        DatabaseConfig, DatabaseError, DatabaseErrorKind, DatabasePoolStatus, DatabaseResult,
+        MadsBuilderDatabaseExt, MigrationReport, MigrationStatus,
     };
 
     let _ = std::any::TypeId::of::<Database>();
@@ -50,6 +51,11 @@ fn prelude_exposes_the_database_runtime_surface() {
     let _ = std::any::TypeId::of::<DatabaseResult<()>>();
     let _ = std::any::TypeId::of::<MigrationReport>();
     let _ = std::any::TypeId::of::<MigrationStatus>();
+    let _ = std::any::TypeId::of::<AutoConfigurationConfigEvidence>();
+    let _ = std::any::TypeId::of::<AutoConfigurationReasonCode>();
+    let _ = std::any::TypeId::of::<AutoConfigurationReport>();
+    let _ = std::any::TypeId::of::<AutoConfigurationRequirement>();
+    let _ = std::any::TypeId::of::<AutoConfigurationStatus>();
 
     fn needs_extension<T: MadsBuilderDatabaseExt>() {}
     needs_extension::<mads::core::MadsBuilder>();
@@ -58,9 +64,13 @@ fn prelude_exposes_the_database_runtime_surface() {
     const MIGRATIONS: mads::diesel_migrations::EmbeddedMigrations =
         mads::diesel_migrations::embed_migrations!("tests/fixtures/empty_migrations");
     let _: mads::diesel_migrations::EmbeddedMigrations = MIGRATIONS;
+    let mut builder = mads::core::Mads::builder();
+    builder.database_migrations(MIGRATIONS).unwrap();
 
     let _ = std::any::TypeId::of::<mads::Database>();
     assert_eq!(mads::MADS100.as_str(), "MADS100");
+    assert_eq!(mads::core::MADS007.as_str(), "MADS007");
+    assert_eq!(mads::MADS101.as_str(), "MADS101");
 }
 
 #[test]

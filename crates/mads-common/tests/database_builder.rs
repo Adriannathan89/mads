@@ -1,9 +1,13 @@
 //! Explicit database bootstrap and graph integration contracts.
 
 use std::any::TypeId;
+use std::sync::{Arc, Mutex};
 
 use mads_common::{Database, DatabaseBootstrap, DatabaseConfig, MADS100, MadsBuilderDatabaseExt};
-use mads_core::{Catalog, MADS001, Mads, ProviderOrigin};
+use mads_core::{
+    ApplicationContext, AutoConfigurationStatus, Catalog, LifecycleFuture, LifecycleHook, MADS001,
+    MADS011, Mads, ProviderOrigin,
+};
 
 const MIGRATIONS: diesel_migrations::EmbeddedMigrations =
     diesel_migrations::embed_migrations!("tests/fixtures/compile_migrations");
@@ -27,6 +31,15 @@ async fn explicit_database_registration_satisfies_repository_dependency() {
             DatabaseConfig::new("postgres://localhost/mads").unwrap(),
         ))
         .unwrap();
+    let analysis = builder.analyze();
+    assert_eq!(
+        analysis.auto_configurations()[0].status(),
+        AutoConfigurationStatus::Overridden,
+    );
+    assert_eq!(
+        analysis.auto_configurations()[0].reason_code().as_str(),
+        "user_override",
+    );
     let application = builder.build().await.unwrap();
 
     assert_eq!(
@@ -45,6 +58,47 @@ async fn explicit_database_registration_satisfies_repository_dependency() {
             .unwrap()
             .is_closed()
     );
+}
+
+struct RecordingApplicationHook(Arc<Mutex<Vec<&'static str>>>);
+
+impl LifecycleHook for RecordingApplicationHook {
+    fn name(&self) -> &str {
+        "application"
+    }
+
+    fn start<'a>(&'a self, _: &'a ApplicationContext) -> LifecycleFuture<'a> {
+        Box::pin(async move {
+            self.0.lock().unwrap().push("start");
+            Ok(())
+        })
+    }
+
+    fn stop<'a>(&'a self, _: &'a ApplicationContext) -> LifecycleFuture<'a> {
+        Box::pin(async move {
+            self.0.lock().unwrap().push("stop");
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test]
+async fn explicit_database_infrastructure_failure_precedes_application_hooks() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let mut builder = Mads::builder();
+    builder.lifecycle_hook(RecordingApplicationHook(Arc::clone(&events)));
+    builder
+        .database(DatabaseBootstrap::new(
+            DatabaseConfig::new("postgres://localhost/mads").unwrap(),
+        ))
+        .unwrap();
+    let mut application = builder.build().await.unwrap();
+    application.context().resolve::<Database>().unwrap().close();
+
+    let error = application.start().await.unwrap_err();
+
+    assert_eq!(error.code(), MADS011);
+    assert!(events.lock().unwrap().is_empty());
 }
 
 #[test]

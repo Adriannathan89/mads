@@ -42,6 +42,9 @@ pub const MADS005: DiagnosticCode = DiagnosticCode::new("MADS005");
 /// Provider construction failure.
 pub const MADS006: DiagnosticCode = DiagnosticCode::new("MADS006");
 
+/// Auto-configuration failure.
+pub const MADS007: DiagnosticCode = DiagnosticCode::new("MADS007");
+
 /// Invalid lifecycle state transition.
 pub const MADS010: DiagnosticCode = DiagnosticCode::new("MADS010");
 
@@ -168,6 +171,14 @@ impl Error {
             diagnostics,
             source: None,
         }
+    }
+
+    pub(crate) fn with_related_diagnostics(
+        mut self,
+        related: impl IntoIterator<Item = Diagnostic>,
+    ) -> Self {
+        self.diagnostics.extend(related);
+        self
     }
 
     /// Creates an error from a structured diagnostic and an underlying cause.

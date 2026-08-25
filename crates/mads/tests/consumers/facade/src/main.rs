@@ -6,7 +6,9 @@ use mads::prelude::*;
 struct AppModule;
 
 #[repository]
-struct Repository;
+struct Repository {
+    database: Database,
+}
 
 #[routes]
 trait Routes {
@@ -21,12 +23,26 @@ impl Routes for Controller {
     async fn index(&self) {}
 }
 
-async fn build_application() -> mads::core::Result<()> {
-    let application = Mads::builder().build().await?;
-    let _router = build_router(&application)?;
-    Ok(())
+fn inspect_auto_configuration() {
+    let config = mads::core::ConfigBuilder::new()
+        .source(mads::core::MapSource::new(
+            "consumer",
+            [("database.url", "postgres://localhost/mads")],
+        ))
+        .build()
+        .unwrap();
+    let analysis = Mads::builder_with_config(config).analyze();
+
+    assert_eq!(
+        analysis.auto_configurations()[0].status(),
+        AutoConfigurationStatus::Active,
+    );
+    assert_eq!(
+        analysis.graph().provider::<Database>().unwrap().origin(),
+        ProviderOrigin::AutoConfiguration,
+    );
 }
 
 fn main() {
-    let _ = build_application;
+    let _ = inspect_auto_configuration;
 }
