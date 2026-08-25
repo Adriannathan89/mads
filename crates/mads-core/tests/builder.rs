@@ -234,6 +234,43 @@ impl LifecycleHook for ApplicationHook {
     }
 }
 
+struct NamedHook {
+    name: &'static str,
+    events: Arc<Mutex<Vec<String>>>,
+}
+
+impl NamedHook {
+    fn new(name: &'static str, events: Arc<Mutex<Vec<String>>>) -> Self {
+        Self { name, events }
+    }
+}
+
+impl LifecycleHook for NamedHook {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn start<'a>(&'a self, _: &'a ApplicationContext) -> LifecycleFuture<'a> {
+        Box::pin(async move {
+            self.events
+                .lock()
+                .expect("event lock should not be poisoned")
+                .push(format!("start:{}", self.name));
+            Ok(())
+        })
+    }
+
+    fn stop<'a>(&'a self, _: &'a ApplicationContext) -> LifecycleFuture<'a> {
+        Box::pin(async move {
+            self.events
+                .lock()
+                .expect("event lock should not be poisoned")
+                .push(format!("stop:{}", self.name));
+            Ok(())
+        })
+    }
+}
+
 #[tokio::test]
 async fn built_application_owns_and_runs_registered_lifecycle_hooks() {
     reset_database_constructions();
@@ -264,5 +301,30 @@ async fn built_application_owns_and_runs_registered_lifecycle_hooks() {
     assert_eq!(
         *events.lock().expect("event lock should not be poisoned"),
         ["start", "stop"]
+    );
+}
+
+#[tokio::test]
+async fn builder_groups_infrastructure_before_application_regardless_of_call_order() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let mut builder = Mads::builder();
+    builder.lifecycle_hook(NamedHook::new("application", Arc::clone(&events)));
+    builder.__infrastructure_lifecycle_hook(
+        "mads.test.infrastructure",
+        NamedHook::new("infrastructure", Arc::clone(&events)),
+    );
+    let mut application = builder.build().await.unwrap();
+
+    application.start().await.unwrap();
+    application.shutdown().await.unwrap();
+
+    assert_eq!(
+        *events.lock().unwrap(),
+        [
+            "start:infrastructure",
+            "start:application",
+            "stop:application",
+            "stop:infrastructure",
+        ],
     );
 }

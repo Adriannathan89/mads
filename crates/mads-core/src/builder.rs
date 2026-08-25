@@ -77,6 +77,16 @@ impl MadsBuilder {
         self
     }
 
+    /// Registers a framework-owned infrastructure lifecycle hook.
+    #[doc(hidden)]
+    pub fn __infrastructure_lifecycle_hook<H>(&mut self, owner: &'static str, hook: H) -> &mut Self
+    where
+        H: LifecycleHook + 'static,
+    {
+        self.lifecycle.add_infrastructure_hook(owner, hook);
+        self
+    }
+
     /// Validates and automatically constructs the complete application graph.
     #[allow(clippy::result_large_err)]
     pub async fn build(mut self) -> Result<Mads> {

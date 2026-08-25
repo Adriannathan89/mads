@@ -5,6 +5,17 @@ use std::pin::Pin;
 
 use crate::{ApplicationContext, Diagnostic, Error, MADS010, MADS011, Result};
 
+enum HookGroup {
+    Infrastructure(&'static str),
+    Application,
+}
+
+struct RegisteredHook {
+    group: HookGroup,
+    sequence: usize,
+    hook: Box<dyn LifecycleHook>,
+}
+
 /// The lifecycle state of an application.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LifecycleState {
@@ -38,7 +49,8 @@ pub trait LifecycleHook: Send + Sync {
 /// Coordinates ordered lifecycle hooks for one application.
 pub struct LifecycleManager {
     state: LifecycleState,
-    hooks: Vec<Box<dyn LifecycleHook>>,
+    hooks: Vec<RegisteredHook>,
+    next_sequence: usize,
 }
 
 impl LifecycleManager {
@@ -47,6 +59,7 @@ impl LifecycleManager {
         Self {
             state: LifecycleState::Created,
             hooks: Vec::new(),
+            next_sequence: 0,
         }
     }
 
@@ -55,8 +68,36 @@ impl LifecycleManager {
     where
         H: LifecycleHook + 'static,
     {
-        self.hooks.push(Box::new(hook));
+        self.hooks.push(RegisteredHook {
+            group: HookGroup::Application,
+            sequence: self.next_sequence,
+            hook: Box::new(hook),
+        });
+        self.next_sequence += 1;
         self
+    }
+
+    /// Adds an infrastructure hook owned by the named framework component.
+    #[doc(hidden)]
+    pub fn add_infrastructure_hook<H>(&mut self, owner: &'static str, hook: H) -> &mut Self
+    where
+        H: LifecycleHook + 'static,
+    {
+        self.add_boxed_infrastructure_hook(owner, Box::new(hook));
+        self
+    }
+
+    pub(crate) fn add_boxed_infrastructure_hook(
+        &mut self,
+        owner: &'static str,
+        hook: Box<dyn LifecycleHook>,
+    ) {
+        self.hooks.push(RegisteredHook {
+            group: HookGroup::Infrastructure(owner),
+            sequence: self.next_sequence,
+            hook,
+        });
+        self.next_sequence += 1;
     }
 
     /// Returns the manager's current lifecycle state.
@@ -64,7 +105,7 @@ impl LifecycleManager {
         self.state
     }
 
-    /// Starts all hooks in registration order.
+    /// Starts infrastructure hooks by owner before application hooks in registration order.
     #[allow(clippy::result_large_err)]
     pub async fn start(&mut self, context: &ApplicationContext) -> Result<()> {
         if self.state != LifecycleState::Created {
@@ -72,14 +113,29 @@ impl LifecycleManager {
         }
 
         self.state = LifecycleState::Starting;
+        self.hooks
+            .sort_by(|left, right| match (&left.group, &right.group) {
+                (HookGroup::Infrastructure(left_owner), HookGroup::Infrastructure(right_owner)) => {
+                    left_owner
+                        .cmp(right_owner)
+                        .then(left.sequence.cmp(&right.sequence))
+                }
+                (HookGroup::Infrastructure(_), HookGroup::Application) => std::cmp::Ordering::Less,
+                (HookGroup::Application, HookGroup::Infrastructure(_)) => {
+                    std::cmp::Ordering::Greater
+                }
+                (HookGroup::Application, HookGroup::Application) => {
+                    left.sequence.cmp(&right.sequence)
+                }
+            });
         let mut started: Vec<usize> = Vec::new();
 
         for index in 0..self.hooks.len() {
-            let hook = self.hooks[index].as_ref();
+            let hook = self.hooks[index].hook.as_ref();
             if let Err(error) = hook.start(context).await {
                 let mut diagnostic = hook_failure_diagnostic(hook.name(), "startup");
                 for started_index in started.into_iter().rev() {
-                    let rollback_hook = self.hooks[started_index].as_ref();
+                    let rollback_hook = self.hooks[started_index].hook.as_ref();
                     if let Err(rollback_error) = rollback_hook.stop(context).await {
                         diagnostic = diagnostic.with_suggestion(format!(
                             "rollback hook {} failed: {rollback_error}",
@@ -97,7 +153,7 @@ impl LifecycleManager {
         Ok(())
     }
 
-    /// Stops all hooks in reverse registration order.
+    /// Stops all hooks in reverse successful startup order.
     #[allow(clippy::result_large_err)]
     pub async fn shutdown(&mut self, context: &ApplicationContext) -> Result<()> {
         if self.state != LifecycleState::Running {
@@ -107,7 +163,8 @@ impl LifecycleManager {
         self.state = LifecycleState::Stopping;
         let mut failure = None;
 
-        for hook in self.hooks.iter().rev() {
+        for registration in self.hooks.iter().rev() {
+            let hook = registration.hook.as_ref();
             if let Err(error) = hook.stop(context).await {
                 if failure.is_none() {
                     failure = Some(hook_failure(hook.name(), "shutdown", error));
