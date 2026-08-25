@@ -6,6 +6,18 @@
 //! configuration remains explicit: when a linked provider requires
 //! [`Database`] and no application provider supplies one, MADS configures the
 //! default database provider from the builder's resolved [`core::Config`].
+//! Applications must construct that configuration explicitly: [`core::Mads::builder`]
+//! does not load configuration files, dotenv values, or environment variables.
+//! The public [`AutoConfigurationReport`] records retained by analysis and a
+//! built application expose redacted decision evidence only. The v0.5 engine
+//! uses the complete provider catalog; module-scoped reachability is a v0.6
+//! boundary.
+//!
+//! [`DatabaseBootstrap`] remains the explicit database override. Otherwise an
+//! enabled database default may use one separately registered embedded migration
+//! source through [`MadsBuilderDatabaseExt::database_migrations`]; MADS neither
+//! generates migrations nor auto-loads them. HTTP listener addresses remain
+//! explicit, because HTTP auto-binding is deferred to v0.5.5.
 //!
 //! A controller implements a typed route contract. MADS validates the complete
 //! route catalog, resolves the application-scoped controller once, and builds

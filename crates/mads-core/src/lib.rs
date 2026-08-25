@@ -5,8 +5,16 @@
 //! interpolation, programmatic and environment sources, provider metadata, and
 //! dependency graph analysis. Dotenv values only participate in interpolation:
 //! they do not mutate process state, and real process variables take
-//! precedence. It re-exports the core procedural macros without introducing
-//! integration dependencies.
+//! precedence. Applications construct configuration explicitly; [`Mads::builder`]
+//! does not load files, dotenv variables, or process environment variables.
+//!
+//! Core also owns deterministic evaluation of official conditional defaults and
+//! the public, retained [`AutoConfigurationReport`] records that explain their
+//! decisions. Reports retain only stable identifiers, reason codes, and redacted
+//! configuration evidence; they never retain resolved configuration values. The
+//! v0.5 catalog is complete across statically discovered providers. Module-scoped
+//! reachability is deferred to v0.6. Core re-exports the procedural macros
+//! without introducing integration dependencies.
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]

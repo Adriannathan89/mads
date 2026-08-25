@@ -1,6 +1,7 @@
 # v0.5 — Auto-Configuration Engine Requirements
 
-**Status:** Design approved; implementation has not started.
+**Status:** Implemented in v0.5.0. This document records the approved
+requirements and compatibility boundary.
 
 The authoritative design is
 [`docs/superpowers/specs/2026-08-23-v0.5-auto-configuration-design.md`](../../superpowers/specs/2026-08-23-v0.5-auto-configuration-design.md).

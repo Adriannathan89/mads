@@ -378,12 +378,24 @@ OVERRIDDEN
 FAILED
 ```
 
+Configuration loading tetap explicit: `Mads::builder()` tidak memuat `.env`,
+`mads.toml`, atau `MADS_*` secara otomatis. Requirements memakai complete
+statically discovered provider catalog pada v0.5; v0.6 menggantinya dengan
+reachability dari root `AppModule`.
+
+v0.5 tidak menambahkan chained defaults, priority selection, module scoping,
+third-party registration API, migration generation, proactive schema checks,
+atau `mads doctor`. Reports hanya menyimpan evidence yang sudah di-redact,
+tidak pernah resolved configuration values atau credentials.
+
 ### Exit Criteria
 
 - default database wiring membutuhkan zero bootstrap code di `main`;
 - custom Database provider dapat override default;
 - auto-config activation deterministic;
-- reason dapat dipakai oleh `mads doctor` di milestone berikutnya.
+- reason dapat dipakai oleh `mads doctor` di milestone v0.8.
+- `DatabaseBootstrap` tetap merupakan explicit override; embedded migrations
+  didaftarkan secara terpisah dan tidak pernah dihasilkan otomatis.
 
 ---
 

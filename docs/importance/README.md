@@ -10,6 +10,7 @@ scope dan boundary tepat untuk menyelesaikannya.
 | v0.2 | [Dependency ownership](version_0.2/dependency-ownership.md), [follow-up findings](version_0.2/follow_up.md) | Graph provider, ownership dependency, construction planning, dan temuan migrasi lanjutan. |
 | v0.3 | [HTTP route runtime](version_0.3/http-route-runtime.md) | Axum adapter, dispatch handler, dan validasi route application-wide. |
 | v0.4 | [Diesel persistence](version_0.4/diesel-persistence.md) | Explicit PostgreSQL/Diesel pool, migrations, and release gates. |
+| v0.5 | [Auto-configuration engine](version_0.5/auto-configuration.md) | Official conditional defaults, redacted inspection, database lifecycle, and release gates. |
 
 Status dalam dokumen:
 
