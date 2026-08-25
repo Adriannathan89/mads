@@ -179,7 +179,7 @@ impl JwtService {
             return Err(JwtError::new(JwtErrorKind::TokenKindMismatch));
         }
 
-        if claims.expires_at < now.saturating_sub(self.inner.policy.clock_skew_seconds) {
+        if claims.expires_at <= now.saturating_sub(self.inner.policy.clock_skew_seconds) {
             return Err(JwtError::new(JwtErrorKind::Expired));
         }
         if let Some(not_before) = claims.not_before {
@@ -609,5 +609,88 @@ impl<'de> Visitor<'de> for StrictJsonVisitor {
             }
         }
         Ok(StrictJsonValue::Object(values))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mads_core::{ConfigBuilder, MapSource};
+
+    use super::*;
+
+    const SECRET: &str = "01234567890123456789012345678901";
+
+    fn service_with_clock_skew(clock_skew_seconds: u64) -> JwtService {
+        let config = ConfigBuilder::new()
+            .source(MapSource::new(
+                "test",
+                [
+                    ("passport.secret", SECRET.to_owned()),
+                    (
+                        "passport.clock_skew_seconds",
+                        clock_skew_seconds.to_string(),
+                    ),
+                ],
+            ))
+            .build()
+            .unwrap();
+        JwtService::from_config(&config).unwrap()
+    }
+
+    fn access_header() -> JwtHeader {
+        JwtHeader {
+            algorithm: JwtAlgorithm::Hs256,
+            key_id: None,
+            token_type: Some(JwtTokenKind::Access.header_type().to_owned()),
+        }
+    }
+
+    fn access_claims(expires_at: u64) -> RegisteredJwtClaims {
+        RegisteredJwtClaims {
+            issuer: None,
+            subject: None,
+            audiences: Vec::new(),
+            expires_at,
+            not_before: None,
+            issued_at: 1,
+            jwt_id: None,
+            token_kind: JwtTokenKind::Access,
+        }
+    }
+
+    #[test]
+    fn expiration_at_current_time_is_expired_without_clock_skew() {
+        let service = service_with_clock_skew(0);
+
+        assert_eq!(
+            service
+                .validate_claims(
+                    &access_header(),
+                    &access_claims(100),
+                    &JwtValidation::access(),
+                    100,
+                )
+                .unwrap_err()
+                .kind(),
+            JwtErrorKind::Expired,
+        );
+    }
+
+    #[test]
+    fn expiration_at_skew_adjusted_current_time_is_expired() {
+        let service = service_with_clock_skew(30);
+
+        assert_eq!(
+            service
+                .validate_claims(
+                    &access_header(),
+                    &access_claims(70),
+                    &JwtValidation::access(),
+                    100,
+                )
+                .unwrap_err()
+                .kind(),
+            JwtErrorKind::Expired,
+        );
     }
 }
