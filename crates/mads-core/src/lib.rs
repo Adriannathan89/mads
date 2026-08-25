@@ -11,6 +11,7 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+mod auto_configuration;
 mod builder;
 mod catalog;
 mod config;
@@ -23,6 +24,10 @@ mod registry;
 #[cfg(feature = "runtime-tokio")]
 pub mod runtime;
 
+pub use auto_configuration::{
+    AutoConfigurationConfigEvidence, AutoConfigurationReasonCode, AutoConfigurationReport,
+    AutoConfigurationRequirement, AutoConfigurationStatus,
+};
 pub use builder::{Mads, MadsBuilder};
 pub use catalog::Catalog;
 pub use config::{
@@ -36,7 +41,7 @@ pub use descriptor::{
 };
 pub use diagnostic::{
     Diagnostic, DiagnosticCode, Error, MADS001, MADS002, MADS003, MADS004, MADS005, MADS006,
-    MADS010, MADS011, MADS020, MADS030, Result, SourceLocation,
+    MADS007, MADS010, MADS011, MADS020, MADS030, Result, SourceLocation,
 };
 pub use graph::{
     ApplicationGraph, ConstructionPlan, ConstructionStep, DependencyEdge, GraphAnalysis,
