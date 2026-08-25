@@ -25,6 +25,10 @@ mod router;
 #[cfg(feature = "http")]
 mod server;
 
+/// Typed JSON Web Token contracts and services.
+#[cfg(feature = "jwt")]
+pub mod jwt;
+
 /// Database configuration and normalized persistence errors.
 #[cfg(feature = "database")]
 pub mod database;
@@ -47,6 +51,13 @@ pub use database::{
     Database, DatabaseBootstrap, DatabaseConfig, DatabaseError, DatabaseErrorKind,
     DatabasePoolStatus, DatabaseResult, MADS100, MADS101, MadsBuilderDatabaseExt, MigrationReport,
     MigrationStatus,
+};
+
+/// Typed JWT claims, options, errors, and diagnostics.
+#[cfg(feature = "jwt")]
+pub use jwt::{
+    JwtAlgorithm, JwtClaims, JwtError, JwtErrorKind, JwtHeader, JwtResult, JwtSignOptions,
+    JwtTokenKind, JwtValidation, MADS120, MADS121, RegisteredJwtClaims, VerifiedJwt,
 };
 
 /// Standard Axum-compatible HTTP request extractors.
