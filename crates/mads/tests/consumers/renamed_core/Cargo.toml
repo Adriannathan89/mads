@@ -5,6 +5,6 @@ edition = "2024"
 rust-version = "1.85"
 
 [dependencies]
-runtime = { package = "mads-core", path = "../../../../mads-core" }
+runtime = { package = "mads-core", path = "../../../../mads-core", default-features = false }
 
 [workspace]

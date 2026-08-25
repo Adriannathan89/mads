@@ -14,10 +14,6 @@ fn consume_repository(repository: &RenamedRepository) {
     let _ = &repository.database;
 }
 
-fn database_config() -> framework::common::DatabaseResult<DatabaseConfig> {
-    DatabaseConfig::new("postgres://localhost/renamed")
-}
-
 fn diesel_backend(_: std::marker::PhantomData<framework::diesel::pg::Pg>) {}
 
 #[routes]
@@ -33,15 +29,28 @@ impl Routes for Controller {
     async fn index(&self) {}
 }
 
-async fn build_application() -> framework::core::Result<()> {
-    let application = Mads::builder().build().await?;
-    let _router = build_router(&application)?;
-    Ok(())
+fn inspect_auto_configuration() {
+    let config = framework::core::ConfigBuilder::new()
+        .source(framework::core::MapSource::new(
+            "consumer",
+            [("database.url", "postgres://localhost/renamed")],
+        ))
+        .build()
+        .unwrap();
+    let analysis = Mads::builder_with_config(config).analyze();
+
+    assert_eq!(
+        analysis.auto_configurations()[0].status(),
+        AutoConfigurationStatus::Active,
+    );
+    assert_eq!(
+        analysis.graph().provider::<Database>().unwrap().origin(),
+        ProviderOrigin::AutoConfiguration,
+    );
 }
 
 fn main() {
-    let _ = build_application;
-    let _ = database_config;
+    let _ = inspect_auto_configuration;
     let _ = diesel_backend;
     let _ = consume_repository;
 }
