@@ -1,8 +1,9 @@
 # v0.5 — Auto-Configuration Engine Requirements
 
-**Status:** Implementation-complete; release verification remains pending the
-PostgreSQL acceptance and 85% llvm-cov coverage gates. This document records
-the approved requirements and compatibility boundary.
+**Status:** Release verification complete. PostgreSQL 16 acceptance and the
+full llvm-cov gate passed against an isolated test cluster; total line coverage
+was 91.54%, above the 85% requirement. This document records the approved
+requirements and compatibility boundary.
 
 The authoritative design is
 [`docs/superpowers/specs/2026-08-23-v0.5-auto-configuration-design.md`](../../superpowers/specs/2026-08-23-v0.5-auto-configuration-design.md).
@@ -221,10 +222,11 @@ The following are outside v0.5:
 
 ## Release gates
 
-The implementation is complete only after formatting, lint, unit/integration,
-rustdoc, architecture, MSRV, PostgreSQL 16, and coverage checks pass. Required
-commands are enumerated in the implementation plan. PostgreSQL acceptance must
-prove zero-bootstrap CRUD, pending-migration application, the no-pending no-op,
-migration-disabled query-error preservation, lifecycle order, and
-failure-before-listener-bind behavior. Workspace coverage remains at least
-85%.
+Release verification passed formatting, lint, unit/integration, rustdoc,
+architecture, MSRV, PostgreSQL 16, and coverage checks. The full approved
+coverage command ran against an isolated PostgreSQL 16 cluster; every included
+test passed and total line coverage was 91.54%, above the 85% threshold.
+PostgreSQL acceptance covers zero-bootstrap CRUD, pending-migration
+application, the no-pending no-op, migration-disabled query-error preservation,
+lifecycle order, and failure-before-listener-bind behavior. Required commands
+remain enumerated in the implementation plan.
