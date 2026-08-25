@@ -5,12 +5,14 @@
 //! redacted errors. Cryptographic service construction is added separately.
 
 mod claims;
+mod config;
 mod error;
 
 pub use claims::{
     JwtAlgorithm, JwtClaims, JwtHeader, JwtSignOptions, JwtTokenKind, JwtValidation,
     RegisteredJwtClaims, VerifiedJwt,
 };
+pub use config::PassportConfig;
 pub use error::{JwtError, JwtErrorKind, JwtResult};
 
 /// JWT signing, verification, or key-operation failure.

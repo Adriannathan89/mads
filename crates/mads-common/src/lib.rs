@@ -57,7 +57,8 @@ pub use database::{
 #[cfg(feature = "jwt")]
 pub use jwt::{
     JwtAlgorithm, JwtClaims, JwtError, JwtErrorKind, JwtHeader, JwtResult, JwtSignOptions,
-    JwtTokenKind, JwtValidation, MADS120, MADS121, RegisteredJwtClaims, VerifiedJwt,
+    JwtTokenKind, JwtValidation, MADS120, MADS121, PassportConfig, RegisteredJwtClaims,
+    VerifiedJwt,
 };
 
 /// Standard Axum-compatible HTTP request extractors.
