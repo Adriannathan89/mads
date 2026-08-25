@@ -7,6 +7,7 @@
 mod claims;
 mod config;
 mod error;
+mod keyring;
 
 pub use claims::{
     JwtAlgorithm, JwtClaims, JwtHeader, JwtSignOptions, JwtTokenKind, JwtValidation,
