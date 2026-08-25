@@ -1,29 +1,33 @@
-use crate::{Config, SourceLocation};
+use crate::SourceLocation;
 
 const REDACTED: &str = "<redacted>";
 
-fn redact_sensitive_text(value: &str) -> String {
-    let lowercase = value.to_ascii_lowercase();
-    let contains_sensitive_marker = [
-        "api_key",
-        "credential",
-        "passwd",
-        "password",
-        "private_key",
-        "secret",
-        "token",
-    ]
-    .iter()
-    .any(|marker| lowercase.contains(marker));
-    let resembles_resolved_value = value.contains("://")
-        || value.contains("${")
-        || value.contains(['\n', '\r', '\0'])
-        || value.contains('@');
+fn safe_source_label(value: &str) -> &'static str {
+    match value {
+        "defaults" => "defaults",
+        "environment" => "environment",
+        "mads.toml" => "mads.toml",
+        "test" => "test",
+        _ => REDACTED,
+    }
+}
 
-    if contains_sensitive_marker || resembles_resolved_value {
-        REDACTED.to_owned()
-    } else {
-        value.to_owned()
+fn safe_explanation(reason_code: AutoConfigurationReasonCode, explanation: &str) -> &'static str {
+    if explanation == "Database is required and configured" {
+        return "Database is required and configured";
+    }
+
+    match reason_code.as_str() {
+        "conditions_matched" => "Auto-configuration conditions matched",
+        "requirement_absent" => "No provider requires this auto-configuration",
+        "user_override" => "An application provider overrides this auto-configuration",
+        "missing_configuration" => "Required configuration is missing",
+        "invalid_configuration" => "Required configuration is invalid",
+        "missing_migration_source" => "A required migration source is missing",
+        "provisioning_failed" => "Auto-configuration provisioning failed",
+        "duplicate_identifier" => "An auto-configuration identifier is duplicated",
+        "conflicting_default" => "Auto-configuration defaults conflict",
+        _ => REDACTED,
     }
 }
 
@@ -88,8 +92,8 @@ impl AutoConfigurationRequirement {
 /// Redacted evidence that a configuration key was present in a named source.
 ///
 /// Configuration values are never stored in evidence. The optional source is
-/// derived from [`Config`] attribution and is only a human-readable source
-/// label, such as a configuration file name.
+/// a fixed, recognized human-readable source label. Unknown labels are
+/// redacted before storage.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AutoConfigurationConfigEvidence {
     key: &'static str,
@@ -97,12 +101,12 @@ pub struct AutoConfigurationConfigEvidence {
 }
 
 impl AutoConfigurationConfigEvidence {
-    /// Creates redacted configuration evidence from a configuration's source label.
+    /// Creates redacted configuration evidence from a configuration source label.
     #[doc(hidden)]
-    pub fn new(key: &'static str, config: &Config) -> Self {
+    pub fn new(key: &'static str, source: Option<&str>) -> Self {
         Self {
             key,
-            source: config.source_of(key).map(redact_sensitive_text),
+            source: source.map(|source| safe_source_label(source).to_owned()),
         }
     }
 
@@ -141,7 +145,7 @@ impl AutoConfigurationReport {
         output_type_name: &'static str,
         status: AutoConfigurationStatus,
         reason_code: AutoConfigurationReasonCode,
-        explanation: &'static str,
+        explanation: impl AsRef<str>,
         requirements: Vec<AutoConfigurationRequirement>,
         configuration: Vec<AutoConfigurationConfigEvidence>,
     ) -> Self {
@@ -150,7 +154,7 @@ impl AutoConfigurationReport {
             output_type_name,
             status,
             reason_code,
-            explanation: redact_sensitive_text(explanation),
+            explanation: safe_explanation(reason_code, explanation.as_ref()).to_owned(),
             requirements,
             configuration,
         }

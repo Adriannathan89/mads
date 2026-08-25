@@ -2,8 +2,7 @@
 
 use mads_core::{
     AutoConfigurationConfigEvidence, AutoConfigurationReasonCode, AutoConfigurationReport,
-    AutoConfigurationRequirement, AutoConfigurationStatus, ConfigBuilder, MADS007, MapSource,
-    SourceLocation,
+    AutoConfigurationRequirement, AutoConfigurationStatus, MADS007, SourceLocation,
 };
 
 #[test]
@@ -12,11 +11,7 @@ fn report_accessors_preserve_stable_redacted_evidence() {
         "example::Repository",
         Some(SourceLocation::new("src/repository.rs", 7, 9)),
     );
-    let config = ConfigBuilder::new()
-        .source(MapSource::new("mads.toml", [("database.url", "ignored")]))
-        .build()
-        .unwrap();
-    let evidence = AutoConfigurationConfigEvidence::new("database.url", &config);
+    let evidence = AutoConfigurationConfigEvidence::new("database.url", Some("mads.toml"));
     let report = AutoConfigurationReport::new(
         "mads.common.database.diesel",
         "mads_common::Database",
@@ -57,28 +52,20 @@ fn every_status_has_the_expected_debug_name() {
 }
 
 #[test]
-fn report_construction_redacts_secret_like_text() {
-    let config = ConfigBuilder::new()
-        .source(MapSource::new(
-            "postgres://user:dotenv-secret@localhost/mads",
-            [("database.url", "ignored")],
-        ))
-        .build()
-        .unwrap();
-    let evidence = AutoConfigurationConfigEvidence::new("database.url", &config);
+fn report_construction_redacts_unknown_text() {
+    let evidence = AutoConfigurationConfigEvidence::new("database.url", Some("hunter2"));
     let report = AutoConfigurationReport::new(
         "mads.common.database.diesel",
         "mads_common::Database",
         AutoConfigurationStatus::Failed,
         AutoConfigurationReasonCode::new("invalid_configuration"),
-        "postgres://user:process-secret@localhost/mads",
+        "hunter2",
         Vec::new(),
         vec![evidence],
     );
 
-    assert_eq!(report.explanation(), "<redacted>");
+    assert_eq!(report.explanation(), "Required configuration is invalid");
     assert_eq!(report.configuration()[0].source(), Some("<redacted>"));
     let debug = format!("{report:?}");
-    assert!(!debug.contains("dotenv-secret"));
-    assert!(!debug.contains("process-secret"));
+    assert!(!debug.contains("hunter2"));
 }
