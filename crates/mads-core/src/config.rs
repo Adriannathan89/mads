@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::{Diagnostic, Error, MADS020, Result};
 
@@ -72,6 +72,11 @@ impl ConfigDocument {
 pub trait ConfigSource: Send + Sync {
     /// Returns the source name used for attribution.
     fn name(&self) -> &str;
+
+    /// Returns the base directory for relative path values from this source.
+    fn relative_path_base(&self) -> Option<&Path> {
+        None
+    }
 
     /// Loads the source's configuration values.
     #[allow(clippy::result_large_err)]
@@ -231,6 +236,10 @@ impl TomlSource {
 impl ConfigSource for TomlSource {
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn relative_path_base(&self) -> Option<&Path> {
+        self.path.parent()
     }
 
     fn load(&self) -> Result<BTreeMap<String, String>> {
@@ -416,13 +425,19 @@ impl DotenvSource {
 #[derive(Clone, Eq, PartialEq)]
 pub struct ConfigValue {
     value: String,
-    source: String,
+    origin: ConfigOrigin,
 }
 
 #[derive(Clone, Eq, PartialEq)]
 struct ConfigStringArrayValue {
     value: Vec<String>,
-    source: String,
+    origin: ConfigOrigin,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ConfigOrigin {
+    label: String,
+    relative_path_base: Option<PathBuf>,
 }
 
 impl fmt::Debug for ConfigStringArrayValue {
@@ -430,7 +445,7 @@ impl fmt::Debug for ConfigStringArrayValue {
         formatter
             .debug_struct("ConfigStringArrayValue")
             .field("elements", &self.value.len())
-            .field("source", &self.source)
+            .field("source", &self.origin.label)
             .finish()
     }
 }
@@ -440,7 +455,7 @@ impl fmt::Debug for ConfigValue {
         formatter
             .debug_struct("ConfigValue")
             .field("value", &"[REDACTED]")
-            .field("source", &self.source)
+            .field("source", &self.origin.label)
             .finish()
     }
 }
@@ -453,7 +468,7 @@ impl ConfigValue {
 
     /// Returns the name of the source that supplied the value.
     pub fn source(&self) -> &str {
-        &self.source
+        &self.origin.label
     }
 }
 
@@ -496,7 +511,22 @@ impl Config {
     pub fn source_of_string_array(&self, key: &str) -> Option<&str> {
         self.string_arrays
             .get(key)
-            .map(|value| value.source.as_str())
+            .map(|value| value.origin.label.as_str())
+    }
+
+    /// Resolves a scalar path value relative to the source that supplied it.
+    pub fn resolve_path(&self, key: &str) -> Option<PathBuf> {
+        let value = self.values.get(key)?;
+        let configured = Path::new(&value.value);
+        if configured.is_absolute() {
+            return Some(configured.to_path_buf());
+        }
+
+        let base = match &value.origin.relative_path_base {
+            Some(base) => base.clone(),
+            None => std::env::current_dir().ok()?,
+        };
+        Some(base.join(configured))
     }
 
     /// Iterates over string-array keys and values in lexical key order.
@@ -580,7 +610,10 @@ impl ConfigBuilder {
         let mut values = BTreeMap::new();
         let mut string_arrays = BTreeMap::new();
         for source in self.sources {
-            let source_name = source.name().to_owned();
+            let origin = ConfigOrigin {
+                label: source.name().to_owned(),
+                relative_path_base: source.relative_path_base().map(Path::to_path_buf),
+            };
             let document = source.load_document()?;
             for (key, value) in document.scalars {
                 string_arrays.remove(&key);
@@ -588,7 +621,7 @@ impl ConfigBuilder {
                     key,
                     ConfigValue {
                         value,
-                        source: source_name.clone(),
+                        origin: origin.clone(),
                     },
                 );
             }
@@ -598,7 +631,7 @@ impl ConfigBuilder {
                     key,
                     ConfigStringArrayValue {
                         value,
-                        source: source_name.clone(),
+                        origin: origin.clone(),
                     },
                 );
             }

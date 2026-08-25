@@ -31,6 +31,76 @@ fn later_sources_override_values_and_retain_attribution() {
     assert_eq!(config.get("ignored"), None);
 }
 
+#[test]
+fn paths_use_the_winning_sources_structured_origin() {
+    let directory = tempfile::tempdir().unwrap();
+    let toml_path = directory.path().join("config/mads.toml");
+    fs::create_dir_all(toml_path.parent().unwrap()).unwrap();
+    fs::write(
+        &toml_path,
+        "[passport.keys.current]\nprivate_key_file = \"keys/private.pem\"\n",
+    )
+    .unwrap();
+
+    let toml_config = ConfigBuilder::new()
+        .source(TomlSource::file(&toml_path))
+        .build()
+        .unwrap();
+    assert_eq!(
+        toml_config
+            .resolve_path("passport.keys.current.private_key_file")
+            .unwrap(),
+        directory.path().join("config/keys/private.pem"),
+    );
+
+    let overridden = ConfigBuilder::new()
+        .source(TomlSource::file(toml_path))
+        .source(MapSource::new(
+            "programmatic",
+            [("passport.keys.current.private_key_file", "override.pem")],
+        ))
+        .build()
+        .unwrap();
+    assert_eq!(
+        overridden
+            .resolve_path("passport.keys.current.private_key_file")
+            .unwrap(),
+        std::env::current_dir().unwrap().join("override.pem"),
+    );
+}
+
+#[test]
+fn resolve_path_preserves_absolute_values() {
+    let directory = tempfile::tempdir().unwrap();
+    let absolute_path = directory.path().join("private.pem");
+    let config = ConfigBuilder::new()
+        .source(MapSource::new(
+            "programmatic",
+            [("passport.private_key_file", absolute_path.to_str().unwrap())],
+        ))
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        config.resolve_path("passport.private_key_file"),
+        Some(absolute_path),
+    );
+}
+
+#[test]
+fn resolve_path_returns_none_for_missing_and_array_values() {
+    let config = ConfigBuilder::new()
+        .source(
+            MapSource::new("programmatic", std::iter::empty::<(&str, &str)>())
+                .with_string_array("passport.key_files", ["first.pem"]),
+        )
+        .build()
+        .unwrap();
+
+    assert_eq!(config.resolve_path("passport.missing"), None);
+    assert_eq!(config.resolve_path("passport.key_files"), None);
+}
+
 struct BrokenSource;
 
 impl ConfigSource for BrokenSource {
