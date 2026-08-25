@@ -7,10 +7,15 @@
 mod context;
 mod error;
 mod principal;
+mod strategy;
 
 pub use context::PassportContext;
 pub use error::{PassportError, PassportErrorKind, PassportRejection, PassportResult};
 pub use principal::{Authenticated, ClaimsPrincipal, PassportPrincipal, VerifiedToken};
+pub use strategy::{
+    ErasedAuthentication, PassportStrategy, PassportStrategyAdapter, PassportStrategyCatalog,
+    PassportStrategyDescriptor, PassportStrategyFuture,
+};
 
 /// Passport strategy registration, resolution, or type mismatch.
 pub const MADS130: mads_core::DiagnosticCode = mads_core::DiagnosticCode::new("MADS130");

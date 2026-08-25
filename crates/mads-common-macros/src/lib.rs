@@ -18,6 +18,8 @@ use proc_macro::TokenStream;
 
 mod controller;
 mod passport_principal;
+#[cfg(feature = "passport")]
+mod passport_strategy;
 mod path;
 mod routes;
 mod verb;
@@ -30,6 +32,15 @@ mod verb;
 pub fn passport_principal(input: TokenStream) -> TokenStream {
     syn::parse(input)
         .and_then(passport_principal::expand)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Registers a managed, typed Passport JWT strategy implementation.
+#[cfg(feature = "passport")]
+#[proc_macro_attribute]
+pub fn passport_strategy(arguments: TokenStream, item: TokenStream) -> TokenStream {
+    passport_strategy::expand(arguments.into(), item.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

@@ -82,6 +82,18 @@ impl std::error::Error for PassportError {
     }
 }
 
+impl From<crate::JwtError> for PassportError {
+    fn from(error: crate::JwtError) -> Self {
+        match error.kind() {
+            crate::JwtErrorKind::InvalidConfiguration
+            | crate::JwtErrorKind::InvalidKeyMaterial
+            | crate::JwtErrorKind::UnavailableSigningKey
+            | crate::JwtErrorKind::Serialization => Self::internal(error),
+            _ => Self::reject(),
+        }
+    }
+}
+
 /// An Axum rejection produced by Passport extractors and guards.
 pub struct PassportRejection(PassportError);
 

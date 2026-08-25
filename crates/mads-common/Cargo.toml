@@ -22,7 +22,13 @@ database = [
     "dep:diesel_migrations",
     "dep:tokio",
 ]
-jwt = ["dep:base64", "dep:jsonwebtoken", "dep:serde", "dep:serde_json"]
+jwt = [
+    "dep:base64",
+    "dep:jsonwebtoken",
+    "dep:serde",
+    "dep:serde_json",
+    "mads-common-macros?/passport",
+]
 cookies = ["http", "dep:cookie", "axum-extra/cookie"]
 
 [dependencies]

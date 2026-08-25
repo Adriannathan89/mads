@@ -72,8 +72,10 @@ pub use jwt::{
 /// Typed Passport principals, guarded extractors, context, errors, and diagnostics.
 #[cfg(all(feature = "http", feature = "jwt"))]
 pub use passport::{
-    Authenticated, ClaimsPrincipal, MADS130, MADS131, PassportContext, PassportError,
-    PassportErrorKind, PassportPrincipal, PassportRejection, PassportResult, VerifiedToken,
+    Authenticated, ClaimsPrincipal, ErasedAuthentication, MADS130, MADS131, PassportContext,
+    PassportError, PassportErrorKind, PassportPrincipal, PassportRejection, PassportResult,
+    PassportStrategy, PassportStrategyAdapter, PassportStrategyCatalog, PassportStrategyDescriptor,
+    PassportStrategyFuture, VerifiedToken,
 };
 
 /// Strict cookie extraction, normalized errors, and established cookie types.
@@ -113,6 +115,10 @@ pub use mads_common_macros::routes;
 /// Derives role and permission membership for a named Passport principal.
 #[cfg(all(feature = "http", feature = "jwt"))]
 pub use mads_common_macros::PassportPrincipal;
+
+/// Registers a managed, typed Passport JWT strategy.
+#[cfg(all(feature = "http", feature = "jwt"))]
+pub use mads_common_macros::passport_strategy;
 
 /// Marks a DELETE route inside a route-contract trait.
 #[cfg(feature = "http")]
