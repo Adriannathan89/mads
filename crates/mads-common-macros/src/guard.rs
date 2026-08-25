@@ -29,6 +29,8 @@ pub(crate) struct GuardSpec {
     predicates: Option<Vec<Path>>,
     skip: bool,
     span: Span,
+    attribute_span: Span,
+    attribute_index: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -71,6 +73,8 @@ impl Parse for GuardSpec {
             predicates: None,
             skip: false,
             span,
+            attribute_span: span,
+            attribute_index: None,
         };
 
         while !input.is_empty() {
@@ -169,6 +173,16 @@ impl GuardSpec {
             || self.roles.is_some()
             || self.permissions.is_some()
             || self.predicates.is_some()
+    }
+
+    /// Returns the original position of this attribute on its target.
+    pub(crate) fn attribute_index(&self) -> Option<usize> {
+        self.attribute_index
+    }
+
+    /// Returns the span of the complete guard attribute.
+    pub(crate) fn attribute_span(&self) -> Span {
+        self.attribute_span
     }
 }
 
@@ -314,9 +328,9 @@ pub(crate) fn take_guard(
 ) -> syn::Result<Option<GuardSpec>> {
     let mut found = Vec::new();
     let mut retained = Vec::with_capacity(attributes.len());
-    for attribute in std::mem::take(attributes) {
+    for (index, attribute) in std::mem::take(attributes).into_iter().enumerate() {
         if is_guard_attribute(&attribute) {
-            found.push(attribute);
+            found.push((index, attribute));
         } else {
             retained.push(attribute);
         }
@@ -325,14 +339,16 @@ pub(crate) fn take_guard(
 
     if found.len() > 1 {
         return Err(Error::new(
-            found[1].span(),
+            found[1].1.span(),
             "a route trait or method may declare only one `#[guard(...)]` attribute",
         ));
     }
-    let Some(attribute) = found.pop() else {
+    let Some((attribute_index, attribute)) = found.pop() else {
         return Ok(None);
     };
-    let spec = attribute.parse_args::<GuardSpec>()?;
+    let mut spec = attribute.parse_args::<GuardSpec>()?;
+    spec.attribute_span = attribute.span();
+    spec.attribute_index = Some(attribute_index);
     if target == GuardTarget::Trait && spec.skip {
         return Err(Error::new(
             attribute.span(),
@@ -466,6 +482,7 @@ impl EffectiveGuard {
                     index
                 );
                 quote! {
+                    #(#conditional_attributes)*
                     #[doc(hidden)]
                     #[allow(non_snake_case)]
                     fn #adapter(
@@ -494,8 +511,13 @@ impl EffectiveGuard {
                 );
                 quote!(#common::GuardPredicate::new(stringify!(#predicate), Some(#adapter)))
             });
-        let (builtin_function, builtin) =
-            builtin_adapter_tokens(&self.principal, common, route_trait, handler);
+        let (builtin_function, builtin) = builtin_adapter_tokens(
+            &self.principal,
+            common,
+            route_trait,
+            handler,
+            conditional_attributes,
+        );
 
         let tokens = quote! {
             #(#conditional_attributes)*
@@ -565,6 +587,7 @@ fn builtin_adapter_tokens(
     common: &syn::Path,
     route_trait: &Ident,
     handler: &Ident,
+    conditional_attributes: &[Attribute],
 ) -> (TokenStream, TokenStream) {
     let Some(claims) = claims_principal_claims(principal) else {
         return (TokenStream::new(), quote!(None));
@@ -572,6 +595,7 @@ fn builtin_adapter_tokens(
     let adapter = format_ident!("__mads_guard_builtin_jwt_{}_{}", route_trait, handler);
     (
         quote! {
+            #(#conditional_attributes)*
             #[doc(hidden)]
             #[allow(non_snake_case)]
             fn #adapter<'a>(

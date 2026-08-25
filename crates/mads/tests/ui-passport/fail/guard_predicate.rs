@@ -12,15 +12,29 @@ impl PassportPrincipal for UserPrincipal {
     }
 }
 
-fn wrong_predicate(_: UserPrincipal) -> bool {
+fn wrong_predicate_argument(_: UserPrincipal) -> bool {
     true
 }
 
+fn wrong_predicate_return(_: &UserPrincipal) {}
+
 #[routes]
-#[guard(strategy = "jwt", principal = UserPrincipal, predicate = wrong_predicate)]
 trait UserRoutes {
-    #[get("/profile")]
-    async fn profile(&self);
+    #[get("/argument")]
+    #[guard(
+        strategy = "jwt",
+        principal = UserPrincipal,
+        predicate = wrong_predicate_argument,
+    )]
+    async fn argument(&self);
+
+    #[get("/return")]
+    #[guard(
+        strategy = "jwt",
+        principal = UserPrincipal,
+        predicate = wrong_predicate_return,
+    )]
+    async fn return_type(&self);
 }
 
 fn main() {}

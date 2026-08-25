@@ -327,6 +327,22 @@ fn validate_method_with_guard(
     }
 
     let (attribute_index, verb) = &route_attributes[0];
+    if let Some(method_guard) = method_guard.as_ref() {
+        let route_attribute_index = if method_guard
+            .attribute_index()
+            .is_some_and(|guard_index| *attribute_index >= guard_index)
+        {
+            *attribute_index + 1
+        } else {
+            *attribute_index
+        };
+        if method_guard.attribute_index() != Some(route_attribute_index + 1) {
+            return Err(Error::new(
+                method_guard.attribute_span(),
+                "`#[guard]` must appear directly below the route verb on a method inside `#[routes]`",
+            ));
+        }
+    }
     let attribute = &method.attrs[*attribute_index];
     let path = parse_route_path(attribute)?;
     validate_path(&path, "route path", false)?;

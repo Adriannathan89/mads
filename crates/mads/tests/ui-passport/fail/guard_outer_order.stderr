@@ -1,0 +1,5 @@
+error: `#[guard]` must appear below `#[routes]` on that trait or below one route verb on a method
+ --> tests/ui-passport/fail/guard_outer_order.rs:5:9
+  |
+5 | #[guard(strategy = "jwt", principal = UserPrincipal)]
+  |         ^^^^^^^^

@@ -1,0 +1,5 @@
+error: `skip` cannot be combined with other guard arguments
+ --> tests/ui-passport/fail/guard_skip_mixed.rs:9:13
+  |
+9 |     #[guard(skip, roles(any = ["user"]))]
+  |             ^^^^

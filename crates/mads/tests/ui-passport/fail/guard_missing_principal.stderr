@@ -1,0 +1,5 @@
+error: a route-level guard requires `principal = Type`
+ --> tests/ui-passport/fail/guard_missing_principal.rs:5:7
+  |
+5 | trait UserRoutes {
+  |       ^^^^^^^^^^

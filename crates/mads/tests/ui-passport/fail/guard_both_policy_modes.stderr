@@ -1,0 +1,5 @@
+error: `roles` accepts exactly one `any = [...]` or `all = [...]` clause
+ --> tests/ui-passport/fail/guard_both_policy_modes.rs:9:25
+  |
+9 |     roles(any = ["user"], all = ["admin"]),
+  |                         ^
