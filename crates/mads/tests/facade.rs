@@ -77,6 +77,7 @@ async fn prelude_exposes_cookie_types_through_native_axum() {
     let _: mads::cookie::time::Duration = cookie::time::Duration::seconds(1);
 }
 
+#[cfg(feature = "database")]
 #[test]
 fn prelude_exposes_the_database_runtime_surface() {
     use mads::diesel_migrations;
@@ -153,6 +154,7 @@ fn prelude_exposes_core_types_and_bare_attributes() {
             async fn index(&self) {}
         }
 
+        #[cfg(feature = "runtime-tokio")]
         #[main]
         async fn main() {}
     }
