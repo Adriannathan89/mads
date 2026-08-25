@@ -234,6 +234,16 @@ impl ConfigSource for TomlSource {
     }
 
     fn load(&self) -> Result<BTreeMap<String, String>> {
+        Ok(self.parse(TomlArrayMode::Reject)?.scalars)
+    }
+
+    fn load_document(&self) -> Result<ConfigDocument> {
+        self.parse(TomlArrayMode::StringOnly)
+    }
+}
+
+impl TomlSource {
+    fn parse(&self, array_mode: TomlArrayMode) -> Result<ConfigDocument> {
         let input = std::fs::read_to_string(&self.path).map_err(|source| {
             Error::with_source(
                 Diagnostic::new(
@@ -245,33 +255,48 @@ impl ConfigSource for TomlSource {
                 source,
             )
         })?;
-        let parsed = input.parse::<toml::Value>().map_err(|_| {
-            Error::new(
-                Diagnostic::new(
-                    MADS020,
-                    "configuration file could not be parsed",
-                    format!("configuration file `{}` is not valid TOML", self.name),
-                )
-                .with_subject(&self.name),
-            )
-        })?;
-        let document = input.parse::<toml_edit::DocumentMut>().map_err(|_| {
-            Error::new(
-                Diagnostic::new(
-                    MADS020,
-                    "configuration file could not be parsed",
-                    format!("configuration file `{}` is not valid TOML", self.name),
-                )
-                .with_subject(&self.name),
-            )
-        })?;
-        if let Some(key) = inline_table_key("", document.as_table()) {
-            return Err(unsupported_value(&key, "inline table"));
-        }
-        let mut output = BTreeMap::new();
-        flatten_toml("", parsed, &mut output)?;
-        Ok(output)
+        parse_toml_document(&input, &self.name, array_mode)
     }
+}
+
+#[derive(Clone, Copy)]
+enum TomlArrayMode {
+    Reject,
+    StringOnly,
+}
+
+fn parse_toml_document(
+    input: &str,
+    source_name: &str,
+    array_mode: TomlArrayMode,
+) -> Result<ConfigDocument> {
+    let parsed = input.parse::<toml::Value>().map_err(|_| {
+        Error::new(
+            Diagnostic::new(
+                MADS020,
+                "configuration file could not be parsed",
+                format!("configuration file `{source_name}` is not valid TOML"),
+            )
+            .with_subject(source_name),
+        )
+    })?;
+    let syntax = input.parse::<toml_edit::DocumentMut>().map_err(|_| {
+        Error::new(
+            Diagnostic::new(
+                MADS020,
+                "configuration file could not be parsed",
+                format!("configuration file `{source_name}` is not valid TOML"),
+            )
+            .with_subject(source_name),
+        )
+    })?;
+    if let Some(key) = inline_table_key("", syntax.as_table()) {
+        return Err(unsupported_value(&key, "inline table"));
+    }
+
+    let mut output = ConfigDocument::new();
+    flatten_toml("", parsed, &mut output, array_mode)?;
+    Ok(output)
 }
 
 fn inline_table_key(prefix: &str, table: &toml_edit::Table) -> Option<String> {
@@ -299,7 +324,8 @@ fn inline_table_key(prefix: &str, table: &toml_edit::Table) -> Option<String> {
 fn flatten_toml(
     prefix: &str,
     value: toml::Value,
-    output: &mut BTreeMap<String, String>,
+    output: &mut ConfigDocument,
+    array_mode: TomlArrayMode,
 ) -> Result<()> {
     match value {
         toml::Value::Table(table) => {
@@ -312,7 +338,7 @@ fn flatten_toml(
                 } else {
                     format!("{prefix}.{segment}")
                 };
-                flatten_toml(&key, value, output)?;
+                flatten_toml(&key, value, output, array_mode)?;
             }
             Ok(())
         }
@@ -320,16 +346,29 @@ fn flatten_toml(
         toml::Value::Integer(value) => insert_scalar(prefix, value.to_string(), output),
         toml::Value::Float(value) => insert_scalar(prefix, value.to_string(), output),
         toml::Value::Boolean(value) => insert_scalar(prefix, value.to_string(), output),
-        toml::Value::Array(_) => Err(unsupported_value(prefix, "array")),
+        toml::Value::Array(values) => match array_mode {
+            TomlArrayMode::Reject => Err(unsupported_value(prefix, "array")),
+            TomlArrayMode::StringOnly => {
+                let values = values
+                    .into_iter()
+                    .map(|value| match value {
+                        toml::Value::String(value) => Ok(value),
+                        _ => Err(unsupported_value(prefix, "non-string array")),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                output.insert_string_array(prefix, values);
+                Ok(())
+            }
+        },
         toml::Value::Datetime(_) => Err(unsupported_value(prefix, "datetime")),
     }
 }
 
-fn insert_scalar(key: &str, value: String, output: &mut BTreeMap<String, String>) -> Result<()> {
+fn insert_scalar(key: &str, value: String, output: &mut ConfigDocument) -> Result<()> {
     if key.is_empty() {
         return Err(unsupported_value(key, "root scalar"));
     }
-    output.insert(key.to_owned(), value);
+    output.insert_scalar(key, value);
     Ok(())
 }
 
@@ -566,17 +605,16 @@ impl ConfigBuilder {
         }
         for (key, value) in &mut values {
             if let Some(variable) = exact_variable_name(&value.value) {
-                let resolved = variables.get(variable).ok_or_else(|| {
-                    Error::new(
-                        Diagnostic::new(
-                            MADS020,
-                            "configuration variable is missing",
-                            format!("configuration variable `{variable}` is not defined"),
-                        )
-                        .with_subject(key),
-                    )
-                })?;
+                let resolved = resolve_variable(key, variable, &variables)?;
                 value.value.clone_from(resolved);
+            }
+        }
+        for (key, value) in &mut string_arrays {
+            for element in &mut value.value {
+                if let Some(variable) = exact_variable_name(element) {
+                    let resolved = resolve_variable(key, variable, &variables)?;
+                    element.clone_from(resolved);
+                }
             }
         }
         Ok(Config {
@@ -584,6 +622,23 @@ impl ConfigBuilder {
             string_arrays,
         })
     }
+}
+
+fn resolve_variable<'a>(
+    key: &str,
+    variable: &str,
+    variables: &'a BTreeMap<String, String>,
+) -> Result<&'a String> {
+    variables.get(variable).ok_or_else(|| {
+        Error::new(
+            Diagnostic::new(
+                MADS020,
+                "configuration variable is missing",
+                format!("configuration variable `{variable}` is not defined"),
+            )
+            .with_subject(key),
+        )
+    })
 }
 
 fn dotenv_open_error(source: &DotenvSource, error: dotenvy::Error) -> Error {

@@ -194,6 +194,94 @@ ratio = 1.5
 }
 
 #[test]
+fn toml_string_arrays_interpolate_each_exact_element() {
+    let directory = tempfile::tempdir().unwrap();
+    let dotenv = directory.path().join(".env");
+    let toml = directory.path().join("mads.toml");
+    fs::write(&dotenv, "PRIMARY=HS256\nSECONDARY=RS256\n").unwrap();
+    fs::write(
+        &toml,
+        "[passport]\nalgorithms = [\"${PRIMARY}\", \"${SECONDARY}\", \"literal-${PRIMARY}\"]\n",
+    )
+    .unwrap();
+
+    let config = ConfigBuilder::new()
+        .dotenv(DotenvSource::required(dotenv))
+        .source(TomlSource::file(toml))
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        config.get_string_array("passport.algorithms").unwrap(),
+        ["HS256", "RS256", "literal-${PRIMARY}"],
+    );
+}
+
+#[test]
+fn toml_rejects_every_non_string_array_without_leaking_values() {
+    for value in [
+        "[1, 2]",
+        "[true, false]",
+        "[1.0]",
+        "[1979-05-27T07:32:00Z]",
+        "[\"ok\", 7]",
+        "[[\"nested-secret\"]]",
+        "[{ token = \"table-secret\" }]",
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("mads.toml");
+        fs::write(&path, format!("[passport]\nalgorithms = {value}\n")).unwrap();
+        let error = ConfigBuilder::new()
+            .source(TomlSource::file(path))
+            .build()
+            .unwrap_err();
+        let report = error.to_string();
+        assert_eq!(error.code(), MADS020);
+        assert!(report.contains("passport.algorithms"));
+        assert!(report.contains("non-string array"));
+        assert!(!report.contains("nested-secret"));
+        assert!(!report.contains("table-secret"));
+    }
+}
+
+#[test]
+fn missing_array_variable_names_only_the_key_and_variable() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("mads.toml");
+    fs::write(
+        &path,
+        "[passport]\nalgorithms = [\"sibling-secret\", \"${MISSING_ALGORITHM}\"]\n",
+    )
+    .unwrap();
+
+    let error = ConfigBuilder::new()
+        .source(TomlSource::file(path))
+        .build()
+        .unwrap_err();
+    let report = error.to_string();
+
+    assert_eq!(error.code(), MADS020);
+    assert!(report.contains("passport.algorithms"));
+    assert!(report.contains("MISSING_ALGORITHM"));
+    assert!(!report.contains("${MISSING_ALGORITHM}"));
+    assert!(!report.contains("sibling-secret"));
+}
+
+#[test]
+fn legacy_toml_load_remains_scalar_only() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("mads.toml");
+    fs::write(&path, "[passport]\nalgorithms = [\"HS256\"]\n").unwrap();
+
+    let error = TomlSource::file(path).load().unwrap_err();
+
+    assert_eq!(error.code(), MADS020);
+    assert!(error.to_string().contains("passport.algorithms"));
+    assert!(error.to_string().contains("array"));
+    assert!(!error.to_string().contains("HS256"));
+}
+
+#[test]
 fn missing_toml_reports_only_its_path() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("missing.toml");
