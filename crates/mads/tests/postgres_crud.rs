@@ -9,6 +9,7 @@ use mads::{
         http::{Method, Request, StatusCode, header},
         response::Response,
     },
+    core::MapSource,
     diesel_migrations::{EmbeddedMigrations, embed_migrations},
     prelude::*,
 };
@@ -228,18 +229,23 @@ fn crud_application_has_a_repository_database_dependency() {
 #[ignore = "requires PostgreSQL through MADS_TEST_DATABASE_URL"]
 async fn postgres_crud_uses_the_managed_graph_and_generated_http_routes() {
     let _guard = TEST_LOCK.lock().await;
-    let config = DatabaseConfig::new(
-        std::env::var("MADS_TEST_DATABASE_URL")
-            .expect("MADS_TEST_DATABASE_URL is required for ignored PostgreSQL tests"),
-    )
-    .unwrap()
-    .with_pool_size(2)
-    .unwrap()
-    .with_migrate_on_startup(true);
-    let mut builder = Mads::builder();
-    builder
-        .database(DatabaseBootstrap::new(config).with_migrations(MIGRATIONS))
+    let config = ConfigBuilder::new()
+        .source(MapSource::new(
+            "test",
+            [
+                (
+                    "database.url",
+                    std::env::var("MADS_TEST_DATABASE_URL")
+                        .expect("MADS_TEST_DATABASE_URL is required for ignored PostgreSQL tests"),
+                ),
+                ("database.pool_size", "2".to_owned()),
+                ("database.migrate", "true".to_owned()),
+            ],
+        ))
+        .build()
         .unwrap();
+    let mut builder = Mads::builder_with_config(config);
+    builder.database_migrations(MIGRATIONS).unwrap();
     let mut application = builder.build().await.unwrap();
     let router = build_router(&application).unwrap();
 
@@ -249,7 +255,19 @@ async fn postgres_crud_uses_the_managed_graph_and_generated_http_routes() {
             .provider::<Database>()
             .expect("database should be registered in the graph")
             .origin(),
-        ProviderOrigin::Provided
+        ProviderOrigin::AutoConfiguration
+    );
+    assert_eq!(
+        application
+            .graph()
+            .provider::<Database>()
+            .expect("database should be registered in the graph")
+            .state(),
+        ProviderState::AutoConfigured
+    );
+    assert_eq!(
+        application.auto_configurations()[0].status(),
+        AutoConfigurationStatus::Active
     );
     assert_dependency::<UserController, UserService>(&application);
     assert_dependency::<UserService, UserRepository>(&application);
