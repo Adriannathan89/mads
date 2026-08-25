@@ -7,6 +7,67 @@ use std::path::PathBuf;
 
 use crate::{Diagnostic, Error, MADS020, Result};
 
+/// A redacted configuration document containing supported value shapes.
+#[derive(Clone, Default, Eq, PartialEq)]
+pub struct ConfigDocument {
+    scalars: BTreeMap<String, String>,
+    string_arrays: BTreeMap<String, Vec<String>>,
+}
+
+impl fmt::Debug for ConfigDocument {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ConfigDocument")
+            .field("entries", &self.len())
+            .field("values", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl ConfigDocument {
+    /// Creates an empty configuration document.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates a configuration document from scalar values.
+    pub fn from_scalars(values: BTreeMap<String, String>) -> Self {
+        Self {
+            scalars: values,
+            string_arrays: BTreeMap::new(),
+        }
+    }
+
+    /// Inserts a scalar, replacing any value at the same key.
+    pub fn insert_scalar(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        let key = key.into();
+        self.string_arrays.remove(&key);
+        self.scalars.insert(key, value.into());
+    }
+
+    /// Inserts a string array, replacing any value at the same key.
+    pub fn insert_string_array<I, V>(&mut self, key: impl Into<String>, values: I)
+    where
+        I: IntoIterator<Item = V>,
+        V: Into<String>,
+    {
+        let key = key.into();
+        self.scalars.remove(&key);
+        self.string_arrays
+            .insert(key, values.into_iter().map(Into::into).collect());
+    }
+
+    /// Returns the number of configuration entries across all value shapes.
+    pub fn len(&self) -> usize {
+        self.scalars.len() + self.string_arrays.len()
+    }
+
+    /// Returns whether the document has no configuration entries.
+    pub fn is_empty(&self) -> bool {
+        self.scalars.is_empty() && self.string_arrays.is_empty()
+    }
+}
+
 /// A source of string configuration values.
 pub trait ConfigSource: Send + Sync {
     /// Returns the source name used for attribution.
@@ -15,13 +76,20 @@ pub trait ConfigSource: Send + Sync {
     /// Loads the source's configuration values.
     #[allow(clippy::result_large_err)]
     fn load(&self) -> Result<BTreeMap<String, String>>;
+
+    /// Loads all supported configuration value shapes.
+    #[allow(clippy::result_large_err)]
+    fn load_document(&self) -> Result<ConfigDocument> {
+        self.load().map(ConfigDocument::from_scalars)
+    }
 }
 
 /// A fixed, named set of configuration values.
 #[derive(Clone, Eq, PartialEq)]
 pub struct MapSource {
     name: String,
-    values: BTreeMap<String, String>,
+    scalars: BTreeMap<String, String>,
+    string_arrays: BTreeMap<String, Vec<String>>,
 }
 
 impl fmt::Debug for MapSource {
@@ -29,7 +97,7 @@ impl fmt::Debug for MapSource {
         formatter
             .debug_struct("MapSource")
             .field("name", &self.name)
-            .field("entries", &self.values.len())
+            .field("entries", &(self.scalars.len() + self.string_arrays.len()))
             .field("values", &"[REDACTED]")
             .finish()
     }
@@ -45,11 +113,25 @@ impl MapSource {
     {
         Self {
             name: name.into(),
-            values: values
+            scalars: values
                 .into_iter()
                 .map(|(key, value)| (key.into(), value.into()))
                 .collect(),
+            string_arrays: BTreeMap::new(),
         }
+    }
+
+    /// Adds a string array, replacing any scalar at the same key.
+    pub fn with_string_array<I, V>(mut self, key: impl Into<String>, values: I) -> Self
+    where
+        I: IntoIterator<Item = V>,
+        V: Into<String>,
+    {
+        let key = key.into();
+        self.scalars.remove(&key);
+        self.string_arrays
+            .insert(key, values.into_iter().map(Into::into).collect());
+        self
     }
 }
 
@@ -59,7 +141,14 @@ impl ConfigSource for MapSource {
     }
 
     fn load(&self) -> Result<BTreeMap<String, String>> {
-        Ok(self.values.clone())
+        Ok(self.scalars.clone())
+    }
+
+    fn load_document(&self) -> Result<ConfigDocument> {
+        Ok(ConfigDocument {
+            scalars: self.scalars.clone(),
+            string_arrays: self.string_arrays.clone(),
+        })
     }
 }
 
@@ -291,6 +380,22 @@ pub struct ConfigValue {
     source: String,
 }
 
+#[derive(Clone, Eq, PartialEq)]
+struct ConfigStringArrayValue {
+    value: Vec<String>,
+    source: String,
+}
+
+impl fmt::Debug for ConfigStringArrayValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ConfigStringArrayValue")
+            .field("elements", &self.value.len())
+            .field("source", &self.source)
+            .finish()
+    }
+}
+
 impl fmt::Debug for ConfigValue {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -317,6 +422,7 @@ impl ConfigValue {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Config {
     values: BTreeMap<String, ConfigValue>,
+    string_arrays: BTreeMap<String, ConfigStringArrayValue>,
 }
 
 impl Config {
@@ -340,14 +446,35 @@ impl Config {
         self.values.iter().map(|(key, value)| (key.as_str(), value))
     }
 
+    /// Returns a string-array configuration value by key.
+    pub fn get_string_array(&self, key: &str) -> Option<&[String]> {
+        self.string_arrays
+            .get(key)
+            .map(|value| value.value.as_slice())
+    }
+
+    /// Returns the source name for a string-array configuration key.
+    pub fn source_of_string_array(&self, key: &str) -> Option<&str> {
+        self.string_arrays
+            .get(key)
+            .map(|value| value.source.as_str())
+    }
+
+    /// Iterates over string-array keys and values in lexical key order.
+    pub fn iter_string_arrays(&self) -> impl Iterator<Item = (&str, &[String])> {
+        self.string_arrays
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.value.as_slice()))
+    }
+
     /// Returns the number of configuration values.
     pub fn len(&self) -> usize {
-        self.values.len()
+        self.values.len() + self.string_arrays.len()
     }
 
     /// Returns whether the configuration has no values.
     pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
+        self.values.is_empty() && self.string_arrays.is_empty()
     }
 }
 
@@ -412,12 +539,25 @@ impl ConfigBuilder {
         }
 
         let mut values = BTreeMap::new();
+        let mut string_arrays = BTreeMap::new();
         for source in self.sources {
             let source_name = source.name().to_owned();
-            for (key, value) in source.load()? {
+            let document = source.load_document()?;
+            for (key, value) in document.scalars {
+                string_arrays.remove(&key);
                 values.insert(
                     key,
                     ConfigValue {
+                        value,
+                        source: source_name.clone(),
+                    },
+                );
+            }
+            for (key, value) in document.string_arrays {
+                values.remove(&key);
+                string_arrays.insert(
+                    key,
+                    ConfigStringArrayValue {
                         value,
                         source: source_name.clone(),
                     },
@@ -439,7 +579,10 @@ impl ConfigBuilder {
                 value.value.clone_from(resolved);
             }
         }
-        Ok(Config { values })
+        Ok(Config {
+            values,
+            string_arrays,
+        })
     }
 }
 

@@ -8,8 +8,8 @@ use std::fs;
 use std::os::unix::ffi::OsStringExt;
 
 use mads_core::{
-    ConfigBuilder, ConfigSource, Diagnostic, DotenvSource, EnvSource, Error, MADS020, MapSource,
-    Result, TomlSource,
+    ConfigBuilder, ConfigDocument, ConfigSource, Diagnostic, DotenvSource, EnvSource, Error,
+    MADS020, MapSource, Result, TomlSource,
 };
 
 #[test]
@@ -81,6 +81,54 @@ fn normalized_environment_key_collisions_use_the_later_variable() {
 
     assert_eq!(config.get("server.port"), Some("8080"));
     assert_eq!(config.source_of("server.port"), Some("environment"));
+}
+
+#[test]
+fn map_source_inserts_string_arrays_without_changing_scalar_access() {
+    let config = ConfigBuilder::new()
+        .source(
+            MapSource::new("base", [("passport.issuer", "issuer")])
+                .with_string_array("passport.algorithms", ["HS256", "RS256"]),
+        )
+        .build()
+        .unwrap();
+
+    assert_eq!(config.get("passport.issuer"), Some("issuer"));
+    assert_eq!(
+        config.get_string_array("passport.algorithms"),
+        Some(["HS256".to_owned(), "RS256".to_owned()].as_slice()),
+    );
+    assert_eq!(
+        config.source_of_string_array("passport.algorithms"),
+        Some("base")
+    );
+    assert_eq!(config.get("passport.algorithms"), None);
+}
+
+#[test]
+fn later_source_replaces_an_entry_across_value_shapes() {
+    let array_wins = ConfigBuilder::new()
+        .source(MapSource::new("first", [("value", "scalar")]))
+        .source(
+            MapSource::new("second", std::iter::empty::<(&str, &str)>())
+                .with_string_array("value", ["array"]),
+        )
+        .build()
+        .unwrap();
+    assert_eq!(array_wins.get("value"), None);
+    assert_eq!(array_wins.get_string_array("value").unwrap(), ["array"]);
+
+    let scalar_wins = ConfigBuilder::new()
+        .source(
+            MapSource::new("first", std::iter::empty::<(&str, &str)>())
+                .with_string_array("value", ["array"]),
+        )
+        .source(MapSource::new("second", [("value", "scalar")]))
+        .build()
+        .unwrap();
+    assert_eq!(scalar_wins.get("value"), Some("scalar"));
+    assert_eq!(scalar_wins.get_string_array("value"), None);
+    assert_eq!(scalar_wins.source_of("value"), Some("second"));
 }
 
 #[cfg(unix)]
@@ -389,5 +437,23 @@ fn debug_redacts_all_configuration_values() {
     ] {
         assert!(!rendered.contains(sentinel));
         assert!(rendered.contains("[REDACTED]"));
+    }
+}
+
+#[test]
+fn debug_redacts_document_and_resolved_string_array_values() {
+    let sentinel = "array-secret-sentinel";
+    let mut document = ConfigDocument::new();
+    document.insert_string_array("passport.keys", [sentinel]);
+    let config = ConfigBuilder::new()
+        .source(
+            MapSource::new("passport", std::iter::empty::<(&str, &str)>())
+                .with_string_array("passport.keys", [sentinel]),
+        )
+        .build()
+        .unwrap();
+
+    for rendered in [format!("{document:?}"), format!("{config:?}")] {
+        assert!(!rendered.contains(sentinel));
     }
 }
