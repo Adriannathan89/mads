@@ -33,6 +33,10 @@ pub mod cookie;
 #[cfg(feature = "jwt")]
 pub mod jwt;
 
+/// Typed Passport principals, request context, and normalized failures.
+#[cfg(all(feature = "http", feature = "jwt"))]
+pub mod passport;
+
 /// Database configuration and normalized persistence errors.
 #[cfg(feature = "database")]
 pub mod database;
@@ -63,6 +67,13 @@ pub use jwt::{
     JwtAlgorithm, JwtClaims, JwtError, JwtErrorKind, JwtHeader, JwtResult, JwtService,
     JwtSignOptions, JwtTokenKind, JwtValidation, MADS120, MADS121, PassportConfig,
     RegisteredJwtClaims, VerifiedJwt,
+};
+
+/// Typed Passport principals, guarded extractors, context, errors, and diagnostics.
+#[cfg(all(feature = "http", feature = "jwt"))]
+pub use passport::{
+    Authenticated, ClaimsPrincipal, MADS130, MADS131, PassportContext, PassportError,
+    PassportErrorKind, PassportPrincipal, PassportRejection, PassportResult, VerifiedToken,
 };
 
 /// Strict cookie extraction, normalized errors, and established cookie types.
@@ -98,6 +109,10 @@ pub use mads_common_macros::controller;
 /// Declares and validates a route-contract trait.
 #[cfg(feature = "http")]
 pub use mads_common_macros::routes;
+
+/// Derives role and permission membership for a named Passport principal.
+#[cfg(all(feature = "http", feature = "jwt"))]
+pub use mads_common_macros::PassportPrincipal;
 
 /// Marks a DELETE route inside a route-contract trait.
 #[cfg(feature = "http")]

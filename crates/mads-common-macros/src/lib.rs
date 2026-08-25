@@ -17,9 +17,22 @@
 use proc_macro::TokenStream;
 
 mod controller;
+mod passport_principal;
 mod path;
 mod routes;
 mod verb;
+
+/// Derives role and permission membership for a named Passport principal.
+///
+/// Mark at most one collection field with `#[roles]` and at most one with
+/// `#[permissions]`. Collection items must implement `AsRef<str>`.
+#[proc_macro_derive(PassportPrincipal, attributes(roles, permissions))]
+pub fn passport_principal(input: TokenStream) -> TokenStream {
+    syn::parse(input)
+        .and_then(passport_principal::expand)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
 
 /// Declares a managed controller and the route traits it must implement.
 ///
