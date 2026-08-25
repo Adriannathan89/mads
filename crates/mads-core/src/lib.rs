@@ -55,5 +55,9 @@ pub use mads_core_macros::{main, module, provider, repository, service};
 /// Implementation details used by MADS.rs procedural macro expansions.
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::auto_configuration::{
+        AutoConfigurationApplyContext, AutoConfigurationContext, AutoConfigurationContribution,
+        AutoConfigurationDescriptor, AutoConfigurationEvaluation,
+    };
     pub use inventory;
 }
