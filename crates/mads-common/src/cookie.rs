@@ -4,8 +4,8 @@ use std::{collections::BTreeMap, fmt};
 
 use axum::{
     extract::FromRequestParts,
-    http::{HeaderMap, StatusCode, header::COOKIE, request::Parts},
-    response::{IntoResponse, Response},
+    http::{HeaderMap, HeaderValue, StatusCode, header::COOKIE, request::Parts},
+    response::{IntoResponse, IntoResponseParts, Response, ResponseParts},
 };
 use axum_extra::extract::cookie::CookieJar as AxumCookieJar;
 
@@ -130,7 +130,18 @@ impl IntoResponse for CookieRejection {
     }
 }
 
-enum PendingCookie {}
+enum PendingCookie {
+    Add(Cookie<'static>),
+    Remove(Cookie<'static>),
+}
+
+impl PendingCookie {
+    fn cookie(&self) -> &Cookie<'static> {
+        match self {
+            Self::Add(cookie) | Self::Remove(cookie) => cookie,
+        }
+    }
+}
 
 /// A strict Axum-compatible cookie jar with redacted diagnostics.
 pub struct CookieJar {
@@ -204,6 +215,39 @@ impl CookieJar {
     pub fn occurrences(&self, name: &str) -> usize {
         self.occurrences.get(name).copied().unwrap_or_default()
     }
+
+    /// Adds a response cookie while retaining it for checked batch emission.
+    #[must_use]
+    #[allow(clippy::should_implement_trait)]
+    pub fn add<C: Into<Cookie<'static>>>(mut self, cookie: C) -> Self {
+        let cookie = cookie.into();
+        self.pending.push(PendingCookie::Add(cookie.clone()));
+        self.inner = self.inner.add(cookie);
+        self
+    }
+
+    /// Removes a cookie by emitting the deletion cookie produced by axum-extra.
+    #[must_use]
+    pub fn remove<C: Into<Cookie<'static>>>(mut self, cookie: C) -> Self {
+        let cookie = cookie.into();
+        self.pending.push(PendingCookie::Remove(cookie.clone()));
+        self.inner = self.inner.remove(cookie);
+        self
+    }
+
+    fn validate_pending(&self) -> CookieResult<()> {
+        for pending in &self.pending {
+            let cookie = pending.cookie();
+            if cookie.same_site() == Some(SameSite::None) && cookie.secure() == Some(false) {
+                return Err(CookieError::new(CookieErrorKind::InvalidResponse));
+            }
+
+            HeaderValue::from_str(&cookie.encoded().to_string()).map_err(|source| {
+                CookieError::with_source(CookieErrorKind::InvalidResponse, source)
+            })?;
+        }
+        Ok(())
+    }
 }
 
 impl Default for CookieJar {
@@ -231,6 +275,25 @@ where
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         Self::from_headers(&parts.headers).map_err(Into::into)
+    }
+}
+
+impl IntoResponseParts for CookieJar {
+    type Error = CookieRejection;
+
+    fn into_response_parts(self, response: ResponseParts) -> Result<ResponseParts, Self::Error> {
+        self.validate_pending()?;
+
+        match self.inner.into_response_parts(response) {
+            Ok(response) => Ok(response),
+            Err(error) => match error {},
+        }
+    }
+}
+
+impl IntoResponse for CookieJar {
+    fn into_response(self) -> Response {
+        (self, ()).into_response()
     }
 }
 
