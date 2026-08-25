@@ -1,4 +1,31 @@
-use crate::SourceLocation;
+use crate::{Config, SourceLocation};
+
+const REDACTED: &str = "<redacted>";
+
+fn redact_sensitive_text(value: &str) -> String {
+    let lowercase = value.to_ascii_lowercase();
+    let contains_sensitive_marker = [
+        "api_key",
+        "credential",
+        "passwd",
+        "password",
+        "private_key",
+        "secret",
+        "token",
+    ]
+    .iter()
+    .any(|marker| lowercase.contains(marker));
+    let resembles_resolved_value = value.contains("://")
+        || value.contains("${")
+        || value.contains(['\n', '\r', '\0'])
+        || value.contains('@');
+
+    if contains_sensitive_marker || resembles_resolved_value {
+        REDACTED.to_owned()
+    } else {
+        value.to_owned()
+    }
+}
 
 /// The outcome of evaluating an auto-configuration descriptor.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -61,7 +88,8 @@ impl AutoConfigurationRequirement {
 /// Redacted evidence that a configuration key was present in a named source.
 ///
 /// Configuration values are never stored in evidence. The optional source is
-/// only a human-readable source label, such as a configuration file name.
+/// derived from [`Config`] attribution and is only a human-readable source
+/// label, such as a configuration file name.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AutoConfigurationConfigEvidence {
     key: &'static str,
@@ -69,12 +97,12 @@ pub struct AutoConfigurationConfigEvidence {
 }
 
 impl AutoConfigurationConfigEvidence {
-    /// Creates redacted configuration evidence for an integration.
+    /// Creates redacted configuration evidence from a configuration's source label.
     #[doc(hidden)]
-    pub fn new(key: &'static str, source: Option<&str>) -> Self {
+    pub fn new(key: &'static str, config: &Config) -> Self {
         Self {
             key,
-            source: source.map(str::to_owned),
+            source: config.source_of(key).map(redact_sensitive_text),
         }
     }
 
@@ -105,7 +133,7 @@ pub struct AutoConfigurationReport {
 }
 
 impl AutoConfigurationReport {
-    /// Creates a redacted auto-configuration report for an integration.
+    /// Creates an auto-configuration report and redacts sensitive explanation text.
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -113,7 +141,7 @@ impl AutoConfigurationReport {
         output_type_name: &'static str,
         status: AutoConfigurationStatus,
         reason_code: AutoConfigurationReasonCode,
-        explanation: impl Into<String>,
+        explanation: &'static str,
         requirements: Vec<AutoConfigurationRequirement>,
         configuration: Vec<AutoConfigurationConfigEvidence>,
     ) -> Self {
@@ -122,7 +150,7 @@ impl AutoConfigurationReport {
             output_type_name,
             status,
             reason_code,
-            explanation: explanation.into(),
+            explanation: redact_sensitive_text(explanation),
             requirements,
             configuration,
         }
