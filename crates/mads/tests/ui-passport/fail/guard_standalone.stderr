@@ -1,0 +1,5 @@
+error: `#[guard]` must appear below `#[routes]` on that trait or below one route verb on a method
+ --> tests/ui-passport/fail/guard_standalone.rs:1:23
+  |
+1 | #[mads::common::guard(strategy = "jwt", principal = UserPrincipal)]
+  |                       ^^^^^^^^

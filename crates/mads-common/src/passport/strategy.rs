@@ -90,6 +90,30 @@ impl ErasedAuthentication {
         }
     }
 
+    /// Creates an erased authentication record from a shared verified JWT.
+    ///
+    /// The generated built-in `ClaimsPrincipal<C>` adapter uses this to retain
+    /// one allocation for both the principal and typed token extraction.
+    #[doc(hidden)]
+    pub fn with_verified<P, C>(principal: P, verified: Arc<VerifiedJwt<C>>) -> Self
+    where
+        P: PassportPrincipal,
+        C: Send + Sync + 'static,
+    {
+        let exact_principal = Arc::new(principal);
+        let policy_principal: Arc<dyn PassportPrincipal> = exact_principal.clone();
+        let exact_verified: Arc<dyn Any + Send + Sync> = verified;
+        Self {
+            principal: policy_principal,
+            exact_principal,
+            exact_verified,
+            principal_type_id: TypeId::of::<P>(),
+            principal_type_name: type_name::<P>(),
+            claims_type_id: TypeId::of::<C>(),
+            claims_type_name: type_name::<C>(),
+        }
+    }
+
     /// Returns the policy-capable application principal.
     #[must_use]
     pub fn principal(&self) -> &(dyn PassportPrincipal + 'static) {

@@ -17,6 +17,7 @@
 use proc_macro::TokenStream;
 
 mod controller;
+mod guard;
 mod passport_principal;
 #[cfg(feature = "passport")]
 mod passport_strategy;
@@ -120,6 +121,16 @@ pub fn routes(arguments: TokenStream, item: TokenStream) -> TokenStream {
     routes::expand(arguments.into(), item.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
+}
+
+/// Declares an inheritable Passport policy on a route trait or route method.
+///
+/// `#[routes]` consumes valid guard attributes and emits their effective
+/// static metadata. Applying this attribute to any other item produces a
+/// focused diagnostic.
+#[proc_macro_attribute]
+pub fn guard(arguments: TokenStream, item: TokenStream) -> TokenStream {
+    guard::outside_contract(arguments.into(), item.into()).into()
 }
 
 /// Marks a GET method inside a trait annotated with [`routes`].

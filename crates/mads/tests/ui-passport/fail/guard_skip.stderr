@@ -1,0 +1,5 @@
+error: `#[guard(skip)]` requires a guard declared on the enclosing `#[routes]` trait
+  --> tests/ui-passport/fail/guard_skip.rs:19:14
+   |
+19 |     async fn profile(&self);
+   |              ^^^^^^^

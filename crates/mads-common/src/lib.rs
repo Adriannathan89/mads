@@ -72,10 +72,11 @@ pub use jwt::{
 /// Typed Passport principals, guarded extractors, context, errors, and diagnostics.
 #[cfg(all(feature = "http", feature = "jwt"))]
 pub use passport::{
-    Authenticated, ClaimsPrincipal, ErasedAuthentication, MADS130, MADS131, PassportContext,
+    Authenticated, BuiltinGuardAdapter, ClaimsPrincipal, ErasedAuthentication, GuardCatalog,
+    GuardDescriptor, GuardPredicate, GuardPredicateAdapter, MADS130, MADS131, PassportContext,
     PassportError, PassportErrorKind, PassportPrincipal, PassportRejection, PassportResult,
     PassportStrategy, PassportStrategyAdapter, PassportStrategyCatalog, PassportStrategyDescriptor,
-    PassportStrategyFuture, VerifiedToken,
+    PassportStrategyFuture, PolicyClause, PolicyMode, TokenSource, VerifiedToken,
 };
 
 /// Safe parsed-cookie metadata available to cookie-authenticated Passport strategies.
@@ -115,6 +116,10 @@ pub use mads_common_macros::controller;
 /// Declares and validates a route-contract trait.
 #[cfg(feature = "http")]
 pub use mads_common_macros::routes;
+
+/// Declares an inheritable Passport policy inside a `#[routes]` contract.
+#[cfg(feature = "http")]
+pub use mads_common_macros::guard;
 
 /// Derives role and permission membership for a named Passport principal.
 #[cfg(all(feature = "http", feature = "jwt"))]

@@ -17,6 +17,8 @@ use syn::{
     Type, parse_quote, spanned::Spanned,
 };
 
+use crate::guard::{self, GuardSpec, GuardTarget};
+
 const CONTRACT_MARKER: &str = "__MADS_ROUTE_CONTRACT";
 const VERBS: &[&str] = &["get", "post", "put", "patch", "delete"];
 
@@ -68,6 +70,19 @@ fn expand_with_common(
     let mut item: ItemTrait = syn::parse2(item)?;
     validate_trait_shape(&item)?;
 
+    if !cfg!(feature = "passport") {
+        if let Some(attribute) = first_guard_attribute(&item) {
+            return Err(Error::new(
+                attribute.span(),
+                "guards require the `jwt` feature",
+            ));
+        }
+    }
+    let trait_guard = guard::take_guard(&mut item.attrs, GuardTarget::Trait)?;
+    if let Some(trait_guard) = &trait_guard {
+        guard::validate_trait_guard(trait_guard, item.ident.span())?;
+    }
+
     let mut routes = BTreeSet::new();
     let mut descriptors = Vec::new();
     let mut route_count = 0usize;
@@ -78,7 +93,14 @@ fn expand_with_common(
                 "`#[routes]` traits may contain route methods only",
             ));
         };
-        descriptors.push(validate_method(method, &mut routes, &prefix)?);
+        let method_guard = guard::take_guard(&mut method.attrs, GuardTarget::Method)?;
+        descriptors.push(validate_method_with_guard(
+            method,
+            &mut routes,
+            &prefix,
+            trait_guard.as_ref(),
+            method_guard,
+        )?);
         route_count += 1;
     }
 
@@ -106,12 +128,32 @@ fn expand_with_common(
     };
     item.items.insert(0, marker);
 
+    let trait_ident = &item.ident;
+    let guard_statics = descriptors
+        .iter_mut()
+        .filter_map(|descriptor| {
+            let guard = descriptor.guard.take()?;
+            let (identifier, tokens) = guard.static_tokens(
+                common,
+                trait_ident,
+                &descriptor.handler_ident,
+                &descriptor.conditional_attributes,
+            );
+            descriptor.guard_ident = Some(identifier);
+            Some(tokens)
+        })
+        .collect::<Vec<_>>();
+
     let descriptor_tokens = descriptors.iter().map(|descriptor| {
         let conditional_attributes = &descriptor.conditional_attributes;
         let method = descriptor.method.tokens(common);
         let path = &descriptor.path;
         let full_path = &descriptor.full_path;
         let handler = &descriptor.handler;
+        let guard = descriptor
+            .guard_ident
+            .as_ref()
+            .map(|guard| quote!(.with_guard(&#guard)));
         quote! {
             #(#conditional_attributes)*
             #common::RouteDescriptor::new(
@@ -122,6 +164,7 @@ fn expand_with_common(
                 #handler,
                 #common::core::SourceLocation::new(file!(), line!(), column!()),
             )
+            #guard
         }
     });
     let metadata: TraitItem = parse_quote! {
@@ -132,7 +175,6 @@ fn expand_with_common(
     };
     item.items.insert(1, metadata);
 
-    let trait_ident = &item.ident;
     let registrations = descriptors
         .iter()
         .map(|descriptor| descriptor.registration_tokens(common, trait_ident));
@@ -155,7 +197,25 @@ fn expand_with_common(
     };
     item.items.insert(2, registrar);
 
-    Ok(quote!(#item))
+    Ok(quote!(
+        #(#guard_statics)*
+        #item
+    ))
+}
+
+fn first_guard_attribute(item: &ItemTrait) -> Option<&Attribute> {
+    item.attrs
+        .iter()
+        .find(|attribute| guard::is_guard_attribute(attribute))
+        .or_else(|| {
+            item.items.iter().find_map(|item| match item {
+                TraitItem::Fn(method) => method
+                    .attrs
+                    .iter()
+                    .find(|attribute| guard::is_guard_attribute(attribute)),
+                _ => None,
+            })
+        })
 }
 
 fn validate_trait_shape(item: &ItemTrait) -> syn::Result<()> {
@@ -180,10 +240,21 @@ fn validate_trait_shape(item: &ItemTrait) -> syn::Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_method(
     method: &mut TraitItemFn,
     routes: &mut BTreeSet<(String, String)>,
     prefix: &LitStr,
+) -> syn::Result<RouteMetadata> {
+    validate_method_with_guard(method, routes, prefix, None, None)
+}
+
+fn validate_method_with_guard(
+    method: &mut TraitItemFn,
+    routes: &mut BTreeSet<(String, String)>,
+    prefix: &LitStr,
+    trait_guard: Option<&GuardSpec>,
+    method_guard: Option<GuardSpec>,
 ) -> syn::Result<RouteMetadata> {
     if method.default.is_some() {
         return Err(Error::new(
@@ -243,6 +314,12 @@ fn validate_method(
         }
     }
     if route_attributes.len() != 1 {
+        if method_guard.is_some() {
+            return Err(Error::new(
+                method.sig.ident.span(),
+                "`#[guard]` must appear below one route verb on a method inside `#[routes]`",
+            ));
+        }
         return Err(Error::new(
             method.sig.ident.span(),
             "each route contract method requires exactly one of `#[get]`, `#[post]`, `#[put]`, `#[patch]`, or `#[delete]`",
@@ -255,6 +332,7 @@ fn validate_method(
     validate_path(&path, "route path", false)?;
 
     let full_path = join_paths(prefix, &path)?;
+    let guard = guard::merge(trait_guard, method_guard.as_ref(), method.sig.ident.span())?;
 
     let identity = ((*verb).to_owned(), full_path.value());
     if !routes.insert(identity) {
@@ -284,6 +362,8 @@ fn validate_method(
         handler_ident: method.sig.ident.clone(),
         argument_types,
         conditional_attributes,
+        guard,
+        guard_ident: None,
     })
 }
 
@@ -295,6 +375,8 @@ struct RouteMetadata {
     handler_ident: syn::Ident,
     argument_types: Vec<Type>,
     conditional_attributes: Vec<Attribute>,
+    guard: Option<guard::EffectiveGuard>,
+    guard_ident: Option<syn::Ident>,
 }
 
 impl RouteMetadata {

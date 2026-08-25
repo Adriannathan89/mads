@@ -8,9 +8,45 @@
 
 use std::any::TypeId;
 use std::collections::BTreeMap;
+#[cfg(feature = "jwt")]
+use std::fmt;
+#[cfg(feature = "jwt")]
+use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
 
 use mads_core::{Diagnostic, Error, MADS030, Result, SourceLocation};
+
+#[cfg(feature = "jwt")]
+#[derive(Clone, Copy)]
+struct GuardReference(&'static crate::passport::GuardDescriptor);
+
+#[cfg(feature = "jwt")]
+impl PartialEq for GuardReference {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.0, other.0)
+    }
+}
+
+#[cfg(feature = "jwt")]
+impl Eq for GuardReference {}
+
+#[cfg(feature = "jwt")]
+impl Hash for GuardReference {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (self.0 as *const crate::passport::GuardDescriptor).hash(state);
+    }
+}
+
+#[cfg(feature = "jwt")]
+impl fmt::Debug for GuardReference {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GuardReference")
+            .field("route_trait", &self.0.route_trait())
+            .field("handler", &self.0.handler())
+            .finish()
+    }
+}
 
 /// An HTTP method declared by a route contract.
 ///
@@ -66,6 +102,8 @@ pub struct RouteDescriptor {
     full_path: &'static str,
     handler: &'static str,
     location: SourceLocation,
+    #[cfg(feature = "jwt")]
+    guard: Option<GuardReference>,
 }
 
 impl RouteDescriptor {
@@ -109,6 +147,8 @@ impl RouteDescriptor {
             full_path,
             handler,
             location,
+            #[cfg(feature = "jwt")]
+            guard: None,
         }
     }
 
@@ -140,6 +180,29 @@ impl RouteDescriptor {
     /// Returns the source location of the declaring route contract.
     pub const fn location(self) -> SourceLocation {
         self.location
+    }
+
+    /// Associates this route with one effective Passport guard descriptor.
+    ///
+    /// Route expansion uses the exact same static descriptor for catalog
+    /// inspection and future request-time enforcement.
+    #[cfg(feature = "jwt")]
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_guard(mut self, guard: &'static crate::passport::GuardDescriptor) -> Self {
+        self.guard = Some(GuardReference(guard));
+        self
+    }
+
+    /// Returns the effective Passport guard for this route when it has one.
+    #[cfg(feature = "jwt")]
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn guard(&self) -> Option<&'static crate::passport::GuardDescriptor> {
+        match self.guard {
+            Some(guard) => Some(guard.0),
+            None => None,
+        }
     }
 }
 

@@ -23,8 +23,13 @@ pub struct ClaimsPrincipal<C> {
 }
 
 impl<C> ClaimsPrincipal<C> {
-    #[allow(dead_code)]
-    pub(crate) fn new(verified: Arc<VerifiedJwt<C>>) -> Self {
+    /// Creates a principal from one complete verified JWT.
+    ///
+    /// This is used by the generated built-in `jwt` guard adapter. Application
+    /// code normally receives this type through [`Authenticated`].
+    #[doc(hidden)]
+    #[must_use]
+    pub fn new(verified: Arc<VerifiedJwt<C>>) -> Self {
         Self { verified }
     }
 

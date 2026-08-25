@@ -6,6 +6,7 @@
 
 mod context;
 mod error;
+mod guard;
 mod principal;
 mod strategy;
 
@@ -13,6 +14,10 @@ pub use context::PassportContext;
 #[cfg(feature = "cookies")]
 pub use context::PassportCookies;
 pub use error::{PassportError, PassportErrorKind, PassportRejection, PassportResult};
+pub use guard::{
+    BuiltinGuardAdapter, GuardCatalog, GuardDescriptor, GuardPredicate, GuardPredicateAdapter,
+    PolicyClause, PolicyMode, TokenSource,
+};
 pub use principal::{Authenticated, ClaimsPrincipal, PassportPrincipal, VerifiedToken};
 pub use strategy::{
     ErasedAuthentication, PassportStrategy, PassportStrategyAdapter, PassportStrategyCatalog,

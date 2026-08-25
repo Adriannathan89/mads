@@ -126,6 +126,25 @@ fn parses_route_arguments() {
     assert!(syn::parse_str::<RoutesArguments>("prefix = \"/api\" extra").is_err());
 }
 
+#[cfg(not(feature = "passport"))]
+#[test]
+fn rejects_guards_when_the_jwt_macro_feature_is_absent() {
+    let error = expand_with_common(
+        quote!(),
+        quote! {
+            #[guard(strategy = "jwt", principal = UserPrincipal)]
+            trait GuardedRoutes {
+                #[get("/profile")]
+                async fn profile(&self);
+            }
+        },
+        &syn::parse_quote!(mads_common),
+    )
+    .expect_err("guards require the macro crate Passport feature");
+
+    assert_eq!(error.to_string(), "guards require the `jwt` feature");
+}
+
 #[test]
 fn validates_trait_shapes() {
     validate_trait_shape(&syn::parse_str("trait Routes { }").unwrap()).unwrap();
