@@ -78,6 +78,10 @@ pub use passport::{
     PassportStrategyFuture, VerifiedToken,
 };
 
+/// Safe parsed-cookie metadata available to cookie-authenticated Passport strategies.
+#[cfg(all(feature = "http", feature = "jwt", feature = "cookies"))]
+pub use passport::PassportCookies;
+
 /// Strict cookie extraction, normalized errors, and established cookie types.
 #[cfg(feature = "cookies")]
 pub use cookie::{

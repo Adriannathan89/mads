@@ -44,7 +44,9 @@ pub type PassportStrategyFuture<'a> =
 ///
 /// This function-pointer type is emitted by [`crate::passport_strategy`].
 /// Applications should select strategies through guards rather than call an
-/// adapter directly.
+/// adapter directly. The raw token argument is retained exclusively for
+/// framework verification; application validation receives only the verified
+/// claims and the credential-sanitized [`PassportContext`].
 pub type PassportStrategyAdapter = for<'a> fn(
     &'a ApplicationContext,
     &'a PassportContext<'a>,
