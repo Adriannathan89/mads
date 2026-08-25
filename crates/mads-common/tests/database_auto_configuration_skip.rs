@@ -23,4 +23,5 @@ fn unused_invalid_database_configuration_is_skipped_without_validation() {
         analysis.auto_configurations()[0].reason_code().as_str(),
         "requirement_absent"
     );
+    assert!(analysis.auto_configurations()[0].configuration().is_empty());
 }

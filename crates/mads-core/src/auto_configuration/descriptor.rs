@@ -136,13 +136,13 @@ impl<'a> AutoConfigurationContext<'a> {
         T: Send + Sync + 'static,
     {
         let type_id = TypeId::of::<T>();
+        let type_name = std::any::type_name::<T>();
         self.satisfied
             .iter()
             .any(|provider| provider.type_id == type_id)
-            || self
-                .providers
-                .iter()
-                .any(|provider| provider.type_id() == type_id)
+            || self.providers.iter().any(|provider| {
+                provider.type_id() == type_id || provider.runtime_type_name() == Some(type_name)
+            })
     }
 
     /// Returns every direct catalog requirement for `T` in deterministic order.

@@ -60,6 +60,7 @@ pub struct ProviderDescriptor {
     kind: ProviderKind,
     type_name: &'static str,
     type_id: fn() -> TypeId,
+    runtime_type_name: Option<fn() -> &'static str>,
     dependencies: &'static [DependencyDescriptor],
     visibility: ProviderVisibility,
     location: SourceLocation,
@@ -81,11 +82,23 @@ impl ProviderDescriptor {
             kind,
             type_name,
             type_id,
+            runtime_type_name: None,
             dependencies,
             visibility,
             location,
             constructor,
         }
+    }
+
+    /// Attaches the resolved Rust type name emitted by a provider macro.
+    ///
+    /// This document-hidden metadata lets catalog consumers compare types
+    /// across separately compiled crate instances while retaining `TypeId` as
+    /// the primary identity mechanism.
+    #[doc(hidden)]
+    pub const fn with_runtime_type_name(mut self, runtime_type_name: fn() -> &'static str) -> Self {
+        self.runtime_type_name = Some(runtime_type_name);
+        self
     }
 
     /// Returns the provider's role.
@@ -101,6 +114,13 @@ impl ProviderDescriptor {
     /// Returns the provider's runtime output type identifier.
     pub fn type_id(&self) -> TypeId {
         (self.type_id)()
+    }
+
+    /// Returns the resolved Rust output type name emitted by a provider macro.
+    #[doc(hidden)]
+    pub fn runtime_type_name(&self) -> Option<&'static str> {
+        self.runtime_type_name
+            .map(|runtime_type_name| runtime_type_name())
     }
 
     /// Returns the static dependency descriptors required by this provider.

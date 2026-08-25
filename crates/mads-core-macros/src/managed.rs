@@ -110,6 +110,7 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
     let inner_ident = format_ident!("__Mads{}Inner", ident);
     let constructor_ident = format_ident!("__mads_construct_{}", ident);
     let type_id_ident = format_ident!("__mads_type_id_{}", ident);
+    let runtime_type_name_ident = format_ident!("__mads_runtime_type_name_{}", ident);
     let is_unit = matches!(fields, Fields::Unit);
 
     let (inner_fields, resolve_fields, dependencies) = match fields {
@@ -199,6 +200,12 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
             ::core::any::TypeId::of::<#ident>()
         }
 
+        #[doc(hidden)]
+        #[allow(non_snake_case)]
+        fn #runtime_type_name_ident() -> &'static str {
+            ::core::any::type_name::<#ident>()
+        }
+
         #core::__private::inventory::submit! {
             #core::ProviderDescriptor::new(
                 #provider_kind,
@@ -209,6 +216,7 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
                 #core::SourceLocation::new(file!(), line!(), column!()),
                 #constructor_ident,
             )
+            .with_runtime_type_name(#runtime_type_name_ident)
         }
     })
 }

@@ -7,11 +7,14 @@ use mads_core::__private::{
     AutoConfigurationDescriptor, AutoConfigurationEvaluation,
 };
 use mads_core::{
-    AutoConfigurationConfigEvidence, AutoConfigurationReasonCode, Diagnostic, Error, Result,
-    SourceLocation,
+    AutoConfigurationConfigEvidence, AutoConfigurationReasonCode, AutoConfigurationRequirement,
+    Diagnostic, Error, Result, SourceLocation,
 };
 
-use super::lifecycle::{DatabaseLifecycle, DatabaseMigrations, database_framework_error};
+use super::lifecycle::{
+    DatabaseLifecycle, DatabaseMigrations, database_framework_error,
+    database_framework_error_with_diagnostic,
+};
 use super::{Database, DatabaseConfig, MADS101};
 
 /// Stable identifier for the official Diesel database auto-configuration.
@@ -24,11 +27,7 @@ fn database_type_id() -> TypeId {
 }
 
 fn evaluate(context: &AutoConfigurationContext<'_>) -> AutoConfigurationEvaluation {
-    if context.has_provider::<Database>()
-        || mads_core::Catalog::providers()
-            .iter()
-            .any(|provider| provider.type_id() == database_type_id())
-    {
+    if context.has_provider::<Database>() {
         return AutoConfigurationEvaluation::overridden(
             AutoConfigurationReasonCode::new("user_override"),
             "an application provider overrides the database default",
@@ -43,7 +42,7 @@ fn evaluate(context: &AutoConfigurationContext<'_>) -> AutoConfigurationEvaluati
             AutoConfigurationReasonCode::new("requirement_absent"),
             "no provider requires the database default",
             requirements,
-            configuration_evidence(context),
+            Vec::new(),
         );
     }
 
@@ -57,17 +56,13 @@ fn evaluate(context: &AutoConfigurationContext<'_>) -> AutoConfigurationEvaluati
             } else {
                 "invalid_configuration"
             };
+            let error = configuration_error(missing_url, &requirements, source);
             return AutoConfigurationEvaluation::failed(
                 AutoConfigurationReasonCode::new(reason),
                 "database auto-configuration could not read its configuration",
                 requirements,
                 configuration,
-                database_framework_error(
-                    MADS101,
-                    "database auto-configuration is invalid",
-                    "database configuration failed",
-                    source,
-                ),
+                error,
             );
         }
     };
@@ -86,11 +81,55 @@ fn evaluate(context: &AutoConfigurationContext<'_>) -> AutoConfigurationEvaluati
         );
     }
 
+    let explanation = if config.migrate_on_startup() {
+        "Database is required and configured"
+    } else {
+        "Database is required and configured with startup migrations disabled"
+    };
+
     AutoConfigurationEvaluation::active(
         AutoConfigurationReasonCode::new("conditions_matched"),
-        "Database is required and configured",
+        explanation,
         requirements,
         configuration,
+    )
+}
+
+fn configuration_error(
+    missing_url: bool,
+    requirements: &[AutoConfigurationRequirement],
+    source: super::DatabaseError,
+) -> Error {
+    let condition = if missing_url {
+        "is missing"
+    } else {
+        "is invalid"
+    };
+    let requiring_providers = requirements
+        .iter()
+        .map(|requirement| match requirement.location() {
+            Some(location) => format!(
+                "{} at {}:{}:{}",
+                requirement.provider_type_name(),
+                location.file,
+                location.line,
+                location.column
+            ),
+            None => requirement.provider_type_name().to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    database_framework_error_with_diagnostic(
+        Diagnostic::new(
+            MADS101,
+            "database auto-configuration is invalid",
+            format!("database.url {condition}; required by {requiring_providers}"),
+        )
+        .with_subject("database.url")
+        .with_suggestion("configure `database.url` with a PostgreSQL connection URL")
+        .with_suggestion("provide an explicit or custom `Database` to override the default"),
+        source,
     )
 }
 

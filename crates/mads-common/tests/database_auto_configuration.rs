@@ -113,6 +113,13 @@ fn missing_url_is_mads101_without_redundant_mads003() {
             .iter()
             .all(|diagnostic| diagnostic.code() != MADS003)
     );
+    let rendered = analysis.diagnostics()[0].to_string();
+    assert!(rendered.contains("database.url"));
+    assert!(rendered.contains("AlphaRepository"));
+    assert!(rendered.contains("ZetaRepository"));
+    assert!(rendered.contains("database_auto_configuration.rs"));
+    assert!(rendered.contains("configure `database.url`"));
+    assert!(rendered.contains("explicit or custom `Database`"));
 }
 
 #[test]
@@ -129,6 +136,13 @@ fn invalid_configuration_is_mads101_and_redacted() {
         "invalid_configuration"
     );
     assert!(!format!("{:?}", analysis.auto_configurations()).contains("invalid-secret"));
+    let rendered = analysis.diagnostics()[0].to_string();
+    assert!(rendered.contains("database.url"));
+    assert!(rendered.contains("AlphaRepository"));
+    assert!(rendered.contains("ZetaRepository"));
+    assert!(rendered.contains("database_auto_configuration.rs"));
+    assert!(rendered.contains("configure `database.url`"));
+    assert!(rendered.contains("explicit or custom `Database`"));
 }
 
 #[test]
@@ -188,7 +202,12 @@ fn disabled_migration_accepts_but_does_not_require_a_source() {
         ("database.migrate", "false"),
     ]));
     builder.database_migrations(MIGRATIONS).unwrap();
-    assert!(builder.analyze().is_valid());
+    let analysis = builder.analyze();
+    assert!(analysis.is_valid());
+    assert_eq!(
+        analysis.auto_configurations()[0].explanation(),
+        "Database is required and configured with startup migrations disabled",
+    );
 }
 
 #[tokio::test]

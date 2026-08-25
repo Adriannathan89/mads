@@ -267,10 +267,14 @@ pub(super) fn database_framework_error(
     operation: &'static str,
     source: DatabaseError,
 ) -> Error {
-    Error::with_source(
-        Diagnostic::new(code, title, operation),
-        DatabaseCoreSource::from(source),
-    )
+    database_framework_error_with_diagnostic(Diagnostic::new(code, title, operation), source)
+}
+
+pub(super) fn database_framework_error_with_diagnostic(
+    diagnostic: Diagnostic,
+    source: DatabaseError,
+) -> Error {
+    Error::with_source(diagnostic, DatabaseCoreSource::from(source))
 }
 
 /// Retains the core-safe parts of a database error for core error sources.
