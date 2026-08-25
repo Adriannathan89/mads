@@ -1,4 +1,58 @@
-//! Strict, redacted cookie extraction for Axum requests.
+//! Strict, redacted cookie extraction and checked response composition.
+//!
+//! # Security boundary
+//!
+//! JWT signatures can protect token integrity, but transporting a token in a
+//! cookie does **not** provide CSRF protection. Applications that accept
+//! state-changing cross-site requests must install appropriate CSRF middleware
+//! and deliberately configure [`Cookie::set_http_only`], [`Cookie::set_secure`],
+//! and [`Cookie::set_same_site`]. Signed and private cookie jars are not provided
+//! in MADS.rs v0.5.5.
+//!
+//! Request cookies are available through the strict [`CookieJar`] extractor or
+//! by parsing an existing header map:
+//!
+//! ```
+//! use mads_common::{CookieJar, axum::http::{HeaderMap, HeaderValue, header::COOKIE}};
+//!
+//! let mut headers = HeaderMap::new();
+//! headers.insert(COOKIE, HeaderValue::from_static("session=opaque"));
+//! let jar = CookieJar::from_headers(&headers)?;
+//! assert_eq!(jar.get("session").map(|cookie| cookie.value()), Some("opaque"));
+//! # Ok::<(), mads_common::CookieError>(())
+//! ```
+//!
+//! Return a jar in an Axum response tuple to emit pending cookies:
+//!
+//! ```
+//! use mads_common::{Cookie, CookieJar};
+//!
+//! async fn login(jar: CookieJar) -> (CookieJar, &'static str) {
+//!     (jar.add(Cookie::new("session", "opaque")), "signed in")
+//! }
+//! ```
+//!
+//! Removing a cookie emits an expired deletion cookie:
+//!
+//! ```
+//! use mads_common::{Cookie, CookieJar};
+//!
+//! let jar = CookieJar::new().remove(Cookie::new("session", ""));
+//! # let _ = jar;
+//! ```
+//!
+//! The extractor and response parts compose directly with native Axum routes:
+//!
+//! ```
+//! use mads_common::{Cookie, CookieJar, axum::{Router, routing::get}};
+//!
+//! async fn rotate(jar: CookieJar) -> (CookieJar, &'static str) {
+//!     (jar.add(Cookie::new("session", "rotated")), "ok")
+//! }
+//!
+//! let app: Router = Router::new().route("/session", get(rotate));
+//! # let _ = app;
+//! ```
 
 use std::{collections::BTreeMap, fmt};
 

@@ -162,6 +162,10 @@ pub use mads_common::diesel;
 #[cfg(feature = "database")]
 pub use mads_common::diesel_migrations;
 
+/// Re-exports strict cookie integration and the established cookie time types.
+#[cfg(feature = "cookies")]
+pub use mads_common::cookie;
+
 /// Re-exports database configuration, runtime, migration, and error contracts.
 #[cfg(feature = "database")]
 pub use mads_common::{
@@ -176,6 +180,13 @@ pub use mads_common::{
     JwtAlgorithm, JwtClaims, JwtError, JwtErrorKind, JwtHeader, JwtResult, JwtService,
     JwtSignOptions, JwtTokenKind, JwtValidation, MADS120, MADS121, PassportConfig,
     RegisteredJwtClaims, VerifiedJwt,
+};
+
+/// Re-exports strict cookie extraction, response composition, and diagnostics.
+#[cfg(feature = "cookies")]
+pub use mads_common::{
+    Cookie, CookieError, CookieErrorKind, CookieJar, CookieRejection, CookieResult, Expiration,
+    MADS110, SameSite,
 };
 
 /// Re-exports HTTP request extractors and their typed-header support.
@@ -273,6 +284,13 @@ pub mod prelude {
         JwtAlgorithm, JwtClaims, JwtError, JwtErrorKind, JwtHeader, JwtResult, JwtService,
         JwtSignOptions, JwtTokenKind, JwtValidation, MADS120, MADS121, PassportConfig,
         RegisteredJwtClaims, VerifiedJwt,
+    };
+
+    /// Re-exports strict cookie extraction, response composition, and time types.
+    #[cfg(feature = "cookies")]
+    pub use mads_common::{
+        Cookie, CookieError, CookieErrorKind, CookieJar, CookieRejection, CookieResult, Expiration,
+        MADS110, SameSite, cookie,
     };
 
     /// Re-exports types used to build, run, and inspect an application.

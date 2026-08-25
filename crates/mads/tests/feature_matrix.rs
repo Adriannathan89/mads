@@ -52,3 +52,12 @@ fn common_remains_http_and_database_without_authentication() {
     assert!(!tree.contains("jsonwebtoken v"));
     assert!(!tree.contains("cookie v"));
 }
+
+#[test]
+fn cookies_include_http_but_not_jwt_or_database() {
+    let tree = dependency_tree("cookies");
+    assert!(tree.contains("axum v"));
+    assert!(tree.contains("cookie v"));
+    assert!(!tree.contains("jsonwebtoken v"));
+    assert!(!tree.contains("diesel v"));
+}

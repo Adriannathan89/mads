@@ -32,6 +32,51 @@ fn prelude_exposes_the_http_runtime_surface() {
     let _: mads::common::axum::Router = mads::common::axum::Router::new();
 }
 
+#[cfg(feature = "cookies")]
+#[tokio::test]
+async fn prelude_exposes_cookie_types_through_native_axum() {
+    use mads::axum::{
+        Router,
+        body::Body,
+        http::{Request, header::SET_COOKIE},
+        routing::get,
+    };
+    use mads::prelude::*;
+    use tower::ServiceExt;
+
+    async fn handler(jar: CookieJar) -> (CookieJar, &'static str) {
+        let session = Cookie::build(("session", "opaque-token"))
+            .http_only(true)
+            .secure(true)
+            .same_site(SameSite::Lax)
+            .max_age(cookie::time::Duration::minutes(5))
+            .build();
+        (jar.add(session), "ok")
+    }
+
+    let response = Router::new()
+        .route("/session", get(handler))
+        .oneshot(
+            Request::builder()
+                .uri("/session")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(response.headers().contains_key(SET_COOKIE));
+    let _ = std::any::TypeId::of::<Expiration>();
+    let _ = std::any::TypeId::of::<CookieError>();
+    let _ = std::any::TypeId::of::<CookieErrorKind>();
+    let _ = std::any::TypeId::of::<CookieRejection>();
+    let _: CookieResult<()> = Ok(());
+    assert_eq!(MADS110.as_str(), "MADS110");
+    let _ = std::any::TypeId::of::<mads::Cookie<'static>>();
+    let _ = std::any::TypeId::of::<mads::CookieJar>();
+    let _: mads::cookie::time::Duration = cookie::time::Duration::seconds(1);
+}
+
 #[test]
 fn prelude_exposes_the_database_runtime_surface() {
     use mads::diesel_migrations;
