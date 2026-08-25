@@ -25,6 +25,10 @@ mod router;
 #[cfg(feature = "http")]
 mod server;
 
+/// Strict cookie extraction, response composition, and established cookie types.
+#[cfg(feature = "cookies")]
+pub mod cookie;
+
 /// Typed JSON Web Token contracts and services.
 #[cfg(feature = "jwt")]
 pub mod jwt;
@@ -59,6 +63,13 @@ pub use jwt::{
     JwtAlgorithm, JwtClaims, JwtError, JwtErrorKind, JwtHeader, JwtResult, JwtService,
     JwtSignOptions, JwtTokenKind, JwtValidation, MADS120, MADS121, PassportConfig,
     RegisteredJwtClaims, VerifiedJwt,
+};
+
+/// Strict cookie extraction, normalized errors, and established cookie types.
+#[cfg(feature = "cookies")]
+pub use cookie::{
+    Cookie, CookieError, CookieErrorKind, CookieJar, CookieRejection, CookieResult, Expiration,
+    MADS110, SameSite,
 };
 
 /// Standard Axum-compatible HTTP request extractors.
