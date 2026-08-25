@@ -22,12 +22,13 @@ database = [
     "dep:diesel_migrations",
     "dep:tokio",
 ]
-jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json"]
+jwt = ["dep:base64", "dep:jsonwebtoken", "dep:serde", "dep:serde_json"]
 cookies = ["http", "dep:cookie", "axum-extra/cookie"]
 
 [dependencies]
 axum = { workspace = true, optional = true }
 axum-extra = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
 cookie = { workspace = true, optional = true }
 deadpool-diesel = { workspace = true, optional = true }
 diesel = { workspace = true, optional = true }

@@ -20,6 +20,7 @@ repository = "https://github.com/Adriannathan89/mads"
 [workspace.dependencies]
 axum = { version = "0.8.9", features = ["http1", "json", "tokio"] }
 axum-extra = { version = "0.12.6", default-features = false, features = ["typed-header"] }
+base64 = "0.22"
 cookie = { version = "=0.18.1", default-features = false, features = ["percent-encode"] }
 deadpool-diesel = { version = "=0.6.1", default-features = false, features = ["postgres", "rt_tokio_1"] }
 diesel = { version = "=2.2.12", default-features = false, features = ["postgres", "32-column-tables"] }

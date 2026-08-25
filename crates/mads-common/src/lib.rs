@@ -53,12 +53,12 @@ pub use database::{
     MigrationStatus,
 };
 
-/// Typed JWT claims, options, errors, and diagnostics.
+/// Typed JWT claims, service, options, errors, and diagnostics.
 #[cfg(feature = "jwt")]
 pub use jwt::{
-    JwtAlgorithm, JwtClaims, JwtError, JwtErrorKind, JwtHeader, JwtResult, JwtSignOptions,
-    JwtTokenKind, JwtValidation, MADS120, MADS121, PassportConfig, RegisteredJwtClaims,
-    VerifiedJwt,
+    JwtAlgorithm, JwtClaims, JwtError, JwtErrorKind, JwtHeader, JwtResult, JwtService,
+    JwtSignOptions, JwtTokenKind, JwtValidation, MADS120, MADS121, PassportConfig,
+    RegisteredJwtClaims, VerifiedJwt,
 };
 
 /// Standard Axum-compatible HTTP request extractors.
