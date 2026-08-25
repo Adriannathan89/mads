@@ -20,8 +20,9 @@ pub use guard::{
 };
 pub use principal::{Authenticated, ClaimsPrincipal, PassportPrincipal, VerifiedToken};
 pub use strategy::{
-    ErasedAuthentication, PassportStrategy, PassportStrategyAdapter, PassportStrategyCatalog,
-    PassportStrategyDescriptor, PassportStrategyFuture,
+    ErasedAuthentication, PassportStrategy, PassportStrategyAdapter, PassportStrategyBinding,
+    PassportStrategyCatalog, PassportStrategyDescriptor, PassportStrategyFuture,
+    PassportStrategyPreflight,
 };
 
 /// Passport strategy registration, resolution, or type mismatch.

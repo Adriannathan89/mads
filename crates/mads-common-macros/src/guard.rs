@@ -552,7 +552,8 @@ impl EffectiveGuard {
                 &[#(#predicate_entries,)*],
                 #common::core::SourceLocation::new(file!(), line!(), column!()),
                 #builtin,
-            );
+            )
+            .with_requirement_subject(concat!(stringify!(#route_trait), "::", stringify!(#handler)));
 
             #(#conditional_attributes)*
             #common::core::__private::inventory::submit! {

@@ -7,11 +7,13 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
-use mads_core::{ApplicationContext, SourceLocation};
+use mads_core::{ApplicationContext, Catalog, Diagnostic, Error, Result, SourceLocation};
 
 use crate::{JwtClaims, JwtTokenKind, VerifiedJwt};
 
-use super::{PassportContext, PassportPrincipal, PassportResult};
+use super::{
+    GuardCatalog, GuardDescriptor, MADS130, PassportContext, PassportPrincipal, PassportResult,
+};
 
 /// A typed application strategy that turns verified JWT claims into a principal.
 ///
@@ -307,6 +309,130 @@ impl PassportStrategyCatalog {
     pub fn strategies() -> Vec<&'static PassportStrategyDescriptor> {
         strategy_cache().clone()
     }
+
+    /// Validates all registered strategy metadata and resolves guarded routes.
+    ///
+    /// The returned bindings retain only static descriptors, function pointers,
+    /// and type metadata. They never construct a provider, resolve an
+    /// application value, or inspect JWT configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns `MADS130` for duplicate, unmanaged, missing, ambiguous, or
+    /// principal-incompatible strategies. Invalid guard metadata is rejected
+    /// with `MADS131` before strategy selection.
+    #[allow(clippy::result_large_err)]
+    pub fn preflight<'a>(
+        guards: &'a [&'a GuardDescriptor],
+    ) -> Result<PassportStrategyPreflight<'a>> {
+        GuardCatalog::validate_descriptors(guards)?;
+
+        let strategies = Self::strategies();
+        validate_strategy_catalog(&strategies)?;
+
+        let mut guards = guards.to_vec();
+        guards.sort_by(guard_order);
+        let mut bindings = Vec::with_capacity(guards.len());
+        for guard in guards {
+            bindings.push(resolve_guard(guard, &strategies)?);
+        }
+        Ok(PassportStrategyPreflight { bindings })
+    }
+}
+
+/// The deterministic static strategy selection for one guarded route.
+///
+/// This record contains no application-owned values. Its adapter obtains a
+/// managed strategy only after ordinary application construction has succeeded.
+pub struct PassportStrategyBinding<'a> {
+    guard: &'a GuardDescriptor,
+    strategy: &'static str,
+    adapter: PassportStrategyAdapter,
+    token_kind: JwtTokenKind,
+    builtin: bool,
+}
+
+impl PassportStrategyBinding<'_> {
+    /// Returns the effective static guard.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn guard(&self) -> &GuardDescriptor {
+        self.guard
+    }
+
+    /// Returns the selected strategy name.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn strategy(&self) -> &'static str {
+        self.strategy
+    }
+
+    /// Returns the adapter selected during preflight.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn adapter(&self) -> PassportStrategyAdapter {
+        self.adapter
+    }
+
+    /// Returns the token profile enforced by the selected adapter.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn token_kind(&self) -> JwtTokenKind {
+        self.token_kind
+    }
+
+    /// Returns whether this binding uses the built-in typed-claims adapter.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn is_builtin(&self) -> bool {
+        self.builtin
+    }
+}
+
+impl fmt::Debug for PassportStrategyBinding<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PassportStrategyBinding")
+            .field("guard", &self.guard.requirement_subject())
+            .field("strategy", &self.strategy)
+            .field("token_kind", &self.token_kind)
+            .field("builtin", &self.builtin)
+            .finish()
+    }
+}
+
+/// The complete deterministic selection generated during Passport preflight.
+///
+/// Preflight is intentionally metadata-only. Request-time guard execution uses
+/// these bindings later to resolve providers from a completed application.
+pub struct PassportStrategyPreflight<'a> {
+    bindings: Vec<PassportStrategyBinding<'a>>,
+}
+
+impl<'a> PassportStrategyPreflight<'a> {
+    /// Returns every selected guard binding in deterministic route order.
+    #[must_use]
+    pub fn bindings(&self) -> &[PassportStrategyBinding<'a>] {
+        &self.bindings
+    }
+
+    /// Finds the selected binding for one exact guard descriptor.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn binding_for(&self, guard: &GuardDescriptor) -> Option<&PassportStrategyBinding<'a>> {
+        self.bindings
+            .iter()
+            .find(|binding| std::ptr::eq(binding.guard, guard))
+    }
+}
+
+impl fmt::Debug for PassportStrategyPreflight<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PassportStrategyPreflight")
+            .field("bindings", &self.bindings)
+            .finish()
+    }
 }
 
 fn strategy_cache() -> &'static Vec<&'static PassportStrategyDescriptor> {
@@ -329,6 +455,155 @@ fn strategy_order(
         .cmp(right.name())
         .then_with(|| left.provider_type_name().cmp(right.provider_type_name()))
         .then_with(|| location_order(left.location(), right.location()))
+}
+
+fn guard_order(left: &&GuardDescriptor, right: &&GuardDescriptor) -> Ordering {
+    left.route_trait()
+        .cmp(right.route_trait())
+        .then_with(|| left.handler().cmp(right.handler()))
+        .then_with(|| location_order(left.location(), right.location()))
+}
+
+fn validate_strategy_catalog(strategies: &[&'static PassportStrategyDescriptor]) -> Result<()> {
+    let duplicate_groups = strategies
+        .chunk_by(|left, right| left.name() == right.name())
+        .filter(|group| group.len() > 1)
+        .collect::<Vec<_>>();
+    if let Some((first, rest)) = duplicate_groups.split_first() {
+        let primary = duplicate_strategy_error(first);
+        let related = rest.iter().map(|group| duplicate_strategy_error(group));
+        return Err(Error::from_diagnostics(primary, related));
+    }
+
+    let providers = Catalog::providers();
+    for strategy in strategies {
+        let candidates = providers
+            .iter()
+            .copied()
+            .filter(|provider| {
+                let provider = *provider;
+                provider.type_id() == strategy.provider_type_id()
+                    && provider.runtime_type_name() == Some(strategy.provider_type_name())
+            })
+            .collect::<Vec<_>>();
+        match candidates.as_slice() {
+            [_provider] => {}
+            [] => {
+                return Err(strategy_error(
+                    "unmanaged_strategy",
+                    "unmanaged Passport strategy",
+                    strategy.provider_type_name(),
+                    "the strategy implementation is not registered as exactly one managed provider",
+                    strategy.location(),
+                    "annotate the concrete strategy type with a MADS managed-provider attribute",
+                ));
+            }
+            _ => {
+                return Err(strategy_error(
+                    "ambiguous_strategy",
+                    "ambiguous Passport strategy provider",
+                    strategy.provider_type_name(),
+                    "more than one managed provider descriptor matches this strategy implementation",
+                    strategy.location(),
+                    "retain exactly one managed provider declaration for the strategy type",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn duplicate_strategy_error(group: &[&'static PassportStrategyDescriptor]) -> Diagnostic {
+    let strategy = group
+        .first()
+        .expect("duplicate strategy groups always have an entry");
+    Diagnostic::new(
+        MADS130,
+        "duplicate Passport strategy",
+        "duplicate_strategy: more than one managed strategy uses this name",
+    )
+    .with_subject(strategy.name())
+    .with_location(strategy.location())
+    .with_suggestion("use a unique Passport strategy name")
+}
+
+fn resolve_guard<'a>(
+    guard: &'a GuardDescriptor,
+    strategies: &[&'static PassportStrategyDescriptor],
+) -> Result<PassportStrategyBinding<'a>> {
+    if let Some(strategy) = strategies
+        .iter()
+        .copied()
+        .find(|strategy| strategy.name() == guard.strategy())
+    {
+        let principal_type_id = guard
+            .principal_type_id()
+            .expect("guard metadata was validated before strategy resolution");
+        if principal_type_id != strategy.principal_type_id() {
+            return Err(strategy_error(
+                "principal_mismatch",
+                "Passport strategy principal mismatch",
+                guard.requirement_subject(),
+                format!(
+                    "the guard requires `{}` but strategy `{}` returns `{}`",
+                    guard
+                        .principal_type_name()
+                        .expect("guard metadata was validated before strategy resolution"),
+                    strategy.name(),
+                    strategy.principal_type_name(),
+                ),
+                guard.location(),
+                "declare the strategy principal type requested by the guard",
+            ));
+        }
+        return Ok(PassportStrategyBinding {
+            guard,
+            strategy: strategy.name(),
+            adapter: strategy.adapter(),
+            token_kind: strategy.token_kind(),
+            builtin: false,
+        });
+    }
+
+    if guard.strategy() == "jwt"
+        && let Some(adapter) = guard.builtin_adapter()
+    {
+        return Ok(PassportStrategyBinding {
+            guard,
+            strategy: "jwt",
+            adapter,
+            token_kind: JwtTokenKind::Access,
+            builtin: true,
+        });
+    }
+
+    Err(strategy_error(
+        "missing_strategy",
+        "missing Passport strategy",
+        guard.requirement_subject(),
+        format!(
+            "no managed strategy named `{}` can authenticate this guard",
+            guard.strategy()
+        ),
+        guard.location(),
+        "register a matching managed Passport strategy or use ClaimsPrincipal<C> with `jwt`",
+    ))
+}
+
+fn strategy_error(
+    reason: &'static str,
+    title: &'static str,
+    subject: impl Into<String>,
+    message: impl Into<String>,
+    location: SourceLocation,
+    suggestion: &'static str,
+) -> Error {
+    Error::new(
+        Diagnostic::new(MADS130, title, format!("{reason}: {}", message.into()))
+            .with_subject(subject)
+            .with_location(location)
+            .with_suggestion(suggestion),
+    )
 }
 
 fn location_order(left: SourceLocation, right: SourceLocation) -> Ordering {

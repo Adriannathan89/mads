@@ -32,16 +32,32 @@ fn jwt_service_type_id() -> TypeId {
 }
 
 fn evaluate(context: &AutoConfigurationContext<'_>) -> AutoConfigurationEvaluation {
+    let guard_requirements = match guard_requirements() {
+        Ok(requirements) => requirements,
+        Err(error) => {
+            return AutoConfigurationEvaluation::failed(
+                AutoConfigurationReasonCode::new("passport_preflight_failed"),
+                "Passport guard and strategy preflight failed",
+                Vec::new(),
+                Vec::new(),
+                error,
+            );
+        }
+    };
+
+    let mut requirements = context.requirements::<JwtService>();
+    requirements.extend(guard_requirements);
+    requirements.sort_by(requirement_order);
+
     if context.has_provider::<JwtService>() {
         return AutoConfigurationEvaluation::overridden(
             AutoConfigurationReasonCode::new("user_override"),
             "an application provider overrides the Passport JWT default",
-            context.requirements::<JwtService>(),
+            requirements,
             Vec::new(),
         );
     }
 
-    let requirements = context.requirements::<JwtService>();
     if requirements.is_empty() {
         return AutoConfigurationEvaluation::skipped(
             AutoConfigurationReasonCode::new("requirement_absent"),
@@ -75,6 +91,46 @@ fn evaluate(context: &AutoConfigurationContext<'_>) -> AutoConfigurationEvaluati
             )
         }
     }
+}
+
+#[cfg(feature = "http")]
+fn guard_requirements() -> Result<Vec<AutoConfigurationRequirement>> {
+    use crate::passport::{GuardCatalog, PassportStrategyCatalog};
+
+    let guards = GuardCatalog::guards();
+    GuardCatalog::validate_descriptors(&guards)?;
+    let preflight = PassportStrategyCatalog::preflight(&guards)?;
+    Ok(preflight
+        .bindings()
+        .iter()
+        .map(|binding| {
+            let guard = binding.guard();
+            AutoConfigurationRequirement::new(guard.requirement_subject(), Some(guard.location()))
+        })
+        .collect())
+}
+
+#[cfg(not(feature = "http"))]
+fn guard_requirements() -> Result<Vec<AutoConfigurationRequirement>> {
+    Ok(Vec::new())
+}
+
+fn requirement_order(
+    left: &AutoConfigurationRequirement,
+    right: &AutoConfigurationRequirement,
+) -> std::cmp::Ordering {
+    left.provider_type_name()
+        .cmp(right.provider_type_name())
+        .then_with(|| match (left.location(), right.location()) {
+            (Some(left), Some(right)) => left
+                .file
+                .cmp(right.file)
+                .then_with(|| left.line.cmp(&right.line))
+                .then_with(|| left.column.cmp(&right.column)),
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        })
 }
 
 fn signing_configuration_is_missing(config: &mads_core::Config) -> bool {

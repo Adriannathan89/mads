@@ -117,6 +117,7 @@ pub type BuiltinGuardAdapter = for<'a> fn(
 pub struct GuardDescriptor {
     route_trait: &'static str,
     handler: &'static str,
+    requirement_subject: &'static str,
     strategy: &'static str,
     principal_type_id: Option<fn() -> TypeId>,
     principal_type_name: Option<fn() -> &'static str>,
@@ -152,6 +153,7 @@ impl GuardDescriptor {
         Self {
             route_trait,
             handler,
+            requirement_subject: "manual Passport guard",
             strategy,
             principal_type_id,
             principal_type_name,
@@ -164,6 +166,17 @@ impl GuardDescriptor {
         }
     }
 
+    /// Attaches the stable requirement subject emitted by `#[guard]`.
+    ///
+    /// Route expansion supplies `RouteTrait::method` with `concat!`, keeping
+    /// auto-configuration evidence static and free of application values.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_requirement_subject(mut self, subject: &'static str) -> Self {
+        self.requirement_subject = subject;
+        self
+    }
+
     /// Returns the route-contract trait name.
     #[must_use]
     pub const fn route_trait(&self) -> &'static str {
@@ -174,6 +187,13 @@ impl GuardDescriptor {
     #[must_use]
     pub const fn handler(&self) -> &'static str {
         self.handler
+    }
+
+    /// Returns the stable subject used for JWT auto-configuration evidence.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn requirement_subject(&self) -> &'static str {
+        self.requirement_subject
     }
 
     /// Returns the requested Passport strategy name.

@@ -75,8 +75,9 @@ pub use passport::{
     Authenticated, BuiltinGuardAdapter, ClaimsPrincipal, ErasedAuthentication, GuardCatalog,
     GuardDescriptor, GuardPredicate, GuardPredicateAdapter, MADS130, MADS131, PassportContext,
     PassportError, PassportErrorKind, PassportPrincipal, PassportRejection, PassportResult,
-    PassportStrategy, PassportStrategyAdapter, PassportStrategyCatalog, PassportStrategyDescriptor,
-    PassportStrategyFuture, PolicyClause, PolicyMode, TokenSource, VerifiedToken,
+    PassportStrategy, PassportStrategyAdapter, PassportStrategyBinding, PassportStrategyCatalog,
+    PassportStrategyDescriptor, PassportStrategyFuture, PassportStrategyPreflight, PolicyClause,
+    PolicyMode, TokenSource, VerifiedToken,
 };
 
 /// Safe parsed-cookie metadata available to cookie-authenticated Passport strategies.
