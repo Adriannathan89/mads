@@ -1,5 +1,7 @@
 //! Real-request tests for validated typed router construction.
 
+#![cfg(feature = "http")]
+
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
 use mads_common::{

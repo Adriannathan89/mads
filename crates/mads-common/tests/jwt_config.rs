@@ -1,5 +1,7 @@
 //! Passport JWT configuration parsing contracts.
 
+#![cfg(feature = "jwt")]
+
 use mads_common::core::{Config, ConfigBuilder, MapSource};
 use mads_common::{JwtAlgorithm, JwtErrorKind, PassportConfig};
 

@@ -1,5 +1,7 @@
 //! Passport JWT algorithm compatibility matrix.
 
+#![cfg(feature = "jwt")]
+
 use std::fs;
 use std::time::Duration;
 

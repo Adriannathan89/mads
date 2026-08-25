@@ -1,5 +1,7 @@
 //! Named Passport JWT key-ring configuration contracts.
 
+#![cfg(feature = "jwt")]
+
 use std::fs;
 
 use mads_common::core::{Config, ConfigBuilder, TomlSource};

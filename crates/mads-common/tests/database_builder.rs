@@ -1,5 +1,7 @@
 //! Explicit database bootstrap and graph integration contracts.
 
+#![cfg(feature = "database")]
+
 use std::any::TypeId;
 use std::sync::{Arc, Mutex};
 

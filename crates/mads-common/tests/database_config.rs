@@ -1,5 +1,7 @@
 //! Public database configuration contracts.
 
+#![cfg(feature = "database")]
+
 use mads_common::{DatabaseConfig, DatabaseErrorKind, MADS100};
 use mads_core::{ConfigBuilder, DotenvSource, MapSource};
 

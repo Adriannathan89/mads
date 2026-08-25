@@ -1,5 +1,7 @@
 //! Passport JWT key-rotation and algorithm-confusion contracts.
 
+#![cfg(feature = "jwt")]
+
 use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

@@ -170,6 +170,14 @@ pub use mads_common::{
     MigrationStatus,
 };
 
+/// Re-exports typed JWT claims, service, options, errors, and diagnostics.
+#[cfg(feature = "jwt")]
+pub use mads_common::{
+    JwtAlgorithm, JwtClaims, JwtError, JwtErrorKind, JwtHeader, JwtResult, JwtService,
+    JwtSignOptions, JwtTokenKind, JwtValidation, MADS120, MADS121, PassportConfig,
+    RegisteredJwtClaims, VerifiedJwt,
+};
+
 /// Re-exports HTTP request extractors and their typed-header support.
 #[cfg(feature = "http")]
 pub use mads_common::{Header, Json, Path, Query, Request, headers};
@@ -257,6 +265,14 @@ pub mod prelude {
         Database, DatabaseBootstrap, DatabaseConfig, DatabaseError, DatabaseErrorKind,
         DatabasePoolStatus, DatabaseResult, MadsBuilderDatabaseExt, MigrationReport,
         MigrationStatus,
+    };
+
+    /// Re-exports application-facing Passport JWT contracts and services.
+    #[cfg(feature = "jwt")]
+    pub use mads_common::{
+        JwtAlgorithm, JwtClaims, JwtError, JwtErrorKind, JwtHeader, JwtResult, JwtService,
+        JwtSignOptions, JwtTokenKind, JwtValidation, MADS120, MADS121, PassportConfig,
+        RegisteredJwtClaims, VerifiedJwt,
     };
 
     /// Re-exports types used to build, run, and inspect an application.

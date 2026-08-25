@@ -1,5 +1,7 @@
 //! JWT signing, verification, and untrusted decoding contracts.
 
+#![cfg(feature = "jwt")]
+
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};

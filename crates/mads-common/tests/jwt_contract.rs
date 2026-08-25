@@ -1,5 +1,7 @@
 //! Public JWT value and error contracts.
 
+#![cfg(feature = "jwt")]
+
 use std::str::FromStr;
 use std::time::Duration;
 

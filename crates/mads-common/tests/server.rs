@@ -1,5 +1,7 @@
 //! Public HTTP runtime error contract tests.
 
+#![cfg(feature = "http")]
+
 use std::error::Error as _;
 use std::io;
 

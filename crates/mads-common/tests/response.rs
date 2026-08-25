@@ -1,5 +1,7 @@
 //! Public HTTP response contract tests.
 
+#![cfg(feature = "http")]
+
 use std::io;
 
 use mads_common::{

@@ -1,5 +1,7 @@
 //! Real PostgreSQL evidence for the managed database facade.
 
+#![cfg(feature = "database")]
+
 use std::sync::{Arc, Mutex};
 
 use mads_common::{

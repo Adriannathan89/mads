@@ -4,6 +4,7 @@
 //! token profiles, typed claim wrappers, explicit operation options, and
 //! redacted errors, and the application-scoped cryptographic service.
 
+mod auto_configuration;
 mod claims;
 mod config;
 mod error;

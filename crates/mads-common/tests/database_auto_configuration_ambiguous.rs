@@ -1,5 +1,7 @@
 //! Ambiguous user providers remain core graph errors, not database failures.
 
+#![cfg(feature = "database")]
+
 use mads_common::{Database, DatabaseConfig};
 use mads_core::{AutoConfigurationStatus, MADS002, Mads};
 
