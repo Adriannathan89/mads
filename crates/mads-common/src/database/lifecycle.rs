@@ -62,9 +62,11 @@ impl DatabaseBootstrap {
 
 /// Registers an explicitly configured database and its lifecycle hook.
 ///
-/// Database registration remains explicit in v0.4; v0.5 may add
-/// auto-configuration, but this extension never detects requirements or backs
-/// off from an existing [`Database`] provider.
+/// Version 0.5 ships the official Diesel conditional default.
+/// [`DatabaseBootstrap`] remains the explicit override: this extension
+/// registers the provided database and its infrastructure lifecycle hook. It
+/// does not perform auto-configuration requirement detection or back-off;
+/// those belong to the official default.
 ///
 /// # Example
 ///
