@@ -6,17 +6,38 @@ rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+default = ["http", "database"]
+http = [
+    "dep:axum",
+    "dep:axum-extra",
+    "dep:mads-common-macros",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:tokio",
+]
+database = [
+    "dep:deadpool-diesel",
+    "dep:diesel",
+    "dep:diesel_migrations",
+    "dep:tokio",
+]
+jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json"]
+cookies = ["http", "dep:cookie", "axum-extra/cookie"]
+
 [dependencies]
-axum.workspace = true
-axum-extra.workspace = true
-deadpool-diesel.workspace = true
-diesel.workspace = true
-diesel_migrations.workspace = true
-mads-common-macros = { path = "../mads-common-macros" }
+axum = { workspace = true, optional = true }
+axum-extra = { workspace = true, optional = true }
+cookie = { workspace = true, optional = true }
+deadpool-diesel = { workspace = true, optional = true }
+diesel = { workspace = true, optional = true }
+diesel_migrations = { workspace = true, optional = true }
+jsonwebtoken = { workspace = true, optional = true }
+mads-common-macros = { path = "../mads-common-macros", optional = true }
 mads-core = { path = "../mads-core" }
-serde.workspace = true
-serde_json.workspace = true
-tokio.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"

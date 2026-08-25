@@ -4,7 +4,7 @@
 //! database provisioning, and Tokio runtime by default; consumers can opt out
 //! of those defaults for a narrower core-only dependency surface. Database
 //! configuration remains explicit: when a linked provider requires
-//! [`Database`] and no application provider supplies one, MADS configures the
+//! the managed database service and no application provider supplies one, MADS configures the
 //! default database provider from the builder's resolved [`core::Config`].
 //! Applications must construct that configuration explicitly: [`core::Mads::builder`]
 //! does not load configuration files, dotenv values, or environment variables.
@@ -13,9 +13,9 @@
 //! uses the complete provider catalog; module-scoped reachability is a v0.6
 //! boundary.
 //!
-//! [`DatabaseBootstrap`] remains the explicit database override. Otherwise an
+//! `DatabaseBootstrap` remains the explicit database override. Otherwise an
 //! enabled database default may use one separately registered embedded migration
-//! source through [`MadsBuilderDatabaseExt::database_migrations`]; MADS neither
+//! source through `MadsBuilderDatabaseExt::database_migrations`; MADS neither
 //! generates migrations nor auto-loads them. HTTP listener addresses remain
 //! explicit, because HTTP auto-binding is deferred to v0.5.5.
 //!
@@ -53,7 +53,7 @@
 //! }
 //! ```
 //!
-//! Run an application with [`serve`]. Validation and router construction occur
+//! Run an application with `serve`. Validation and router construction occur
 //! before lifecycle startup or listener binding:
 //!
 //! ```no_run
@@ -88,7 +88,7 @@
 //! }
 //! ```
 //!
-//! [`DatabaseBootstrap`] remains the explicit native Diesel escape hatch. It
+//! `DatabaseBootstrap` remains the explicit native Diesel escape hatch. It
 //! overrides the conditional default and retains direct control of the
 //! database lifecycle:
 //!
@@ -141,24 +141,29 @@ pub use mads_core::repository;
 /// Re-exports the service declaration attribute.
 pub use mads_core::service;
 
-/// Re-exports standard integrations when the `common` feature is enabled.
-#[cfg(feature = "common")]
+/// Re-exports enabled standard integrations.
+#[cfg(any(
+    feature = "http",
+    feature = "database",
+    feature = "jwt",
+    feature = "cookies"
+))]
 pub use mads_common as common;
 
 /// Re-exports Axum for native HTTP runtime integration.
-#[cfg(feature = "common")]
+#[cfg(feature = "http")]
 pub use mads_common::axum;
 
 /// Re-exports Diesel for native persistence integration.
-#[cfg(feature = "common")]
+#[cfg(feature = "database")]
 pub use mads_common::diesel;
 
 /// Re-exports Diesel migrations for native persistence integration.
-#[cfg(feature = "common")]
+#[cfg(feature = "database")]
 pub use mads_common::diesel_migrations;
 
 /// Re-exports database configuration, runtime, migration, and error contracts.
-#[cfg(feature = "common")]
+#[cfg(feature = "database")]
 pub use mads_common::{
     Database, DatabaseBootstrap, DatabaseConfig, DatabaseError, DatabaseErrorKind,
     DatabasePoolStatus, DatabaseResult, MADS100, MADS101, MadsBuilderDatabaseExt, MigrationReport,
@@ -166,43 +171,43 @@ pub use mads_common::{
 };
 
 /// Re-exports HTTP request extractors and their typed-header support.
-#[cfg(feature = "common")]
+#[cfg(feature = "http")]
 pub use mads_common::{Header, Json, Path, Query, Request, headers};
 
 /// Re-exports standard HTTP response types.
-#[cfg(feature = "common")]
+#[cfg(feature = "http")]
 pub use mads_common::{Created, HttpError, HttpResult, NoContent};
 
 /// Re-exports HTTP router construction and runtime startup functions.
-#[cfg(feature = "common")]
+#[cfg(feature = "http")]
 pub use mads_common::{HttpRuntimeError, build_router, serve};
 
 /// Re-exports the managed-controller declaration attribute.
-#[cfg(feature = "common")]
+#[cfg(feature = "http")]
 pub use mads_common::controller;
 
 /// Re-exports the DELETE route-contract attribute.
-#[cfg(feature = "common")]
+#[cfg(feature = "http")]
 pub use mads_common::delete;
 
 /// Re-exports the GET route-contract attribute.
-#[cfg(feature = "common")]
+#[cfg(feature = "http")]
 pub use mads_common::get;
 
 /// Re-exports the PATCH route-contract attribute.
-#[cfg(feature = "common")]
+#[cfg(feature = "http")]
 pub use mads_common::patch;
 
 /// Re-exports the POST route-contract attribute.
-#[cfg(feature = "common")]
+#[cfg(feature = "http")]
 pub use mads_common::post;
 
 /// Re-exports the route-trait declaration attribute.
-#[cfg(feature = "common")]
+#[cfg(feature = "http")]
 pub use mads_common::routes;
 
 /// Re-exports the PUT route-contract attribute.
-#[cfg(feature = "common")]
+#[cfg(feature = "http")]
 pub use mads_common::put;
 
 /// Re-exports extensions when the `extra` feature is enabled.
@@ -227,27 +232,27 @@ pub mod prelude {
     pub use mads_core::service;
 
     /// Re-exports the managed-controller declaration attribute.
-    #[cfg(feature = "common")]
+    #[cfg(feature = "http")]
     pub use mads_common::controller;
 
     /// Re-exports route-contract attributes.
-    #[cfg(feature = "common")]
+    #[cfg(feature = "http")]
     pub use mads_common::{delete, get, patch, post, put, routes};
 
     /// Re-exports standard HTTP request extractors and typed-header support.
-    #[cfg(feature = "common")]
+    #[cfg(feature = "http")]
     pub use mads_common::{Header, Json, Path, Query, Request, headers};
 
     /// Re-exports standard HTTP response types.
-    #[cfg(feature = "common")]
+    #[cfg(feature = "http")]
     pub use mads_common::{Created, HttpError, HttpResult, NoContent};
 
     /// Re-exports HTTP router construction and runtime startup functions.
-    #[cfg(feature = "common")]
+    #[cfg(feature = "http")]
     pub use mads_common::{HttpRuntimeError, build_router, serve};
 
     /// Re-exports application-facing database configuration and runtime types.
-    #[cfg(feature = "common")]
+    #[cfg(feature = "database")]
     pub use mads_common::{
         Database, DatabaseBootstrap, DatabaseConfig, DatabaseError, DatabaseErrorKind,
         DatabasePoolStatus, DatabaseResult, MadsBuilderDatabaseExt, MigrationReport,
