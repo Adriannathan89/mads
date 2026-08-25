@@ -173,6 +173,14 @@ impl Error {
         }
     }
 
+    pub(crate) fn with_related_diagnostics(
+        mut self,
+        related: impl IntoIterator<Item = Diagnostic>,
+    ) -> Self {
+        self.diagnostics.extend(related);
+        self
+    }
+
     /// Creates an error from a structured diagnostic and an underlying cause.
     pub fn with_source<E>(diagnostic: Diagnostic, source: E) -> Self
     where

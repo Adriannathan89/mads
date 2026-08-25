@@ -398,7 +398,7 @@ mod tests {
 use std::any::TypeId;
 use std::collections::HashSet;
 
-use crate::graph::{ProviderState, SatisfiedProvider};
+use crate::graph::SatisfiedProvider;
 use crate::{
     AutoConfigurationReasonCode, AutoConfigurationReport, AutoConfigurationStatus, Config,
     Diagnostic, Error, MADS007, ProviderDescriptor,
@@ -527,19 +527,22 @@ pub(crate) fn analyze_parts(
         .collect::<Vec<_>>();
     let virtual_satisfied = selected
         .iter()
-        .map(|descriptor| SatisfiedProvider {
-            type_id: descriptor.output_type_id(),
-            type_name: descriptor.output_type_name(),
-            // Task 4 introduces the distinct AutoConfigured state before these
-            // virtual satisfactions are consumed by graph analysis.
-            state: ProviderState::Provided,
+        .map(|descriptor| {
+            SatisfiedProvider::auto_configured(
+                descriptor.output_type_id(),
+                descriptor.output_type_name(),
+            )
         })
         .collect();
     let covered_missing = covered_missing(&decisions);
     let failure = decisions.iter_mut().find_map(|decision| {
-        (decision.evaluation.status() == AutoConfigurationStatus::Failed)
-            .then(|| decision.evaluation.take_failure())
-            .flatten()
+        (decision.evaluation.status() == AutoConfigurationStatus::Failed
+            && decision
+                .evaluation
+                .failure()
+                .is_some_and(|error| std::error::Error::source(error).is_some()))
+        .then(|| decision.evaluation.take_failure())
+        .flatten()
     });
 
     AutoConfigurationAnalysis {
