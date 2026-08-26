@@ -8,6 +8,7 @@ use std::any::TypeId;
 use std::cmp::Ordering;
 use std::fmt;
 use std::future::Future;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::OnceLock;
 use std::task::{Context, Poll};
@@ -21,9 +22,13 @@ use mads_core::{Diagnostic, Error, Result, SourceLocation};
 use tower::{Layer, Service};
 
 use super::{
-    ErasedAuthentication, PassportContext, PassportError, PassportResult, PassportStrategyAdapter,
-    PassportStrategyCatalog, PassportStrategyFuture,
+    ErasedAuthentication, MADS131, PassportContext, PassportError, PassportResult,
+    PassportStrategyAdapter, PassportStrategyCatalog, PassportStrategyFuture,
 };
+use crate::{ClaimsPrincipal, JwtService, JwtValidation, PassportPrincipal};
+
+#[cfg(feature = "cookies")]
+use crate::CookieJar;
 
 /// The one token source selected by a Passport guard.
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
@@ -31,6 +36,7 @@ pub enum TokenSource {
     /// Read one RFC 6750 Bearer credential from the `Authorization` header.
     Bearer,
     /// Read one strict request cookie by its literal name.
+    #[cfg(feature = "cookies")]
     Cookie(&'static str),
 }
 
@@ -40,6 +46,7 @@ impl fmt::Debug for TokenSource {
             Self::Bearer => formatter.write_str("Bearer"),
             // Cookie names can identify a deployment's authentication surface;
             // diagnostics intentionally retain only the source category.
+            #[cfg(feature = "cookies")]
             Self::Cookie(_) => formatter.write_str("Cookie(..)"),
         }
     }
@@ -399,19 +406,17 @@ where
 
 impl PassportGuardState {
     async fn authorize(&self, request: &mut Request) -> PassportResult<()> {
-        let TokenSource::Bearer = self.guard.source() else {
-            return Err(PassportError::reject());
-        };
-        let token = bearer_token(request.headers())?.to_owned();
-        let headers = request.headers().clone();
-        let method = request.method().clone();
-        let uri = request.uri().clone();
-        let remote_addr = request
-            .extensions()
-            .get::<ConnectInfo<std::net::SocketAddr>>()
-            .map(|address| address.0);
-        let context = PassportContext::new(&headers, &method, &uri, remote_addr);
-        let authentication = (self.adapter)(&self.application, &context, &token).await?;
+        let (headers, method, uri, remote_addr) = request_metadata(request);
+        let authentication = authenticate_request(
+            &self.application,
+            self.guard.source(),
+            self.adapter,
+            headers,
+            method,
+            uri,
+            remote_addr,
+        )
+        .await?;
         if !authorizes(self.guard, &authentication) {
             return Err(PassportError::forbidden());
         }
@@ -422,6 +427,488 @@ impl PassportGuardState {
         }
         Ok(())
     }
+}
+
+/// A typed Tower layer for protecting a native Axum route with a Passport policy.
+///
+/// Construct it with [`PassportGuard::builder`] for a managed strategy, or
+/// [`PassportGuard::<ClaimsPrincipal<C>>::jwt`] for the built-in typed-claims
+/// strategy. Native guards use the same extraction, JWT verification, strategy,
+/// policy, extension, and rejection pipeline as generated MADS routes.
+pub struct PassportGuard<P> {
+    state: NativePassportGuardState<P>,
+}
+
+impl<P> PassportGuard<P>
+where
+    P: PassportPrincipal,
+{
+    /// Starts a native Passport guard builder for the supplied application context.
+    #[must_use]
+    pub fn builder(application: mads_core::ApplicationContext) -> PassportGuardBuilder<P> {
+        PassportGuardBuilder::new(application)
+    }
+}
+
+impl<C> PassportGuard<ClaimsPrincipal<C>>
+where
+    C: PassportPrincipal + serde::de::DeserializeOwned,
+{
+    /// Starts a native guard builder using the built-in `jwt` claims strategy.
+    #[must_use]
+    pub fn jwt(
+        application: mads_core::ApplicationContext,
+    ) -> PassportGuardBuilder<ClaimsPrincipal<C>> {
+        PassportGuardBuilder::new(application)
+            .strategy("jwt")
+            .with_builtin_adapter(builtin_claims_adapter::<C>)
+    }
+}
+
+impl<P> Clone for PassportGuard<P> {
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+        }
+    }
+}
+
+impl<P> fmt::Debug for PassportGuard<P> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PassportGuard")
+            .field("source", &self.state.source)
+            .field("has_roles", &self.state.roles.is_some())
+            .field("has_permissions", &self.state.permissions.is_some())
+            .field("predicate_count", &self.state.predicates.len())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Configures one typed native [`PassportGuard`] before it is applied to a route.
+pub struct PassportGuardBuilder<P> {
+    application: mads_core::ApplicationContext,
+    strategy: Option<&'static str>,
+    source: TokenSource,
+    roles: Option<NativePolicyClause>,
+    permissions: Option<NativePolicyClause>,
+    predicates: Vec<fn(&P) -> bool>,
+    builtin_adapter: Option<BuiltinGuardAdapter>,
+}
+
+impl<P> PassportGuardBuilder<P>
+where
+    P: PassportPrincipal,
+{
+    fn new(application: mads_core::ApplicationContext) -> Self {
+        Self {
+            application,
+            strategy: None,
+            source: TokenSource::Bearer,
+            roles: None,
+            permissions: None,
+            predicates: Vec::new(),
+            builtin_adapter: None,
+        }
+    }
+
+    /// Selects the managed Passport strategy registered under `strategy`.
+    #[must_use]
+    pub const fn strategy(mut self, strategy: &'static str) -> Self {
+        self.strategy = Some(strategy);
+        self
+    }
+
+    /// Selects the sole credential source accepted by this guard.
+    #[must_use]
+    pub const fn source(mut self, source: TokenSource) -> Self {
+        self.source = source;
+        self
+    }
+
+    /// Requires at least one listed principal role.
+    #[must_use]
+    pub fn roles_any<I, V>(mut self, values: I) -> Self
+    where
+        I: IntoIterator<Item = V>,
+        V: AsRef<str>,
+    {
+        self.roles = Some(NativePolicyClause::new(PolicyMode::Any, values));
+        self
+    }
+
+    /// Requires every listed principal role.
+    #[must_use]
+    pub fn roles_all<I, V>(mut self, values: I) -> Self
+    where
+        I: IntoIterator<Item = V>,
+        V: AsRef<str>,
+    {
+        self.roles = Some(NativePolicyClause::new(PolicyMode::All, values));
+        self
+    }
+
+    /// Requires at least one listed principal permission.
+    #[must_use]
+    pub fn permissions_any<I, V>(mut self, values: I) -> Self
+    where
+        I: IntoIterator<Item = V>,
+        V: AsRef<str>,
+    {
+        self.permissions = Some(NativePolicyClause::new(PolicyMode::Any, values));
+        self
+    }
+
+    /// Requires every listed principal permission.
+    #[must_use]
+    pub fn permissions_all<I, V>(mut self, values: I) -> Self
+    where
+        I: IntoIterator<Item = V>,
+        V: AsRef<str>,
+    {
+        self.permissions = Some(NativePolicyClause::new(PolicyMode::All, values));
+        self
+    }
+
+    /// Adds one synchronous principal predicate that must return `true`.
+    #[must_use]
+    pub fn predicate(mut self, predicate: fn(&P) -> bool) -> Self {
+        self.predicates.push(predicate);
+        self
+    }
+
+    fn with_builtin_adapter(mut self, adapter: BuiltinGuardAdapter) -> Self {
+        self.builtin_adapter = Some(adapter);
+        self
+    }
+
+    /// Validates the selected strategy and produces a reusable Tower layer.
+    ///
+    /// The application must already contain a concrete [`JwtService`]. Native
+    /// guards do not appear in the static MADS route catalog, so they cannot
+    /// activate JWT auto-configuration by themselves. Require `JwtService`
+    /// from a managed provider before building the application, or provide a
+    /// concrete service through [`mads_core::MadsBuilder`] before calling `build`.
+    #[allow(clippy::result_large_err)]
+    pub fn build(self) -> Result<PassportGuard<P>> {
+        let strategy = self.strategy.ok_or_else(|| {
+            native_guard_error("native Passport guards require a strategy selected with `strategy`")
+        })?;
+        validate_native_policy(self.roles.as_ref(), "roles")?;
+        validate_native_policy(self.permissions.as_ref(), "permissions")?;
+
+        let descriptor = GuardDescriptor::new(
+            "native Axum",
+            "PassportGuard",
+            strategy,
+            Some(native_principal_type_id::<P>),
+            Some(native_principal_type_name::<P>),
+            self.source,
+            None,
+            None,
+            &[],
+            SourceLocation::new("native Axum PassportGuard", 1, 1),
+            self.builtin_adapter,
+        );
+        let guards = [&descriptor];
+        let preflight = PassportStrategyCatalog::preflight(&guards)?;
+        let binding = preflight
+            .binding_for(&descriptor)
+            .expect("native guard preflight must retain the requested descriptor");
+        self.application.resolve::<JwtService>().map_err(|_| {
+            native_guard_error("native Passport guards require an available JwtService")
+        })?;
+
+        Ok(PassportGuard {
+            state: NativePassportGuardState {
+                application: self.application,
+                source: self.source,
+                adapter: binding.adapter(),
+                roles: self.roles,
+                permissions: self.permissions,
+                predicates: self.predicates,
+                marker: PhantomData,
+            },
+        })
+    }
+}
+
+/// A Tower service created by a native [`PassportGuard`].
+#[doc(hidden)]
+pub struct NativePassportGuardService<S, P> {
+    inner: S,
+    state: NativePassportGuardState<P>,
+}
+
+impl<S, P> Clone for NativePassportGuardService<S, P>
+where
+    S: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            state: self.state.clone(),
+        }
+    }
+}
+
+impl<P, S> Layer<S> for PassportGuard<P>
+where
+    P: PassportPrincipal,
+{
+    type Service = NativePassportGuardService<S, P>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        NativePassportGuardService {
+            inner,
+            state: self.state.clone(),
+        }
+    }
+}
+
+impl<P, S> Service<Request> for NativePassportGuardService<S, P>
+where
+    P: PassportPrincipal,
+    S: Service<Request, Response = Response> + Clone + Send + 'static,
+    S::Error: Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = S::Error;
+    type Future = Pin<Box<dyn Future<Output = std::result::Result<Response, S::Error>> + Send>>;
+
+    fn poll_ready(&mut self, context: &mut Context<'_>) -> Poll<std::result::Result<(), S::Error>> {
+        self.inner.poll_ready(context)
+    }
+
+    fn call(&mut self, mut request: Request) -> Self::Future {
+        let state = self.state.clone();
+        let not_ready_inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, not_ready_inner);
+        Box::pin(async move {
+            if let Err(error) = state.authorize(&mut request).await {
+                return Ok(super::PassportRejection::from(error).into_response());
+            }
+            inner.call(request).await
+        })
+    }
+}
+
+struct NativePassportGuardState<P> {
+    application: mads_core::ApplicationContext,
+    source: TokenSource,
+    adapter: PassportStrategyAdapter,
+    roles: Option<NativePolicyClause>,
+    permissions: Option<NativePolicyClause>,
+    predicates: Vec<fn(&P) -> bool>,
+    marker: PhantomData<fn() -> P>,
+}
+
+impl<P> Clone for NativePassportGuardState<P> {
+    fn clone(&self) -> Self {
+        Self {
+            application: self.application.clone(),
+            source: self.source,
+            adapter: self.adapter,
+            roles: self.roles.clone(),
+            permissions: self.permissions.clone(),
+            predicates: self.predicates.clone(),
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<P> NativePassportGuardState<P>
+where
+    P: PassportPrincipal,
+{
+    async fn authorize(&self, request: &mut Request) -> PassportResult<()> {
+        let (headers, method, uri, remote_addr) = request_metadata(request);
+        let authentication = authenticate_request(
+            &self.application,
+            self.source,
+            self.adapter,
+            headers,
+            method,
+            uri,
+            remote_addr,
+        )
+        .await?;
+        let Some(principal) = authentication.principal_as::<P>() else {
+            return Err(PassportError::internal(std::io::Error::other(
+                "native guard authentication type binding failed",
+            )));
+        };
+        if !matches_native_clause(self.roles.as_ref(), |value| principal.has_role(value))
+            || !matches_native_clause(self.permissions.as_ref(), |value| {
+                principal.has_permission(value)
+            })
+            || !self
+                .predicates
+                .iter()
+                .all(|predicate| predicate(&principal))
+        {
+            return Err(PassportError::forbidden());
+        }
+        if !authentication.install_extensions(request.extensions_mut()) {
+            return Err(PassportError::internal(std::io::Error::other(
+                "native guard authentication type binding failed",
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct NativePolicyClause {
+    mode: PolicyMode,
+    values: Vec<String>,
+}
+
+impl NativePolicyClause {
+    fn new<I, V>(mode: PolicyMode, values: I) -> Self
+    where
+        I: IntoIterator<Item = V>,
+        V: AsRef<str>,
+    {
+        Self {
+            mode,
+            values: values
+                .into_iter()
+                .map(|value| value.as_ref().to_owned())
+                .collect(),
+        }
+    }
+}
+
+async fn authenticate_request(
+    application: &mads_core::ApplicationContext,
+    source: TokenSource,
+    adapter: PassportStrategyAdapter,
+    headers: axum::http::HeaderMap,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    remote_addr: Option<std::net::SocketAddr>,
+) -> PassportResult<ErasedAuthentication> {
+    match source {
+        TokenSource::Bearer => {
+            let token = bearer_token(&headers)?.to_owned();
+            let context = PassportContext::new(&headers, &method, &uri, remote_addr);
+            adapter(application, &context, &token).await
+        }
+        #[cfg(feature = "cookies")]
+        TokenSource::Cookie(name) => {
+            let jar = CookieJar::from_headers(&headers).map_err(|_| PassportError::reject())?;
+            if jar.occurrences(name) != 1 {
+                return Err(PassportError::reject());
+            }
+            let token = jar
+                .get(name)
+                .map(|cookie| cookie.value().to_owned())
+                .ok_or_else(PassportError::reject)?;
+            let context = PassportContext::with_cookie_token(
+                &headers,
+                &method,
+                &uri,
+                remote_addr,
+                &jar,
+                name,
+            );
+            adapter(application, &context, &token).await
+        }
+    }
+}
+
+fn request_metadata(
+    request: &Request,
+) -> (
+    axum::http::HeaderMap,
+    axum::http::Method,
+    axum::http::Uri,
+    Option<std::net::SocketAddr>,
+) {
+    (
+        request.headers().clone(),
+        request.method().clone(),
+        request.uri().clone(),
+        request
+            .extensions()
+            .get::<ConnectInfo<std::net::SocketAddr>>()
+            .map(|address| address.0),
+    )
+}
+
+fn matches_native_clause(
+    clause: Option<&NativePolicyClause>,
+    matches: impl FnMut(&str) -> bool,
+) -> bool {
+    let Some(clause) = clause else {
+        return true;
+    };
+    match clause.mode {
+        PolicyMode::Any => clause.values.iter().map(String::as_str).any(matches),
+        PolicyMode::All => clause.values.iter().map(String::as_str).all(matches),
+    }
+}
+
+fn validate_native_policy(clause: Option<&NativePolicyClause>, label: &str) -> Result<()> {
+    let Some(clause) = clause else {
+        return Ok(());
+    };
+    if clause.values.is_empty()
+        || clause
+            .values
+            .iter()
+            .any(|value| value.is_empty() || value.chars().any(char::is_control))
+    {
+        return Err(native_guard_error(format!(
+            "native guard {label} policy must contain non-empty values without control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn native_principal_type_id<P>() -> TypeId
+where
+    P: PassportPrincipal,
+{
+    TypeId::of::<P>()
+}
+
+fn native_principal_type_name<P>() -> &'static str
+where
+    P: PassportPrincipal,
+{
+    std::any::type_name::<P>()
+}
+
+fn native_guard_error(message: impl Into<String>) -> Error {
+    Error::new(
+        Diagnostic::new(MADS131, "invalid native Passport guard", message)
+            .with_subject("native Axum PassportGuard")
+            .with_location(SourceLocation::new("native Axum PassportGuard", 1, 1)),
+    )
+}
+
+fn builtin_claims_adapter<'a, C>(
+    application: &'a mads_core::ApplicationContext,
+    _context: &'a PassportContext<'a>,
+    token: &'a str,
+) -> PassportStrategyFuture<'a>
+where
+    C: PassportPrincipal + serde::de::DeserializeOwned,
+{
+    Box::pin(async move {
+        let jwt = application
+            .resolve::<JwtService>()
+            .map_err(PassportError::internal)?;
+        let verified = std::sync::Arc::new(
+            jwt.verify::<C>(token, JwtValidation::access())
+                .map_err(PassportError::from)?,
+        );
+        let principal = ClaimsPrincipal::<C>::new(std::sync::Arc::clone(&verified));
+        Ok(ErasedAuthentication::with_verified(principal, verified))
+    })
 }
 
 fn bearer_token(headers: &axum::http::HeaderMap) -> PassportResult<&str> {
@@ -520,6 +1007,7 @@ fn validate_guard(guard: &GuardDescriptor) -> Result<()> {
             guard.location(),
         ));
     }
+    #[cfg(feature = "cookies")]
     if let TokenSource::Cookie(name) = guard.source()
         && !valid_cookie_name(name)
     {
@@ -582,6 +1070,7 @@ fn valid_strategy_name(value: &str) -> bool {
         })
 }
 
+#[cfg(feature = "cookies")]
 fn valid_cookie_name(value: &str) -> bool {
     !value.is_empty()
         && value.bytes().all(|byte| {

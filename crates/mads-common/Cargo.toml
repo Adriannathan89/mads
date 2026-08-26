@@ -30,7 +30,7 @@ jwt = [
     "dep:serde_json",
     "mads-common-macros?/passport",
 ]
-cookies = ["http", "dep:cookie", "axum-extra/cookie"]
+cookies = ["http", "dep:cookie", "axum-extra/cookie", "mads-common-macros?/cookies"]
 
 [dependencies]
 axum = { workspace = true, optional = true }

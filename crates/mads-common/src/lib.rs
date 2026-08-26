@@ -74,10 +74,11 @@ pub use jwt::{
 pub use passport::{
     Authenticated, BuiltinGuardAdapter, ClaimsPrincipal, ErasedAuthentication, GuardCatalog,
     GuardDescriptor, GuardPredicate, GuardPredicateAdapter, MADS130, MADS131, PassportContext,
-    PassportError, PassportErrorKind, PassportPrincipal, PassportRejection, PassportResult,
-    PassportStrategy, PassportStrategyAdapter, PassportStrategyBinding, PassportStrategyCatalog,
-    PassportStrategyDescriptor, PassportStrategyFuture, PassportStrategyPreflight, PolicyClause,
-    PolicyMode, TokenSource, VerifiedToken,
+    PassportError, PassportErrorKind, PassportGuard, PassportGuardBuilder, PassportPrincipal,
+    PassportRejection, PassportResult, PassportStrategy, PassportStrategyAdapter,
+    PassportStrategyBinding, PassportStrategyCatalog, PassportStrategyDescriptor,
+    PassportStrategyFuture, PassportStrategyPreflight, PolicyClause, PolicyMode, TokenSource,
+    VerifiedToken,
 };
 
 /// Safe parsed-cookie metadata available to cookie-authenticated Passport strategies.

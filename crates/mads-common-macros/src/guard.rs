@@ -36,6 +36,7 @@ pub(crate) struct GuardSpec {
 #[derive(Clone)]
 enum TokenSourceSpec {
     Bearer,
+    #[cfg(feature = "cookies")]
     Cookie(LitStr),
 }
 
@@ -201,14 +202,25 @@ fn parse_source(input: ParseStream<'_>) -> syn::Result<TokenSourceSpec> {
     match source.to_string().as_str() {
         "bearer" => Ok(TokenSourceSpec::Bearer),
         "cookie" => {
-            let content;
-            parenthesized!(content in input);
-            let name: LitStr = content.parse()?;
-            if !content.is_empty() {
-                return Err(content.error("`cookie` accepts exactly one literal cookie name"));
+            #[cfg(not(feature = "cookies"))]
+            {
+                return Err(Error::new(
+                    source.span(),
+                    "cookie token sources require the `cookies` feature",
+                ));
             }
-            validate_cookie_name(&name)?;
-            Ok(TokenSourceSpec::Cookie(name))
+
+            #[cfg(feature = "cookies")]
+            {
+                let content;
+                parenthesized!(content in input);
+                let name: LitStr = content.parse()?;
+                if !content.is_empty() {
+                    return Err(content.error("`cookie` accepts exactly one literal cookie name"));
+                }
+                validate_cookie_name(&name)?;
+                Ok(TokenSourceSpec::Cookie(name))
+            }
         }
         _ => Err(Error::new(
             source.span(),
@@ -269,6 +281,7 @@ fn validate_strategy_name(value: &LitStr) -> syn::Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "cookies")]
 fn validate_cookie_name(value: &LitStr) -> syn::Result<()> {
     if value.value().is_empty()
         || !value.value().bytes().all(|byte| {
@@ -567,6 +580,7 @@ impl EffectiveGuard {
 fn source_tokens(source: &TokenSourceSpec, common: &syn::Path) -> TokenStream {
     match source {
         TokenSourceSpec::Bearer => quote!(#common::TokenSource::Bearer),
+        #[cfg(feature = "cookies")]
         TokenSourceSpec::Cookie(name) => quote!(#common::TokenSource::Cookie(#name)),
     }
 }

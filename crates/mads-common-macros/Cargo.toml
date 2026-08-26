@@ -8,6 +8,7 @@ repository.workspace = true
 
 [features]
 passport = []
+cookies = ["passport"]
 
 [dependencies]
 proc-macro-crate.workspace = true
