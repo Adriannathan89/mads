@@ -6,6 +6,7 @@ fn parsed(source: &str) -> GuardSpec {
     syn::parse_str(source).unwrap_or_else(|error| panic!("{source}: {error}"))
 }
 
+#[cfg(feature = "cookies")]
 #[test]
 fn parses_the_complete_guard_grammar() {
     let spec = parsed(
@@ -17,6 +18,22 @@ fn parses_the_complete_guard_grammar() {
     assert_eq!(spec.roles.unwrap().values.len(), 1);
     assert_eq!(spec.permissions.unwrap().values.len(), 1);
     assert_eq!(spec.predicates.unwrap().len(), 2);
+}
+
+#[cfg(not(feature = "cookies"))]
+#[test]
+fn cookie_sources_require_the_cookie_capability() {
+    let error = match syn::parse_str::<GuardSpec>(
+        r#"strategy = "jwt", principal = UserPrincipal, source = cookie("access")"#,
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("a cookie source must require the cookie capability"),
+    };
+
+    assert_eq!(
+        error.to_string(),
+        "cookie token sources require the `cookies` feature"
+    );
 }
 
 #[test]
@@ -35,13 +52,20 @@ fn rejects_duplicate_and_mixed_skip_fields() {
 fn rejects_invalid_names_sources_and_policy_forms() {
     for source in [
         r#"strategy = "JWT", principal = UserPrincipal"#,
-        r#"strategy = "jwt", principal = UserPrincipal, source = cookie("bad;name")"#,
         r#"strategy = "jwt", principal = UserPrincipal, source = header"#,
         r#"strategy = "jwt", principal = UserPrincipal, roles(one = ["user"])"#,
         r#"strategy = "jwt", principal = UserPrincipal, unknown = "value""#,
     ] {
         assert!(syn::parse_str::<GuardSpec>(source).is_err(), "{source}");
     }
+
+    #[cfg(feature = "cookies")]
+    assert!(
+        syn::parse_str::<GuardSpec>(
+            r#"strategy = "jwt", principal = UserPrincipal, source = cookie("bad;name")"#,
+        )
+        .is_err()
+    );
 }
 
 #[test]
