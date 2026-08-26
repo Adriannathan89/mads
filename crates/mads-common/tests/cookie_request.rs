@@ -1,5 +1,7 @@
 //! Strict request-cookie extraction.
 
+#![cfg(feature = "cookies")]
+
 use axum::{
     Router,
     body::Body,

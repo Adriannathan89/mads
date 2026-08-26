@@ -1,5 +1,7 @@
 //! Checked response-cookie composition.
 
+#![cfg(feature = "cookies")]
+
 use axum::{
     Router,
     body::Body,

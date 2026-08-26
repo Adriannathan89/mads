@@ -28,7 +28,14 @@
 //! use mads_common::{Cookie, CookieJar};
 //!
 //! async fn login(jar: CookieJar) -> (CookieJar, &'static str) {
-//!     (jar.add(Cookie::new("session", "opaque")), "signed in")
+//!     let cookie = Cookie::build(("session", "opaque"))
+//!         .path("/")
+//!         .http_only(true)
+//!         .secure(true)
+//!         .same_site(mads_common::SameSite::Strict)
+//!         .max_age(mads_common::cookie::time::Duration::days(7))
+//!         .build();
+//!     (jar.add(cookie), "signed in")
 //! }
 //! ```
 //!

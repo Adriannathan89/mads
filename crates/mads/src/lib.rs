@@ -17,13 +17,15 @@
 //! enabled database default may use one separately registered embedded migration
 //! source through `MadsBuilderDatabaseExt::database_migrations`; MADS neither
 //! generates migrations nor auto-loads them. HTTP listener addresses remain
-//! explicit, because HTTP auto-binding is deferred to v0.5.5.
+//! explicit, because HTTP auto-binding and CORS are deferred to v0.5.6.
+//! v0.5.5 adds opt-in cookies and Passport/JWT without login, refresh storage,
+//! password hashing, CSRF, remote JWKS, JWE, or module scoping.
 //!
 //! A controller implements a typed route contract. MADS validates the complete
 //! route catalog, resolves the application-scoped controller once, and builds
 //! an Axum router without requiring application state or a manual route list:
 //!
-//! ```
+//! ```no_run
 //! use mads::prelude::*;
 //!
 //! #[derive(Clone, serde::Serialize)]
@@ -111,6 +113,99 @@
 //!         .unwrap();
 //!     let _application = builder.build().await.unwrap();
 //! }
+//! ```
+//!
+//! Register custom access and refresh strategies as managed providers. MADS
+//! verifies JWT cryptography, registered claims, and token kind before either
+//! strategy receives typed claims:
+//!
+//! ```
+//! use mads::prelude::*;
+//!
+//! #[derive(serde::Deserialize)]
+//! struct UserClaims { user_id: u64 }
+//! struct UserPrincipal(u64);
+//! impl PassportPrincipal for UserPrincipal {
+//!     fn has_role(&self, role: &str) -> bool { role == "user" }
+//!     fn has_permission(&self, permission: &str) -> bool {
+//!         permission == "profile:read"
+//!     }
+//! }
+//!
+//! #[service]
+//! struct AccessStrategy;
+//! #[passport_strategy(name = "jwt")]
+//! impl PassportStrategy for AccessStrategy {
+//!     type Claims = UserClaims;
+//!     type Principal = UserPrincipal;
+//!     const TOKEN_KIND: JwtTokenKind = JwtTokenKind::Access;
+//!     async fn validate(
+//!         &self,
+//!         _context: &PassportContext<'_>,
+//!         claims: &JwtClaims<Self::Claims>,
+//!     ) -> PassportResult<Self::Principal> {
+//!         Ok(UserPrincipal(claims.custom.user_id))
+//!     }
+//! }
+//!
+//! #[service]
+//! struct RefreshStrategy;
+//! #[passport_strategy(name = "jwt-refresh")]
+//! impl PassportStrategy for RefreshStrategy {
+//!     type Claims = UserClaims;
+//!     type Principal = UserPrincipal;
+//!     const TOKEN_KIND: JwtTokenKind = JwtTokenKind::Refresh;
+//!     async fn validate(
+//!         &self,
+//!         _context: &PassportContext<'_>,
+//!         claims: &JwtClaims<Self::Claims>,
+//!     ) -> PassportResult<Self::Principal> {
+//!         Ok(UserPrincipal(claims.custom.user_id))
+//!     }
+//! }
+//! # fn main() {}
+//! ```
+//!
+//! Route guards inherit field by field. Method clauses replace only supplied
+//! fields, cookie sources select exactly one named cookie, and `skip` removes
+//! an inherited guard:
+//!
+//! ```
+//! use mads::prelude::*;
+//!
+//! struct UserPrincipal;
+//! impl PassportPrincipal for UserPrincipal {
+//!     fn has_role(&self, role: &str) -> bool { role == "user" }
+//!     fn has_permission(&self, permission: &str) -> bool {
+//!         permission == "profile:read"
+//!     }
+//! }
+//! fn owns_profile(_: &UserPrincipal) -> bool { true }
+//!
+//! #[routes(prefix = "/users")]
+//! #[guard(
+//!     strategy = "jwt",
+//!     principal = UserPrincipal,
+//!     source = bearer,
+//!     roles(any = ["user", "admin"]),
+//! )]
+//! trait UserRoutes {
+//!     #[get("/profile")]
+//!     #[guard(
+//!         permissions(all = ["profile:read"]),
+//!         predicate = owns_profile,
+//!     )]
+//!     async fn profile(&self, principal: Authenticated<UserPrincipal>);
+//!
+//!     #[post("/refresh")]
+//!     #[guard(strategy = "jwt-refresh", source = cookie("refresh_token"))]
+//!     async fn refresh(&self);
+//!
+//!     #[post("/login")]
+//!     #[guard(skip)]
+//!     async fn login(&self);
+//! }
+//! # fn main() {}
 //! ```
 
 #![deny(missing_docs)]

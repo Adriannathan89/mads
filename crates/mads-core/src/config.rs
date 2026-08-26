@@ -1,4 +1,27 @@
 //! Deterministic configuration sources and merged configuration values.
+//!
+//! Configuration loading is explicit. Dotenv files supply interpolation values;
+//! ordinary sources merge from first to last, so the final source wins on a key:
+//!
+//! ```no_run
+//! use mads_core::{ConfigBuilder, DotenvSource, EnvSource, Mads, TomlSource};
+//!
+//! # async fn example() -> mads_core::Result<()> {
+//! let config = ConfigBuilder::new()
+//!     .dotenv(DotenvSource::optional(".env"))
+//!     .source(TomlSource::file("mads.toml"))
+//!     .source(EnvSource::new("MADS_"))
+//!     .build()?;
+//! let application = Mads::builder_with_config(config).build().await?;
+//! # let _ = application;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! TOML and programmatic sources may contain string arrays. A later scalar or
+//! string array replaces the earlier value and its shape completely. Process
+//! environment variables override dotenv variables during `${NAME}`
+//! interpolation; [`EnvSource`] itself remains scalar-only.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;

@@ -189,17 +189,23 @@ mod tests {
     struct PreflightPermit;
 
     #[cfg(feature = "database")]
-    #[mads_core::repository]
-    struct AutoDatabaseRepository {
-        database: Database,
+    mod auto_database_repository {
+        use super::*;
+
+        #[mads_core::repository]
+        pub(super) struct AutoDatabaseRepository {
+            database: Database,
+        }
+
+        impl AutoDatabaseRepository {
+            pub(super) fn database(&self) -> &Database {
+                &self.database
+            }
+        }
     }
 
     #[cfg(feature = "database")]
-    impl AutoDatabaseRepository {
-        fn database(&self) -> &Database {
-            &self.database
-        }
-    }
+    use auto_database_repository::AutoDatabaseRepository;
 
     fn preflight_controller_type_id() -> TypeId {
         TypeId::of::<PreflightController>()

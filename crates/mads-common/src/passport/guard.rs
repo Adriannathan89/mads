@@ -435,6 +435,39 @@ impl PassportGuardState {
 /// [`PassportGuard::<ClaimsPrincipal<C>>::jwt`] for the built-in typed-claims
 /// strategy. Native guards use the same extraction, JWT verification, strategy,
 /// policy, extension, and rejection pipeline as generated MADS routes.
+///
+/// ```no_run
+/// use mads_common::{
+///     ClaimsPrincipal, PassportGuard, PassportPrincipal,
+///     axum::{Router, routing::get},
+///     core::Mads,
+/// };
+///
+/// #[derive(serde::Deserialize)]
+/// struct UserClaims { role: String }
+/// impl PassportPrincipal for UserClaims {
+///     fn has_role(&self, role: &str) -> bool { self.role == role }
+///     fn has_permission(&self, _: &str) -> bool { false }
+/// }
+///
+/// # async fn example(application: Mads) -> mads_core::Result<()> {
+/// let guard = PassportGuard::<ClaimsPrincipal<UserClaims>>::jwt(
+///     application.context().clone(),
+/// )
+/// .roles_any(["user"])
+/// .build()?;
+/// let router: Router = Router::new()
+///     .route("/profile", get(|| async { "ok" }))
+///     .route_layer(guard);
+/// # let _ = router;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Native guards are runtime escape hatches: they are absent from the static
+/// route catalog and cannot activate JWT auto-configuration. Their completed
+/// application context must already contain [`JwtService`], or `build` returns
+/// [`MADS131`].
 pub struct PassportGuard<P> {
     state: NativePassportGuardState<P>,
 }
@@ -1008,31 +1041,32 @@ fn validate_guard(guard: &GuardDescriptor) -> Result<()> {
         ));
     }
     #[cfg(feature = "cookies")]
-    if let TokenSource::Cookie(name) = guard.source()
-        && !valid_cookie_name(name)
-    {
-        return Err(metadata_error(
-            subject,
-            "guard cookie token source must use a non-empty RFC cookie name",
-            guard.location(),
-        ));
+    if let TokenSource::Cookie(name) = guard.source() {
+        if !valid_cookie_name(name) {
+            return Err(metadata_error(
+                subject,
+                "guard cookie token source must use a non-empty RFC cookie name",
+                guard.location(),
+            ));
+        }
     }
     for (label, clause) in [
         ("roles", guard.roles()),
         ("permissions", guard.permissions()),
     ] {
-        if let Some(clause) = clause
-            && (clause.values().is_empty()
+        if let Some(clause) = clause {
+            if clause.values().is_empty()
                 || clause
                     .values()
                     .iter()
-                    .any(|value| value.is_empty() || value.chars().any(char::is_control)))
-        {
-            return Err(metadata_error(
-                subject,
-                format!("guard {label} policy must contain non-empty values"),
-                guard.location(),
-            ));
+                    .any(|value| value.is_empty() || value.chars().any(char::is_control))
+            {
+                return Err(metadata_error(
+                    subject,
+                    format!("guard {label} policy must contain non-empty values"),
+                    guard.location(),
+                ));
+            }
         }
     }
     if guard

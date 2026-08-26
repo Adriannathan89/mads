@@ -32,6 +32,7 @@ fn expands_a_concrete_controller_registrar_and_stores_its_pointer() {
         <Controller as UserRoutes>::__mads_register(
             __mads_router,
             __mads_controller.clone(),
+            __mads_context,
             __mads_routes,
         )?
     })));
@@ -39,6 +40,7 @@ fn expands_a_concrete_controller_registrar_and_stores_its_pointer() {
         <Controller as AdminRoutes>::__mads_register(
             __mads_router,
             __mads_controller.clone(),
+            __mads_context,
             __mads_routes,
         )?
     })));

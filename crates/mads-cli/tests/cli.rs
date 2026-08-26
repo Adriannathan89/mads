@@ -14,7 +14,7 @@ fn version_reports_the_workspace_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(contains("mads 0.5.0"));
+        .stdout(contains("mads 0.5.5"));
 }
 
 #[test]

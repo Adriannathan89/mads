@@ -1,5 +1,7 @@
 //! Managed Passport strategy registration contracts.
 
+#![cfg(all(feature = "http", feature = "jwt"))]
+
 use std::any::TypeId;
 
 use mads_common::{
