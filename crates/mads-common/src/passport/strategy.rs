@@ -7,12 +7,14 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
+use axum::http::Extensions;
 use mads_core::{ApplicationContext, Catalog, Diagnostic, Error, Result, SourceLocation};
 
 use crate::{JwtClaims, JwtTokenKind, VerifiedJwt};
 
 use super::{
-    GuardCatalog, GuardDescriptor, MADS130, PassportContext, PassportPrincipal, PassportResult,
+    Authenticated, GuardCatalog, GuardDescriptor, MADS130, PassportContext, PassportPrincipal,
+    PassportResult, VerifiedToken,
 };
 
 /// A typed application strategy that turns verified JWT claims into a principal.
@@ -68,7 +70,10 @@ pub struct ErasedAuthentication {
     principal_type_name: &'static str,
     claims_type_id: TypeId,
     claims_type_name: &'static str,
+    install_extensions: ExtensionInstaller,
 }
+
+type ExtensionInstaller = fn(&ErasedAuthentication, &mut Extensions) -> bool;
 
 impl ErasedAuthentication {
     /// Creates a type-erased authentication record for macro-generated adapters.
@@ -89,6 +94,7 @@ impl ErasedAuthentication {
             principal_type_name: type_name::<P>(),
             claims_type_id: TypeId::of::<C>(),
             claims_type_name: type_name::<C>(),
+            install_extensions: install_typed_extensions::<P, C>,
         }
     }
 
@@ -113,6 +119,7 @@ impl ErasedAuthentication {
             principal_type_name: type_name::<P>(),
             claims_type_id: TypeId::of::<C>(),
             claims_type_name: type_name::<C>(),
+            install_extensions: install_typed_extensions::<P, C>,
         }
     }
 
@@ -163,6 +170,29 @@ impl ErasedAuthentication {
     {
         Arc::downcast::<VerifiedJwt<C>>(Arc::clone(&self.exact_verified)).ok()
     }
+
+    pub(crate) fn install_extensions(&self, extensions: &mut Extensions) -> bool {
+        (self.install_extensions)(self, extensions)
+    }
+}
+
+fn install_typed_extensions<P, C>(
+    authentication: &ErasedAuthentication,
+    extensions: &mut Extensions,
+) -> bool
+where
+    P: PassportPrincipal,
+    C: Send + Sync + 'static,
+{
+    let Some(principal) = authentication.principal_as::<P>() else {
+        return false;
+    };
+    let Some(verified) = authentication.verified_as::<C>() else {
+        return false;
+    };
+    extensions.insert(Authenticated::new(principal));
+    extensions.insert(VerifiedToken::new(verified));
+    true
 }
 
 impl fmt::Debug for ErasedAuthentication {

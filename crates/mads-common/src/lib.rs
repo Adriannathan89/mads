@@ -119,7 +119,7 @@ pub use mads_common_macros::controller;
 pub use mads_common_macros::routes;
 
 /// Declares an inheritable Passport policy inside a `#[routes]` contract.
-#[cfg(feature = "http")]
+#[cfg(all(feature = "http", feature = "jwt"))]
 pub use mads_common_macros::guard;
 
 /// Derives role and permission membership for a named Passport principal.
@@ -164,5 +164,7 @@ pub mod __private {
     pub use axum::Router;
     pub use axum::routing::{delete, get, patch, post, put};
 
+    #[cfg(feature = "jwt")]
+    pub use crate::passport::{PassportGuardLayer, PassportGuardState};
     pub use crate::route::{ValidatedRouteIter, validate_descriptors};
 }

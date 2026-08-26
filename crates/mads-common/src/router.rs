@@ -6,6 +6,9 @@
 
 use crate::RouteCatalog;
 
+#[cfg(feature = "jwt")]
+use crate::{GuardCatalog, PassportStrategyCatalog};
+
 /// Builds an Axum router from every validated managed-controller registration.
 ///
 /// The complete route catalog is validated before any generated registrar is
@@ -36,6 +39,8 @@ use crate::RouteCatalog;
 /// ```
 #[allow(clippy::result_large_err)]
 pub fn build_router(application: &mads_core::Mads) -> mads_core::Result<axum::Router> {
+    #[cfg(feature = "jwt")]
+    PassportStrategyCatalog::preflight(&GuardCatalog::guards())?;
     let controllers = RouteCatalog::validated()?;
     let mut router = axum::Router::new();
     for controller in controllers {

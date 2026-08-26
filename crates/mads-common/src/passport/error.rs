@@ -16,6 +16,8 @@ pub type PassportResult<T> = std::result::Result<T, PassportError>;
 pub enum PassportErrorKind {
     /// Authentication was rejected by an application strategy.
     Rejected,
+    /// A verified principal did not satisfy a route policy.
+    Forbidden,
     /// A strategy or framework operation failed unexpectedly.
     Internal,
 }
@@ -33,6 +35,13 @@ impl PassportError {
     pub const fn reject() -> Self {
         Self {
             kind: PassportErrorKind::Rejected,
+            source: None,
+        }
+    }
+
+    pub(crate) const fn forbidden() -> Self {
+        Self {
+            kind: PassportErrorKind::Forbidden,
             source: None,
         }
     }
@@ -69,6 +78,7 @@ impl fmt::Display for PassportError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self.kind {
             PassportErrorKind::Rejected => "authentication was rejected",
+            PassportErrorKind::Forbidden => "access was denied",
             PassportErrorKind::Internal => "Passport operation failed",
         })
     }
@@ -95,6 +105,7 @@ impl From<crate::JwtError> for PassportError {
 }
 
 /// An Axum rejection produced by Passport extractors and guards.
+#[non_exhaustive]
 pub struct PassportRejection(PassportError);
 
 impl PassportRejection {
@@ -142,11 +153,12 @@ impl IntoResponse for PassportRejection {
             PassportErrorKind::Rejected => (
                 StatusCode::UNAUTHORIZED,
                 [(WWW_AUTHENTICATE, "Bearer")],
-                self.to_string(),
+                "Unauthorized",
             )
                 .into_response(),
+            PassportErrorKind::Forbidden => (StatusCode::FORBIDDEN, "Forbidden").into_response(),
             PassportErrorKind::Internal => {
-                (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response()
             }
         }
     }

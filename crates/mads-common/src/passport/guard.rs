@@ -1,18 +1,29 @@
 //! Static Passport guard policy metadata.
 //!
-//! This module deliberately contains no request-time authentication logic.
-//! Route macros emit immutable descriptors here; later bootstrap and HTTP
-//! layers consume the same descriptors to select a strategy and enforce a
-//! policy.
+//! Route macros emit immutable descriptors here. Router construction resolves
+//! each descriptor to one strategy adapter, and the route middleware below
+//! uses that same binding to authenticate and authorize requests.
 
 use std::any::TypeId;
 use std::cmp::Ordering;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::OnceLock;
+use std::task::{Context, Poll};
 
+use axum::{
+    extract::{Request, connect_info::ConnectInfo},
+    http::header::AUTHORIZATION,
+    response::{IntoResponse, Response},
+};
 use mads_core::{Diagnostic, Error, Result, SourceLocation};
+use tower::{Layer, Service};
 
-use super::{ErasedAuthentication, PassportContext, PassportStrategyFuture};
+use super::{
+    ErasedAuthentication, PassportContext, PassportError, PassportResult, PassportStrategyAdapter,
+    PassportStrategyCatalog, PassportStrategyFuture,
+};
 
 /// The one token source selected by a Passport guard.
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
@@ -287,6 +298,175 @@ impl GuardCatalog {
             validate_guard(guard)?;
         }
         Ok(())
+    }
+}
+
+/// Per-route middleware state produced from one preflight-selected Passport guard.
+///
+/// Generated route registration constructs this state while the router is built,
+/// so the request path uses the exact static descriptor and selected adapter
+/// already validated for that route.
+#[doc(hidden)]
+#[derive(Clone)]
+pub struct PassportGuardState {
+    application: mads_core::ApplicationContext,
+    guard: &'static GuardDescriptor,
+    adapter: PassportStrategyAdapter,
+}
+
+impl PassportGuardState {
+    /// Selects the one strategy adapter for a static guard descriptor.
+    #[doc(hidden)]
+    #[allow(clippy::result_large_err)]
+    pub fn new(
+        application: &mads_core::ApplicationContext,
+        guard: &'static GuardDescriptor,
+    ) -> Result<Self> {
+        let guards = [guard];
+        let preflight = PassportStrategyCatalog::preflight(&guards)?;
+        let binding = preflight
+            .binding_for(guard)
+            .expect("the preflight result must retain its requested guard");
+        Ok(Self {
+            application: application.clone(),
+            guard,
+            adapter: binding.adapter(),
+        })
+    }
+}
+
+/// A route-specific Tower layer that executes a selected Passport guard.
+#[doc(hidden)]
+#[derive(Clone)]
+pub struct PassportGuardLayer {
+    state: PassportGuardState,
+}
+
+impl PassportGuardLayer {
+    /// Creates one route-specific Passport middleware layer.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(state: PassportGuardState) -> Self {
+        Self { state }
+    }
+}
+
+impl<S> Layer<S> for PassportGuardLayer {
+    type Service = PassportGuardService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        PassportGuardService {
+            inner,
+            state: self.state.clone(),
+        }
+    }
+}
+
+/// A Tower service produced by [`PassportGuardLayer`].
+#[doc(hidden)]
+#[derive(Clone)]
+pub struct PassportGuardService<S> {
+    inner: S,
+    state: PassportGuardState,
+}
+
+impl<S> Service<Request> for PassportGuardService<S>
+where
+    S: Service<Request, Response = Response> + Clone + Send + 'static,
+    S::Error: Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = S::Error;
+    type Future = Pin<Box<dyn Future<Output = std::result::Result<Response, S::Error>> + Send>>;
+
+    fn poll_ready(&mut self, context: &mut Context<'_>) -> Poll<std::result::Result<(), S::Error>> {
+        self.inner.poll_ready(context)
+    }
+
+    fn call(&mut self, mut request: Request) -> Self::Future {
+        let state = self.state.clone();
+        let not_ready_inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, not_ready_inner);
+        Box::pin(async move {
+            if let Err(error) = state.authorize(&mut request).await {
+                return Ok(super::PassportRejection::from(error).into_response());
+            }
+            inner.call(request).await
+        })
+    }
+}
+
+impl PassportGuardState {
+    async fn authorize(&self, request: &mut Request) -> PassportResult<()> {
+        let TokenSource::Bearer = self.guard.source() else {
+            return Err(PassportError::reject());
+        };
+        let token = bearer_token(request.headers())?.to_owned();
+        let headers = request.headers().clone();
+        let method = request.method().clone();
+        let uri = request.uri().clone();
+        let remote_addr = request
+            .extensions()
+            .get::<ConnectInfo<std::net::SocketAddr>>()
+            .map(|address| address.0);
+        let context = PassportContext::new(&headers, &method, &uri, remote_addr);
+        let authentication = (self.adapter)(&self.application, &context, &token).await?;
+        if !authorizes(self.guard, &authentication) {
+            return Err(PassportError::forbidden());
+        }
+        if !authentication.install_extensions(request.extensions_mut()) {
+            return Err(PassportError::internal(std::io::Error::other(
+                "guard authentication type binding failed",
+            )));
+        }
+        Ok(())
+    }
+}
+
+fn bearer_token(headers: &axum::http::HeaderMap) -> PassportResult<&str> {
+    let mut values = headers.get_all(AUTHORIZATION).iter();
+    let Some(value) = values.next() else {
+        return Err(PassportError::reject());
+    };
+    if values.next().is_some() {
+        return Err(PassportError::reject());
+    }
+    let value = value.to_str().map_err(|_| PassportError::reject())?;
+    let mut parts = value.split_whitespace();
+    let Some(scheme) = parts.next() else {
+        return Err(PassportError::reject());
+    };
+    let Some(token) = parts.next() else {
+        return Err(PassportError::reject());
+    };
+    if !scheme.eq_ignore_ascii_case("Bearer") || token.is_empty() || parts.next().is_some() {
+        return Err(PassportError::reject());
+    }
+    Ok(token)
+}
+
+fn authorizes(guard: &GuardDescriptor, authentication: &ErasedAuthentication) -> bool {
+    let principal = authentication.principal();
+    if !matches_clause(guard.roles(), |value| principal.has_role(value))
+        || !matches_clause(guard.permissions(), |value| principal.has_permission(value))
+    {
+        return false;
+    }
+    guard.predicates().iter().all(|predicate| {
+        predicate
+            .adapter()
+            .is_some_and(|adapter| adapter(authentication))
+    })
+}
+
+fn matches_clause(clause: Option<PolicyClause>, matches: impl FnMut(&str) -> bool) -> bool {
+    let Some(clause) = clause else {
+        return true;
+    };
+    match clause.mode() {
+        PolicyMode::Any => clause.values().iter().copied().any(matches),
+        PolicyMode::All => clause.values().iter().copied().all(matches),
     }
 }
 

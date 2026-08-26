@@ -15,6 +15,7 @@ http = [
     "dep:serde",
     "dep:serde_json",
     "dep:tokio",
+    "dep:tower",
 ]
 database = [
     "dep:deadpool-diesel",
@@ -45,11 +46,11 @@ mads-core = { path = "../mads-core" }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"
 tokio.workspace = true
-tower.workspace = true
 
 [lints]
 workspace = true

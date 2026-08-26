@@ -201,6 +201,14 @@ pub use mads_common::{Created, HttpError, HttpResult, NoContent};
 #[cfg(feature = "http")]
 pub use mads_common::{HttpRuntimeError, build_router, serve};
 
+/// Re-exports guarded Passport authentication and policy contracts.
+#[cfg(all(feature = "http", feature = "jwt"))]
+pub use mads_common::{
+    Authenticated, ClaimsPrincipal, MADS130, MADS131, PassportContext, PassportError,
+    PassportErrorKind, PassportPrincipal, PassportRejection, PassportResult, PassportStrategy,
+    TokenSource, VerifiedToken, guard, passport_strategy,
+};
+
 /// Re-exports the managed-controller declaration attribute.
 #[cfg(feature = "http")]
 pub use mads_common::controller;
@@ -269,6 +277,14 @@ pub mod prelude {
     /// Re-exports HTTP router construction and runtime startup functions.
     #[cfg(feature = "http")]
     pub use mads_common::{HttpRuntimeError, build_router, serve};
+
+    /// Re-exports application-facing Passport guards, strategies, and extractors.
+    #[cfg(all(feature = "http", feature = "jwt"))]
+    pub use mads_common::{
+        Authenticated, ClaimsPrincipal, MADS130, MADS131, PassportContext, PassportError,
+        PassportErrorKind, PassportPrincipal, PassportRejection, PassportResult, PassportStrategy,
+        TokenSource, VerifiedToken, guard, passport_strategy,
+    };
 
     /// Re-exports application-facing database configuration and runtime types.
     #[cfg(feature = "database")]
