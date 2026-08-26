@@ -206,16 +206,12 @@ async fn cookie_guards_require_exactly_one_valid_refresh_cookie_without_bearer_f
     ] {
         HANDLER_CALLS.store(0, Ordering::SeqCst);
         STRATEGY_CALLS.store(0, Ordering::SeqCst);
-        assert_generic_authentication_failure(request(&router, cookies, None).await).await;
+        assert_generic_authentication_failure(
+            request(&router, cookies, Some(format!("Bearer {refresh}"))).await,
+        )
+        .await;
+        assert_eq!(STRATEGY_CALLS.load(Ordering::SeqCst), 0);
     }
-
-    HANDLER_CALLS.store(0, Ordering::SeqCst);
-    STRATEGY_CALLS.store(0, Ordering::SeqCst);
-    assert_generic_authentication_failure(
-        request(&router, Vec::new(), Some(format!("Bearer {access}"))).await,
-    )
-    .await;
-    assert_eq!(STRATEGY_CALLS.load(Ordering::SeqCst), 0);
 
     REJECT_REFRESH.store(true, Ordering::SeqCst);
     HANDLER_CALLS.store(0, Ordering::SeqCst);
