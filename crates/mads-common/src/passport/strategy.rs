@@ -477,6 +477,7 @@ fn validate_strategy_catalog(strategies: &[&'static PassportStrategyDescriptor])
 
     let providers = Catalog::providers();
     for strategy in strategies {
+        validate_reserved_strategy_token_kind(strategy)?;
         let candidates = providers
             .iter()
             .copied()
@@ -511,6 +512,38 @@ fn validate_strategy_catalog(strategies: &[&'static PassportStrategyDescriptor])
         }
     }
     Ok(())
+}
+
+fn validate_reserved_strategy_token_kind(strategy: &PassportStrategyDescriptor) -> Result<()> {
+    let (expected, suggestion) = match strategy.name() {
+        "jwt" => (
+            JwtTokenKind::Access,
+            "declare `JwtTokenKind::Access` for the reserved `jwt` strategy",
+        ),
+        "jwt-refresh" => (
+            JwtTokenKind::Refresh,
+            "declare `JwtTokenKind::Refresh` for the reserved `jwt-refresh` strategy",
+        ),
+        _ => return Ok(()),
+    };
+
+    if strategy.token_kind() == expected {
+        return Ok(());
+    }
+
+    Err(strategy_error(
+        "reserved_strategy_token_kind",
+        "Passport strategy token kind mismatch",
+        strategy.name(),
+        format!(
+            "the reserved `{}` strategy accepts only {} tokens, but its adapter declares {} tokens",
+            strategy.name(),
+            expected.claim_value(),
+            strategy.token_kind().claim_value(),
+        ),
+        strategy.location(),
+        suggestion,
+    ))
 }
 
 fn duplicate_strategy_error(group: &[&'static PassportStrategyDescriptor]) -> Diagnostic {
