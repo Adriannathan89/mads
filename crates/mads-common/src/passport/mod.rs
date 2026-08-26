@@ -8,11 +8,15 @@
 //! application identity. A refresh strategy is application-defined and selects
 //! the refresh token profile:
 //!
-//! ```ignore
+//! ```no_run
 //! use mads_common::{
 //!     JwtClaims, JwtTokenKind, PassportContext, PassportPrincipal,
 //!     PassportResult, PassportStrategy, passport_strategy,
 //! };
+//! # use mads_common::{
+//! #     core, ErasedAuthentication, JwtService, JwtValidation, PassportError,
+//! #     PassportStrategyDescriptor, PassportStrategyFuture,
+//! # };
 //!
 //! #[derive(Clone, serde::Deserialize)]
 //! struct UserClaims { user_id: u64 }
@@ -61,8 +65,12 @@
 //! Route policy inherits field by field. A method replaces only the fields it
 //! supplies, while `skip` removes an inherited guard:
 //!
-//! ```ignore
+//! ```no_run
 //! use mads_common::{Authenticated, PassportPrincipal, guard, routes};
+//! # use mads_common::{
+//! #     __private, core, ErasedAuthentication, GuardDescriptor, GuardPredicate,
+//! #     HttpMethod, PolicyClause, PolicyMode, RouteDescriptor, TokenSource,
+//! # };
 //!
 //! struct UserPrincipal;
 //! impl PassportPrincipal for UserPrincipal {
