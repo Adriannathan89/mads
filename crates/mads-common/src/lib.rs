@@ -179,6 +179,23 @@ pub mod __private {
         crate::server_config::load_standard_config_from_with_environment(root, environment)
     }
 
+    /// Enables the private automatic HTTP server mode for integration tests.
+    pub fn enable_automatic_server_for_test(builder: &mut mads_core::MadsBuilder) -> bool {
+        crate::server_config::enable_automatic_server(builder)
+    }
+
+    /// Returns the automatic server binding as an owned address tuple for integration tests.
+    #[allow(clippy::result_large_err)]
+    pub fn server_binding_address_for_test(
+        application: &mads_core::Mads,
+    ) -> mads_core::Result<(String, u16)> {
+        let binding = application
+            .context()
+            .resolve::<crate::server_config::ServerBinding>()?;
+        let (host, port) = binding.address();
+        Ok((host.to_owned(), port))
+    }
+
     #[cfg(feature = "jwt")]
     pub use crate::passport::{PassportGuardLayer, PassportGuardState};
     #[cfg(feature = "jwt")]

@@ -163,16 +163,17 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use mads_core::{
-        ApplicationContext, Diagnostic, Error, LifecycleFuture, LifecycleHook, MADS011, MADS020,
-        Mads, SourceLocation,
-    };
     #[cfg(feature = "database")]
-    use mads_core::{AutoConfigurationStatus, ConfigBuilder, MapSource};
+    use mads_core::AutoConfigurationStatus;
+    use mads_core::{
+        ApplicationContext, ConfigBuilder, Diagnostic, Error, LifecycleFuture, LifecycleHook,
+        MADS011, MADS020, Mads, MapSource, SourceLocation,
+    };
     #[cfg(feature = "database")]
     use tokio::net::TcpListener;
 
     use super::{HttpRuntimeError, serve_with};
+    use crate::server_config::ServerBinding;
     use crate::{ControllerRouteDescriptor, HttpMethod, RouteContractDescriptor, RouteDescriptor};
     #[cfg(feature = "database")]
     use crate::{Database, DatabaseConfig, DatabaseErrorKind, MADS100, MadsBuilderDatabaseExt};
@@ -306,6 +307,25 @@ mod tests {
     fn address() -> SocketAddr {
         SocketAddr::from((Ipv4Addr::LOCALHOST, 0))
     }
+
+    #[test]
+    fn ipv6_automatic_server_binding_uses_a_host_port_tuple() {
+        let config = ConfigBuilder::new()
+            .source(MapSource::new(
+                "test",
+                [("server.host", "::1"), ("server.port", "3000")],
+            ))
+            .build()
+            .unwrap();
+        let binding = ServerBinding::from_config(&config).unwrap();
+        let address = binding.address();
+
+        accepts_tokio_socket_address(address);
+        assert_eq!(address, ("::1", 3000));
+        assert_eq!(format!("{binding:?}"), "[REDACTED]");
+    }
+
+    fn accepts_tokio_socket_address(_: impl tokio::net::ToSocketAddrs) {}
 
     #[tokio::test]
     async fn preflight_failure_prevents_lifecycle_start_and_bind() {

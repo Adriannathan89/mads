@@ -73,6 +73,10 @@ impl ScopedController {
             .any(|identity| identity.matches(self.descriptor, route))
     }
 
+    fn has_routes(&self) -> bool {
+        !self.selected_routes.is_empty()
+    }
+
     #[allow(dead_code)]
     pub(crate) const fn context_module(&self) -> Option<TypeId> {
         self.context_module
@@ -109,6 +113,10 @@ impl HttpApplicationScope {
 
     pub(crate) fn controllers(&self) -> &[ScopedController] {
         &self.controllers
+    }
+
+    pub(crate) fn has_routes(&self) -> bool {
+        self.controllers.iter().any(ScopedController::has_routes)
     }
 
     #[cfg(feature = "jwt")]
