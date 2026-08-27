@@ -77,9 +77,4 @@ pub mod __private {
         let modules = crate::Catalog::modules();
         crate::graph::build_module_graph(TypeId::of::<M>(), &modules)
     }
-
-    /// Analyzes provider scope for one rooted module without constructing providers.
-    pub fn analyze_module_scope<M: crate::Module>() -> crate::Result<crate::GraphAnalysis> {
-        crate::graph::analyze_module_scope::<M>()
-    }
 }

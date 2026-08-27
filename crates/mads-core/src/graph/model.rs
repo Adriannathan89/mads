@@ -7,6 +7,8 @@ use crate::{
     ProviderVisibility, SourceLocation,
 };
 
+use super::module::ModuleGraph;
+
 /// Describes how a provider enters an application graph.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ProviderOrigin {
@@ -240,6 +242,7 @@ pub struct GraphAnalysis {
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) construction_plan: Option<ConstructionPlan>,
     pub(crate) auto_configurations: Vec<AutoConfigurationReport>,
+    pub(crate) module_graph: Option<ModuleGraph>,
 }
 
 impl GraphAnalysis {
@@ -256,6 +259,11 @@ impl GraphAnalysis {
     /// Returns reports for official auto-configurations evaluated during analysis.
     pub fn auto_configurations(&self) -> &[AutoConfigurationReport] {
         &self.auto_configurations
+    }
+
+    /// Returns the rooted module graph, or `None` for complete-catalog analysis.
+    pub const fn module_graph(&self) -> Option<&ModuleGraph> {
+        self.module_graph.as_ref()
     }
 
     /// Returns the deterministic construction plan when the graph is valid.
@@ -277,15 +285,46 @@ impl GraphAnalysis {
         self.diagnostics = diagnostics;
     }
 
+    pub(crate) fn append_diagnostics(&mut self, diagnostics: Vec<Diagnostic>) {
+        if diagnostics.is_empty() {
+            return;
+        }
+        self.construction_plan = None;
+        self.diagnostics.extend(diagnostics);
+    }
+
+    pub(crate) fn set_module_graph(&mut self, module_graph: ModuleGraph) {
+        self.module_graph = Some(module_graph);
+    }
+
+    pub(crate) fn invalid(diagnostics: Vec<Diagnostic>) -> Self {
+        Self {
+            graph: ApplicationGraph {
+                providers: Vec::new(),
+                dependencies: Vec::new(),
+            },
+            diagnostics,
+            construction_plan: None,
+            auto_configurations: Vec::new(),
+            module_graph: None,
+        }
+    }
+
     pub(crate) fn into_valid_parts(
         self,
     ) -> crate::Result<(
         ApplicationGraph,
         ConstructionPlan,
         Vec<AutoConfigurationReport>,
+        Option<ModuleGraph>,
     )> {
         match (self.diagnostics.is_empty(), self.construction_plan) {
-            (true, Some(plan)) => Ok((self.graph, plan, self.auto_configurations)),
+            (true, Some(plan)) => Ok((
+                self.graph,
+                plan,
+                self.auto_configurations,
+                self.module_graph,
+            )),
             (false, _) => {
                 let mut diagnostics = self.diagnostics.into_iter();
                 let primary = diagnostics
@@ -333,6 +372,7 @@ mod tests {
             diagnostics: Vec::new(),
             construction_plan: Some(ConstructionPlan { steps: Vec::new() }),
             auto_configurations: Vec::new(),
+            module_graph: None,
         };
 
         assert!(analysis.is_valid());

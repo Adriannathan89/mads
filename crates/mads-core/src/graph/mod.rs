@@ -34,14 +34,3 @@ pub(crate) fn analyze_catalog(
     let descriptors = Catalog::providers();
     analyze_descriptors(&descriptors, satisfied, covered_missing)
 }
-
-pub(crate) fn analyze_module_scope<M: crate::Module>() -> crate::Result<GraphAnalysis> {
-    let modules = Catalog::modules();
-    let mut module_graph = build_module_graph(std::any::TypeId::of::<M>(), &modules)?;
-    let descriptors = Catalog::providers();
-    let scoped = select_scoped_providers(&module_graph, &descriptors, &[]);
-    let mut analysis = analyze_descriptors(&scoped.descriptors, &[], &scoped.covered_missing);
-    analysis.prepend_diagnostics(scoped.diagnostics);
-    module_graph.set_provider_ownership(scoped.ownership);
-    Ok(analysis)
-}

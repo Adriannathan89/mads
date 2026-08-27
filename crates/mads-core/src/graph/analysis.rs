@@ -176,6 +176,7 @@ pub(crate) fn analyze_parts(
         diagnostics,
         construction_plan,
         auto_configurations: Vec::new(),
+        module_graph: None,
     }
 }
 

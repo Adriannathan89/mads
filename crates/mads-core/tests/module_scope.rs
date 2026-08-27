@@ -2,7 +2,9 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mads_core::{Config, ConstructionContext, GraphAnalysis, MADS009, Module, ProviderRegistry};
+use mads_core::{
+    Config, ConstructionContext, GraphAnalysis, MADS009, Mads, Module, ProviderRegistry,
+};
 
 mod selected_scope {
     pub mod app {
@@ -268,8 +270,11 @@ mod diamond {
 }
 
 fn rooted_analysis<M: Module>() -> GraphAnalysis {
-    mads_core::__private::analyze_module_scope::<M>()
-        .expect("module graph metadata should be valid")
+    let mut builder = Mads::builder();
+    builder
+        .root::<M>()
+        .expect("module graph metadata should be valid");
+    builder.analyze()
 }
 
 #[test]
