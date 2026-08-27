@@ -8,8 +8,8 @@ use std::fs;
 use std::os::unix::ffi::OsStringExt;
 
 use mads_core::{
-    ConfigBuilder, ConfigSource, Diagnostic, DotenvSource, EnvSource, Error, MADS020, MapSource,
-    Result, TomlSource,
+    ConfigBuilder, ConfigDocument, ConfigSource, Diagnostic, DotenvSource, EnvSource, Error,
+    MADS020, MapSource, Result, TomlSource,
 };
 
 #[test]
@@ -29,6 +29,76 @@ fn later_sources_override_values_and_retain_attribution() {
     assert_eq!(config.get("server.port"), Some("8080"));
     assert_eq!(config.source_of("server.port"), Some("environment"));
     assert_eq!(config.get("ignored"), None);
+}
+
+#[test]
+fn paths_use_the_winning_sources_structured_origin() {
+    let directory = tempfile::tempdir().unwrap();
+    let toml_path = directory.path().join("config/mads.toml");
+    fs::create_dir_all(toml_path.parent().unwrap()).unwrap();
+    fs::write(
+        &toml_path,
+        "[passport.keys.current]\nprivate_key_file = \"keys/private.pem\"\n",
+    )
+    .unwrap();
+
+    let toml_config = ConfigBuilder::new()
+        .source(TomlSource::file(&toml_path))
+        .build()
+        .unwrap();
+    assert_eq!(
+        toml_config
+            .resolve_path("passport.keys.current.private_key_file")
+            .unwrap(),
+        directory.path().join("config/keys/private.pem"),
+    );
+
+    let overridden = ConfigBuilder::new()
+        .source(TomlSource::file(toml_path))
+        .source(MapSource::new(
+            "programmatic",
+            [("passport.keys.current.private_key_file", "override.pem")],
+        ))
+        .build()
+        .unwrap();
+    assert_eq!(
+        overridden
+            .resolve_path("passport.keys.current.private_key_file")
+            .unwrap(),
+        std::env::current_dir().unwrap().join("override.pem"),
+    );
+}
+
+#[test]
+fn resolve_path_preserves_absolute_values() {
+    let directory = tempfile::tempdir().unwrap();
+    let absolute_path = directory.path().join("private.pem");
+    let config = ConfigBuilder::new()
+        .source(MapSource::new(
+            "programmatic",
+            [("passport.private_key_file", absolute_path.to_str().unwrap())],
+        ))
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        config.resolve_path("passport.private_key_file"),
+        Some(absolute_path),
+    );
+}
+
+#[test]
+fn resolve_path_returns_none_for_missing_and_array_values() {
+    let config = ConfigBuilder::new()
+        .source(
+            MapSource::new("programmatic", std::iter::empty::<(&str, &str)>())
+                .with_string_array("passport.key_files", ["first.pem"]),
+        )
+        .build()
+        .unwrap();
+
+    assert_eq!(config.resolve_path("passport.missing"), None);
+    assert_eq!(config.resolve_path("passport.key_files"), None);
 }
 
 struct BrokenSource;
@@ -81,6 +151,54 @@ fn normalized_environment_key_collisions_use_the_later_variable() {
 
     assert_eq!(config.get("server.port"), Some("8080"));
     assert_eq!(config.source_of("server.port"), Some("environment"));
+}
+
+#[test]
+fn map_source_inserts_string_arrays_without_changing_scalar_access() {
+    let config = ConfigBuilder::new()
+        .source(
+            MapSource::new("base", [("passport.issuer", "issuer")])
+                .with_string_array("passport.algorithms", ["HS256", "RS256"]),
+        )
+        .build()
+        .unwrap();
+
+    assert_eq!(config.get("passport.issuer"), Some("issuer"));
+    assert_eq!(
+        config.get_string_array("passport.algorithms"),
+        Some(["HS256".to_owned(), "RS256".to_owned()].as_slice()),
+    );
+    assert_eq!(
+        config.source_of_string_array("passport.algorithms"),
+        Some("base")
+    );
+    assert_eq!(config.get("passport.algorithms"), None);
+}
+
+#[test]
+fn later_source_replaces_an_entry_across_value_shapes() {
+    let array_wins = ConfigBuilder::new()
+        .source(MapSource::new("first", [("value", "scalar")]))
+        .source(
+            MapSource::new("second", std::iter::empty::<(&str, &str)>())
+                .with_string_array("value", ["array"]),
+        )
+        .build()
+        .unwrap();
+    assert_eq!(array_wins.get("value"), None);
+    assert_eq!(array_wins.get_string_array("value").unwrap(), ["array"]);
+
+    let scalar_wins = ConfigBuilder::new()
+        .source(
+            MapSource::new("first", std::iter::empty::<(&str, &str)>())
+                .with_string_array("value", ["array"]),
+        )
+        .source(MapSource::new("second", [("value", "scalar")]))
+        .build()
+        .unwrap();
+    assert_eq!(scalar_wins.get("value"), Some("scalar"));
+    assert_eq!(scalar_wins.get_string_array("value"), None);
+    assert_eq!(scalar_wins.source_of("value"), Some("second"));
 }
 
 #[cfg(unix)]
@@ -143,6 +261,94 @@ ratio = 1.5
             "database.url"
         ]
     );
+}
+
+#[test]
+fn toml_string_arrays_interpolate_each_exact_element() {
+    let directory = tempfile::tempdir().unwrap();
+    let dotenv = directory.path().join(".env");
+    let toml = directory.path().join("mads.toml");
+    fs::write(&dotenv, "PRIMARY=HS256\nSECONDARY=RS256\n").unwrap();
+    fs::write(
+        &toml,
+        "[passport]\nalgorithms = [\"${PRIMARY}\", \"${SECONDARY}\", \"literal-${PRIMARY}\"]\n",
+    )
+    .unwrap();
+
+    let config = ConfigBuilder::new()
+        .dotenv(DotenvSource::required(dotenv))
+        .source(TomlSource::file(toml))
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        config.get_string_array("passport.algorithms").unwrap(),
+        ["HS256", "RS256", "literal-${PRIMARY}"],
+    );
+}
+
+#[test]
+fn toml_rejects_every_non_string_array_without_leaking_values() {
+    for value in [
+        "[1, 2]",
+        "[true, false]",
+        "[1.0]",
+        "[1979-05-27T07:32:00Z]",
+        "[\"ok\", 7]",
+        "[[\"nested-secret\"]]",
+        "[{ token = \"table-secret\" }]",
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("mads.toml");
+        fs::write(&path, format!("[passport]\nalgorithms = {value}\n")).unwrap();
+        let error = ConfigBuilder::new()
+            .source(TomlSource::file(path))
+            .build()
+            .unwrap_err();
+        let report = error.to_string();
+        assert_eq!(error.code(), MADS020);
+        assert!(report.contains("passport.algorithms"));
+        assert!(report.contains("non-string array"));
+        assert!(!report.contains("nested-secret"));
+        assert!(!report.contains("table-secret"));
+    }
+}
+
+#[test]
+fn missing_array_variable_names_only_the_key_and_variable() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("mads.toml");
+    fs::write(
+        &path,
+        "[passport]\nalgorithms = [\"sibling-secret\", \"${MISSING_ALGORITHM}\"]\n",
+    )
+    .unwrap();
+
+    let error = ConfigBuilder::new()
+        .source(TomlSource::file(path))
+        .build()
+        .unwrap_err();
+    let report = error.to_string();
+
+    assert_eq!(error.code(), MADS020);
+    assert!(report.contains("passport.algorithms"));
+    assert!(report.contains("MISSING_ALGORITHM"));
+    assert!(!report.contains("${MISSING_ALGORITHM}"));
+    assert!(!report.contains("sibling-secret"));
+}
+
+#[test]
+fn legacy_toml_load_remains_scalar_only() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("mads.toml");
+    fs::write(&path, "[passport]\nalgorithms = [\"HS256\"]\n").unwrap();
+
+    let error = TomlSource::file(path).load().unwrap_err();
+
+    assert_eq!(error.code(), MADS020);
+    assert!(error.to_string().contains("passport.algorithms"));
+    assert!(error.to_string().contains("array"));
+    assert!(!error.to_string().contains("HS256"));
 }
 
 #[test]
@@ -389,5 +595,23 @@ fn debug_redacts_all_configuration_values() {
     ] {
         assert!(!rendered.contains(sentinel));
         assert!(rendered.contains("[REDACTED]"));
+    }
+}
+
+#[test]
+fn debug_redacts_document_and_resolved_string_array_values() {
+    let sentinel = "array-secret-sentinel";
+    let mut document = ConfigDocument::new();
+    document.insert_string_array("passport.keys", [sentinel]);
+    let config = ConfigBuilder::new()
+        .source(
+            MapSource::new("passport", std::iter::empty::<(&str, &str)>())
+                .with_string_array("passport.keys", [sentinel]),
+        )
+        .build()
+        .unwrap();
+
+    for rendered in [format!("{document:?}"), format!("{config:?}")] {
+        assert!(!rendered.contains(sentinel));
     }
 }

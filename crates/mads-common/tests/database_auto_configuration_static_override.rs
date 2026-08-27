@@ -1,5 +1,7 @@
 //! Static provider precedence over the official Diesel auto-configuration.
 
+#![cfg(feature = "database")]
+
 use mads_common::{Database, DatabaseConfig};
 use mads_core::{AutoConfigurationStatus, Mads, ProviderOrigin};
 

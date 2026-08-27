@@ -193,6 +193,7 @@ fn expand_controller_with_common(
             __mads_router = <#ident as #route>::__mads_register(
                 __mads_router,
                 __mads_controller.clone(),
+                __mads_context,
                 __mads_routes,
             )?;
         }

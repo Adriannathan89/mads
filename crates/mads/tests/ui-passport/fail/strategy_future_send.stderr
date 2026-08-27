@@ -1,0 +1,16 @@
+error: future cannot be sent between threads safely
+  --> tests/ui-passport/fail/strategy_future_send.rs:10:1
+   |
+10 | #[passport_strategy(name = "jwt")]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ future created by async block is not `Send`
+   |
+   = help: within `{async block@$DIR/tests/ui-passport/fail/strategy_future_send.rs:10:1: 10:35}`, the trait `Send` is not implemented for `Rc<()>`
+note: future is not `Send` as this value is used across an await
+  --> tests/ui-passport/fail/strategy_future_send.rs:22:38
+   |
+21 |         let local = Rc::new(());
+   |             ----- has type `Rc<()>` which is not `Send`
+22 |         std::future::pending::<()>().await;
+   |                                      ^^^^^ await occurs here, with `local` maybe used later
+   = note: required for the cast from `Pin<Box<{async block@$DIR/tests/ui-passport/fail/strategy_future_send.rs:10:1: 10:35}>>` to `Pin<Box<dyn Future<Output = Result<ErasedAuthentication, PassportError>> + Send>>`
+   = note: this error originates in the attribute macro `passport_strategy` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -1,0 +1,5 @@
+error: `skip` is only valid on a route method inheriting a trait guard
+ --> tests/ui-passport/fail/guard_trait_skip.rs:4:1
+  |
+4 | #[guard(skip)]
+  | ^

@@ -1,0 +1,5 @@
+error: guard cookie source must use a non-empty RFC cookie name
+ --> tests/ui-passport/fail/guard_invalid_cookie.rs:9:21
+  |
+9 |     source = cookie("bad;name"),
+  |                     ^^^^^^^^^^

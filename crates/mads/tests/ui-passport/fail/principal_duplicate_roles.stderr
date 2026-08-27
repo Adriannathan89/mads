@@ -1,0 +1,5 @@
+error: duplicate `#[roles]` Passport principal field
+ --> tests/ui-passport/fail/principal_duplicate_roles.rs:8:5
+  |
+8 |     inherited_roles: Vec<String>,
+  |     ^^^^^^^^^^^^^^^

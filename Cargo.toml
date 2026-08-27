@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.5.5"
 edition = "2024"
 rust-version = "1.85"
 authors = ["MADS.rs contributors"]
@@ -20,11 +20,14 @@ repository = "https://github.com/Adriannathan89/mads"
 [workspace.dependencies]
 axum = { version = "0.8.9", features = ["http1", "json", "tokio"] }
 axum-extra = { version = "0.12.6", default-features = false, features = ["typed-header"] }
+base64 = "0.22"
+cookie = { version = "=0.18.1", default-features = false, features = ["percent-encode"] }
 deadpool-diesel = { version = "=0.6.1", default-features = false, features = ["postgres", "rt_tokio_1"] }
 diesel = { version = "=2.2.12", default-features = false, features = ["postgres", "32-column-tables"] }
 diesel_migrations = { version = "=2.2.0", default-features = false, features = ["postgres"] }
 dotenvy = "=0.15.7"
 inventory = "0.3"
+jsonwebtoken = { version = "=10.3.0", default-features = false, features = ["rust_crypto", "use_pem"] }
 proc-macro-crate = "3"
 proc-macro2 = "1"
 quote = "1"

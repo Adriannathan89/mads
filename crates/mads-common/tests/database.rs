@@ -1,5 +1,7 @@
 //! Offline contracts for the managed PostgreSQL pool.
 
+#![cfg(feature = "database")]
+
 use mads_common::{Database, DatabaseConfig, DatabaseErrorKind, diesel::prelude::*};
 
 #[test]

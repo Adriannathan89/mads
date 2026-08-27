@@ -1,5 +1,7 @@
 //! Requirement-free behavior for the official Diesel auto-configuration.
 
+#![cfg(feature = "database")]
+
 use mads_common::Database;
 use mads_core::{AutoConfigurationStatus, ConfigBuilder, Mads, MapSource};
 

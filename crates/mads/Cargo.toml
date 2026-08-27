@@ -7,7 +7,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-mads-common = { path = "../mads-common", optional = true }
+mads-common = { path = "../mads-common", optional = true, default-features = false }
 mads-core = { path = "../mads-core" }
 mads-extra = { path = "../mads-extra", optional = true }
 
@@ -22,7 +22,11 @@ trybuild.workspace = true
 
 [features]
 default = ["common", "runtime-tokio"]
-common = ["dep:mads-common"]
+common = ["http", "database"]
+http = ["dep:mads-common", "mads-common/http"]
+database = ["dep:mads-common", "mads-common/database"]
+jwt = ["dep:mads-common", "mads-common/jwt"]
+cookies = ["http", "mads-common/cookies"]
 runtime-tokio = ["mads-core/runtime-tokio"]
 extra = ["dep:mads-extra"]
 

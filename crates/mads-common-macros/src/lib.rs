@@ -17,9 +17,34 @@
 use proc_macro::TokenStream;
 
 mod controller;
+mod guard;
+mod passport_principal;
+#[cfg(feature = "passport")]
+mod passport_strategy;
 mod path;
 mod routes;
 mod verb;
+
+/// Derives role and permission membership for a named Passport principal.
+///
+/// Mark at most one collection field with `#[roles]` and at most one with
+/// `#[permissions]`. Collection items must implement `AsRef<str>`.
+#[proc_macro_derive(PassportPrincipal, attributes(roles, permissions))]
+pub fn passport_principal(input: TokenStream) -> TokenStream {
+    syn::parse(input)
+        .and_then(passport_principal::expand)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Registers a managed, typed Passport JWT strategy implementation.
+#[cfg(feature = "passport")]
+#[proc_macro_attribute]
+pub fn passport_strategy(arguments: TokenStream, item: TokenStream) -> TokenStream {
+    passport_strategy::expand(arguments.into(), item.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
 
 /// Declares a managed controller and the route traits it must implement.
 ///
@@ -96,6 +121,16 @@ pub fn routes(arguments: TokenStream, item: TokenStream) -> TokenStream {
     routes::expand(arguments.into(), item.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
+}
+
+/// Declares an inheritable Passport policy on a route trait or route method.
+///
+/// `#[routes]` consumes valid guard attributes and emits their effective
+/// static metadata. Applying this attribute to any other item produces a
+/// focused diagnostic.
+#[proc_macro_attribute]
+pub fn guard(arguments: TokenStream, item: TokenStream) -> TokenStream {
+    guard::outside_contract(arguments.into(), item.into()).into()
 }
 
 /// Marks a GET method inside a trait annotated with [`routes`].

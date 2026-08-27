@@ -1,0 +1,5 @@
+error: `#[passport_strategy]` requires `impl PassportStrategy for ConcreteType`
+ --> tests/ui-passport/fail/strategy_trait.rs:6:1
+  |
+6 | impl NotAStrategy {
+  | ^^^^

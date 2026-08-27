@@ -1,0 +1,5 @@
+error: unknown guard argument; expected strategy, principal, source, roles, permissions, predicate, predicates, or skip
+ --> tests/ui-passport/fail/guard_unknown_argument.rs:6:54
+  |
+6 | #[guard(strategy = "jwt", principal = UserPrincipal, audience = "mads")]
+  |                                                      ^^^^^^^^

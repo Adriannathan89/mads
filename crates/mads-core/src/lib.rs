@@ -39,8 +39,8 @@ pub use auto_configuration::{
 pub use builder::{Mads, MadsBuilder};
 pub use catalog::Catalog;
 pub use config::{
-    Config, ConfigBuilder, ConfigSource, ConfigValue, DotenvSource, EnvSource, MapSource,
-    TomlSource,
+    Config, ConfigBuilder, ConfigDocument, ConfigSource, ConfigValue, DotenvSource, EnvSource,
+    MapSource, TomlSource,
 };
 pub use context::{ApplicationContext, ConstructionContext};
 pub use descriptor::{

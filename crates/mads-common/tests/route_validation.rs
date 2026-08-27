@@ -1,5 +1,7 @@
 //! Integration tests for runtime validation of route metadata.
 
+#![cfg(feature = "http")]
+
 use std::any::TypeId;
 
 use mads_common::core::{ApplicationContext, MADS030, Result, SourceLocation};

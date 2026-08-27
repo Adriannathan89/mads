@@ -1,27 +1,123 @@
 //! Deterministic configuration sources and merged configuration values.
+//!
+//! Configuration loading is explicit. Dotenv files supply interpolation values;
+//! ordinary sources merge from first to last, so the final source wins on a key:
+//!
+//! ```no_run
+//! use mads_core::{ConfigBuilder, DotenvSource, EnvSource, Mads, TomlSource};
+//!
+//! # async fn example() -> mads_core::Result<()> {
+//! let config = ConfigBuilder::new()
+//!     .dotenv(DotenvSource::optional(".env"))
+//!     .source(TomlSource::file("mads.toml"))
+//!     .source(EnvSource::new("MADS_"))
+//!     .build()?;
+//! let application = Mads::builder_with_config(config).build().await?;
+//! # let _ = application;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! TOML and programmatic sources may contain string arrays. A later scalar or
+//! string array replaces the earlier value and its shape completely. Process
+//! environment variables override dotenv variables during `${NAME}`
+//! interpolation; [`EnvSource`] itself remains scalar-only.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::{Diagnostic, Error, MADS020, Result};
+
+/// A redacted configuration document containing supported value shapes.
+#[derive(Clone, Default, Eq, PartialEq)]
+pub struct ConfigDocument {
+    scalars: BTreeMap<String, String>,
+    string_arrays: BTreeMap<String, Vec<String>>,
+}
+
+impl fmt::Debug for ConfigDocument {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ConfigDocument")
+            .field("entries", &self.len())
+            .field("values", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl ConfigDocument {
+    /// Creates an empty configuration document.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates a configuration document from scalar values.
+    pub fn from_scalars(values: BTreeMap<String, String>) -> Self {
+        Self {
+            scalars: values,
+            string_arrays: BTreeMap::new(),
+        }
+    }
+
+    /// Inserts a scalar, replacing any value at the same key.
+    pub fn insert_scalar(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        let key = key.into();
+        self.string_arrays.remove(&key);
+        self.scalars.insert(key, value.into());
+    }
+
+    /// Inserts a string array, replacing any value at the same key.
+    pub fn insert_string_array<I, V>(&mut self, key: impl Into<String>, values: I)
+    where
+        I: IntoIterator<Item = V>,
+        V: Into<String>,
+    {
+        let key = key.into();
+        self.scalars.remove(&key);
+        self.string_arrays
+            .insert(key, values.into_iter().map(Into::into).collect());
+    }
+
+    /// Returns the number of configuration entries across all value shapes.
+    pub fn len(&self) -> usize {
+        self.scalars.len() + self.string_arrays.len()
+    }
+
+    /// Returns whether the document has no configuration entries.
+    pub fn is_empty(&self) -> bool {
+        self.scalars.is_empty() && self.string_arrays.is_empty()
+    }
+}
 
 /// A source of string configuration values.
 pub trait ConfigSource: Send + Sync {
     /// Returns the source name used for attribution.
     fn name(&self) -> &str;
 
+    /// Returns the base directory for relative path values from this source.
+    fn relative_path_base(&self) -> Option<&Path> {
+        None
+    }
+
     /// Loads the source's configuration values.
     #[allow(clippy::result_large_err)]
     fn load(&self) -> Result<BTreeMap<String, String>>;
+
+    /// Loads all supported configuration value shapes.
+    #[allow(clippy::result_large_err)]
+    fn load_document(&self) -> Result<ConfigDocument> {
+        self.load().map(ConfigDocument::from_scalars)
+    }
 }
 
 /// A fixed, named set of configuration values.
 #[derive(Clone, Eq, PartialEq)]
 pub struct MapSource {
     name: String,
-    values: BTreeMap<String, String>,
+    scalars: BTreeMap<String, String>,
+    string_arrays: BTreeMap<String, Vec<String>>,
 }
 
 impl fmt::Debug for MapSource {
@@ -29,7 +125,7 @@ impl fmt::Debug for MapSource {
         formatter
             .debug_struct("MapSource")
             .field("name", &self.name)
-            .field("entries", &self.values.len())
+            .field("entries", &(self.scalars.len() + self.string_arrays.len()))
             .field("values", &"[REDACTED]")
             .finish()
     }
@@ -45,11 +141,25 @@ impl MapSource {
     {
         Self {
             name: name.into(),
-            values: values
+            scalars: values
                 .into_iter()
                 .map(|(key, value)| (key.into(), value.into()))
                 .collect(),
+            string_arrays: BTreeMap::new(),
         }
+    }
+
+    /// Adds a string array, replacing any scalar at the same key.
+    pub fn with_string_array<I, V>(mut self, key: impl Into<String>, values: I) -> Self
+    where
+        I: IntoIterator<Item = V>,
+        V: Into<String>,
+    {
+        let key = key.into();
+        self.scalars.remove(&key);
+        self.string_arrays
+            .insert(key, values.into_iter().map(Into::into).collect());
+        self
     }
 }
 
@@ -59,7 +169,14 @@ impl ConfigSource for MapSource {
     }
 
     fn load(&self) -> Result<BTreeMap<String, String>> {
-        Ok(self.values.clone())
+        Ok(self.scalars.clone())
+    }
+
+    fn load_document(&self) -> Result<ConfigDocument> {
+        Ok(ConfigDocument {
+            scalars: self.scalars.clone(),
+            string_arrays: self.string_arrays.clone(),
+        })
     }
 }
 
@@ -144,7 +261,21 @@ impl ConfigSource for TomlSource {
         &self.name
     }
 
+    fn relative_path_base(&self) -> Option<&Path> {
+        self.path.parent()
+    }
+
     fn load(&self) -> Result<BTreeMap<String, String>> {
+        Ok(self.parse(TomlArrayMode::Reject)?.scalars)
+    }
+
+    fn load_document(&self) -> Result<ConfigDocument> {
+        self.parse(TomlArrayMode::StringOnly)
+    }
+}
+
+impl TomlSource {
+    fn parse(&self, array_mode: TomlArrayMode) -> Result<ConfigDocument> {
         let input = std::fs::read_to_string(&self.path).map_err(|source| {
             Error::with_source(
                 Diagnostic::new(
@@ -156,33 +287,48 @@ impl ConfigSource for TomlSource {
                 source,
             )
         })?;
-        let parsed = input.parse::<toml::Value>().map_err(|_| {
-            Error::new(
-                Diagnostic::new(
-                    MADS020,
-                    "configuration file could not be parsed",
-                    format!("configuration file `{}` is not valid TOML", self.name),
-                )
-                .with_subject(&self.name),
-            )
-        })?;
-        let document = input.parse::<toml_edit::DocumentMut>().map_err(|_| {
-            Error::new(
-                Diagnostic::new(
-                    MADS020,
-                    "configuration file could not be parsed",
-                    format!("configuration file `{}` is not valid TOML", self.name),
-                )
-                .with_subject(&self.name),
-            )
-        })?;
-        if let Some(key) = inline_table_key("", document.as_table()) {
-            return Err(unsupported_value(&key, "inline table"));
-        }
-        let mut output = BTreeMap::new();
-        flatten_toml("", parsed, &mut output)?;
-        Ok(output)
+        parse_toml_document(&input, &self.name, array_mode)
     }
+}
+
+#[derive(Clone, Copy)]
+enum TomlArrayMode {
+    Reject,
+    StringOnly,
+}
+
+fn parse_toml_document(
+    input: &str,
+    source_name: &str,
+    array_mode: TomlArrayMode,
+) -> Result<ConfigDocument> {
+    let parsed = input.parse::<toml::Value>().map_err(|_| {
+        Error::new(
+            Diagnostic::new(
+                MADS020,
+                "configuration file could not be parsed",
+                format!("configuration file `{source_name}` is not valid TOML"),
+            )
+            .with_subject(source_name),
+        )
+    })?;
+    let syntax = input.parse::<toml_edit::DocumentMut>().map_err(|_| {
+        Error::new(
+            Diagnostic::new(
+                MADS020,
+                "configuration file could not be parsed",
+                format!("configuration file `{source_name}` is not valid TOML"),
+            )
+            .with_subject(source_name),
+        )
+    })?;
+    if let Some(key) = inline_table_key("", syntax.as_table()) {
+        return Err(unsupported_value(&key, "inline table"));
+    }
+
+    let mut output = ConfigDocument::new();
+    flatten_toml("", parsed, &mut output, array_mode)?;
+    Ok(output)
 }
 
 fn inline_table_key(prefix: &str, table: &toml_edit::Table) -> Option<String> {
@@ -210,7 +356,8 @@ fn inline_table_key(prefix: &str, table: &toml_edit::Table) -> Option<String> {
 fn flatten_toml(
     prefix: &str,
     value: toml::Value,
-    output: &mut BTreeMap<String, String>,
+    output: &mut ConfigDocument,
+    array_mode: TomlArrayMode,
 ) -> Result<()> {
     match value {
         toml::Value::Table(table) => {
@@ -223,7 +370,7 @@ fn flatten_toml(
                 } else {
                     format!("{prefix}.{segment}")
                 };
-                flatten_toml(&key, value, output)?;
+                flatten_toml(&key, value, output, array_mode)?;
             }
             Ok(())
         }
@@ -231,16 +378,29 @@ fn flatten_toml(
         toml::Value::Integer(value) => insert_scalar(prefix, value.to_string(), output),
         toml::Value::Float(value) => insert_scalar(prefix, value.to_string(), output),
         toml::Value::Boolean(value) => insert_scalar(prefix, value.to_string(), output),
-        toml::Value::Array(_) => Err(unsupported_value(prefix, "array")),
+        toml::Value::Array(values) => match array_mode {
+            TomlArrayMode::Reject => Err(unsupported_value(prefix, "array")),
+            TomlArrayMode::StringOnly => {
+                let values = values
+                    .into_iter()
+                    .map(|value| match value {
+                        toml::Value::String(value) => Ok(value),
+                        _ => Err(unsupported_value(prefix, "non-string array")),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                output.insert_string_array(prefix, values);
+                Ok(())
+            }
+        },
         toml::Value::Datetime(_) => Err(unsupported_value(prefix, "datetime")),
     }
 }
 
-fn insert_scalar(key: &str, value: String, output: &mut BTreeMap<String, String>) -> Result<()> {
+fn insert_scalar(key: &str, value: String, output: &mut ConfigDocument) -> Result<()> {
     if key.is_empty() {
         return Err(unsupported_value(key, "root scalar"));
     }
-    output.insert(key.to_owned(), value);
+    output.insert_scalar(key, value);
     Ok(())
 }
 
@@ -288,7 +448,29 @@ impl DotenvSource {
 #[derive(Clone, Eq, PartialEq)]
 pub struct ConfigValue {
     value: String,
-    source: String,
+    origin: ConfigOrigin,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+struct ConfigStringArrayValue {
+    value: Vec<String>,
+    origin: ConfigOrigin,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ConfigOrigin {
+    label: String,
+    relative_path_base: Option<PathBuf>,
+}
+
+impl fmt::Debug for ConfigStringArrayValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ConfigStringArrayValue")
+            .field("elements", &self.value.len())
+            .field("source", &self.origin.label)
+            .finish()
+    }
 }
 
 impl fmt::Debug for ConfigValue {
@@ -296,7 +478,7 @@ impl fmt::Debug for ConfigValue {
         formatter
             .debug_struct("ConfigValue")
             .field("value", &"[REDACTED]")
-            .field("source", &self.source)
+            .field("source", &self.origin.label)
             .finish()
     }
 }
@@ -309,7 +491,7 @@ impl ConfigValue {
 
     /// Returns the name of the source that supplied the value.
     pub fn source(&self) -> &str {
-        &self.source
+        &self.origin.label
     }
 }
 
@@ -317,6 +499,7 @@ impl ConfigValue {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Config {
     values: BTreeMap<String, ConfigValue>,
+    string_arrays: BTreeMap<String, ConfigStringArrayValue>,
 }
 
 impl Config {
@@ -340,14 +523,50 @@ impl Config {
         self.values.iter().map(|(key, value)| (key.as_str(), value))
     }
 
+    /// Returns a string-array configuration value by key.
+    pub fn get_string_array(&self, key: &str) -> Option<&[String]> {
+        self.string_arrays
+            .get(key)
+            .map(|value| value.value.as_slice())
+    }
+
+    /// Returns the source name for a string-array configuration key.
+    pub fn source_of_string_array(&self, key: &str) -> Option<&str> {
+        self.string_arrays
+            .get(key)
+            .map(|value| value.origin.label.as_str())
+    }
+
+    /// Resolves a scalar path value relative to the source that supplied it.
+    pub fn resolve_path(&self, key: &str) -> Option<PathBuf> {
+        let value = self.values.get(key)?;
+        let configured = Path::new(&value.value);
+        if configured.is_absolute() {
+            return Some(configured.to_path_buf());
+        }
+
+        let base = match &value.origin.relative_path_base {
+            Some(base) => base.clone(),
+            None => std::env::current_dir().ok()?,
+        };
+        Some(base.join(configured))
+    }
+
+    /// Iterates over string-array keys and values in lexical key order.
+    pub fn iter_string_arrays(&self) -> impl Iterator<Item = (&str, &[String])> {
+        self.string_arrays
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.value.as_slice()))
+    }
+
     /// Returns the number of configuration values.
     pub fn len(&self) -> usize {
-        self.values.len()
+        self.values.len() + self.string_arrays.len()
     }
 
     /// Returns whether the configuration has no values.
     pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
+        self.values.is_empty() && self.string_arrays.is_empty()
     }
 }
 
@@ -412,35 +631,70 @@ impl ConfigBuilder {
         }
 
         let mut values = BTreeMap::new();
+        let mut string_arrays = BTreeMap::new();
         for source in self.sources {
-            let source_name = source.name().to_owned();
-            for (key, value) in source.load()? {
+            let origin = ConfigOrigin {
+                label: source.name().to_owned(),
+                relative_path_base: source.relative_path_base().map(Path::to_path_buf),
+            };
+            let document = source.load_document()?;
+            for (key, value) in document.scalars {
+                string_arrays.remove(&key);
                 values.insert(
                     key,
                     ConfigValue {
                         value,
-                        source: source_name.clone(),
+                        origin: origin.clone(),
+                    },
+                );
+            }
+            for (key, value) in document.string_arrays {
+                values.remove(&key);
+                string_arrays.insert(
+                    key,
+                    ConfigStringArrayValue {
+                        value,
+                        origin: origin.clone(),
                     },
                 );
             }
         }
         for (key, value) in &mut values {
             if let Some(variable) = exact_variable_name(&value.value) {
-                let resolved = variables.get(variable).ok_or_else(|| {
-                    Error::new(
-                        Diagnostic::new(
-                            MADS020,
-                            "configuration variable is missing",
-                            format!("configuration variable `{variable}` is not defined"),
-                        )
-                        .with_subject(key),
-                    )
-                })?;
+                let resolved = resolve_variable(key, variable, &variables)?;
                 value.value.clone_from(resolved);
             }
         }
-        Ok(Config { values })
+        for (key, value) in &mut string_arrays {
+            for element in &mut value.value {
+                if let Some(variable) = exact_variable_name(element) {
+                    let resolved = resolve_variable(key, variable, &variables)?;
+                    element.clone_from(resolved);
+                }
+            }
+        }
+        Ok(Config {
+            values,
+            string_arrays,
+        })
     }
+}
+
+fn resolve_variable<'a>(
+    key: &str,
+    variable: &str,
+    variables: &'a BTreeMap<String, String>,
+) -> Result<&'a String> {
+    variables.get(variable).ok_or_else(|| {
+        Error::new(
+            Diagnostic::new(
+                MADS020,
+                "configuration variable is missing",
+                format!("configuration variable `{variable}` is not defined"),
+            )
+            .with_subject(key),
+        )
+    })
 }
 
 fn dotenv_open_error(source: &DotenvSource, error: dotenvy::Error) -> Error {

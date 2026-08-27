@@ -1,0 +1,5 @@
+error: Passport strategy names must be non-empty lowercase ASCII `[a-z0-9._-]`
+ --> tests/ui-passport/fail/strategy_name.rs:5:28
+  |
+5 | #[passport_strategy(name = "JWT")]
+  |                            ^^^^^

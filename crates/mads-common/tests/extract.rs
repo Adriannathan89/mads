@@ -1,5 +1,7 @@
 //! Public extractor surface tests.
 
+#![cfg(feature = "http")]
+
 use mads_common::{Header, Json, Path, Query, Request, axum, headers};
 
 #[test]

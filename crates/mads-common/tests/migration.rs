@@ -1,5 +1,7 @@
 //! Offline migration API contract tests.
 
+#![cfg(feature = "database")]
+
 use mads_common::{Database, MigrationReport, MigrationStatus};
 
 const MIGRATIONS: diesel_migrations::EmbeddedMigrations =

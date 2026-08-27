@@ -1,0 +1,5 @@
+error: guard strategy names must be non-empty lowercase ASCII `[a-z0-9._-]`
+ --> tests/ui-passport/fail/guard_invalid_strategy.rs:6:20
+  |
+6 | #[guard(strategy = "JWT", principal = UserPrincipal)]
+  |                    ^^^^^

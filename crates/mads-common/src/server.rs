@@ -156,6 +156,7 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use std::any::TypeId;
+    #[cfg(feature = "database")]
     use std::error::Error as StdError;
     use std::io;
     use std::net::{Ipv4Addr, SocketAddr};
@@ -163,17 +164,20 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use mads_core::{
-        ApplicationContext, AutoConfigurationStatus, ConfigBuilder, Diagnostic, Error,
-        LifecycleFuture, LifecycleHook, MADS011, MADS020, Mads, MapSource, SourceLocation,
+        ApplicationContext, Diagnostic, Error, LifecycleFuture, LifecycleHook, MADS011, MADS020,
+        Mads, SourceLocation,
     };
+    #[cfg(feature = "database")]
+    use mads_core::{AutoConfigurationStatus, ConfigBuilder, MapSource};
+    #[cfg(feature = "database")]
     use tokio::net::TcpListener;
 
     use super::{HttpRuntimeError, serve_with};
-    use crate::{
-        ControllerRouteDescriptor, Database, DatabaseConfig, DatabaseErrorKind, HttpMethod,
-        MADS100, MadsBuilderDatabaseExt, RouteContractDescriptor, RouteDescriptor,
-    };
+    use crate::{ControllerRouteDescriptor, HttpMethod, RouteContractDescriptor, RouteDescriptor};
+    #[cfg(feature = "database")]
+    use crate::{Database, DatabaseConfig, DatabaseErrorKind, MADS100, MadsBuilderDatabaseExt};
 
+    #[cfg(feature = "database")]
     const FAILING_MIGRATIONS: diesel_migrations::EmbeddedMigrations =
         diesel_migrations::embed_migrations!("tests/fixtures/failing_migrations");
 
@@ -184,16 +188,24 @@ mod tests {
     struct PreflightController;
     struct PreflightPermit;
 
-    #[mads_core::repository]
-    struct AutoDatabaseRepository {
-        database: Database,
-    }
+    #[cfg(feature = "database")]
+    mod auto_database_repository {
+        use super::*;
 
-    impl AutoDatabaseRepository {
-        fn database(&self) -> &Database {
-            &self.database
+        #[mads_core::repository]
+        pub(super) struct AutoDatabaseRepository {
+            database: Database,
+        }
+
+        impl AutoDatabaseRepository {
+            pub(super) fn database(&self) -> &Database {
+                &self.database
+            }
         }
     }
+
+    #[cfg(feature = "database")]
+    use auto_database_repository::AutoDatabaseRepository;
 
     fn preflight_controller_type_id() -> TypeId {
         TypeId::of::<PreflightController>()
@@ -269,6 +281,7 @@ mod tests {
         fail_shutdown: bool,
     ) -> Mads {
         let mut builder = Mads::builder();
+        #[cfg(feature = "database")]
         builder
             .provide(
                 Database::from_config(
@@ -313,6 +326,7 @@ mod tests {
         assert!(events.lock().unwrap().is_empty());
     }
 
+    #[cfg(feature = "database")]
     #[tokio::test]
     async fn database_start_failure_prevents_listener_binding() {
         let _guard = TEST_LOCK.lock().await;
@@ -358,6 +372,7 @@ mod tests {
         assert!(!output.contains(database_url));
     }
 
+    #[cfg(feature = "database")]
     #[tokio::test]
     #[ignore = "requires PostgreSQL through MADS_TEST_DATABASE_URL"]
     async fn database_migration_failure_prevents_listener_binding() {
@@ -430,6 +445,7 @@ mod tests {
         assert!(!output.contains(&database_url));
     }
 
+    #[cfg(feature = "database")]
     #[tokio::test]
     async fn invalid_routes_prevent_automatic_database_checkout_and_binding() {
         let _guard = TEST_LOCK.lock().await;

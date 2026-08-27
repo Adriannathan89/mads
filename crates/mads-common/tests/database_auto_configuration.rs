@@ -1,5 +1,7 @@
 //! Offline behavior for the official Diesel auto-configuration.
 
+#![cfg(feature = "database")]
+
 use mads_common::{Database, DatabaseConfig, MADS101, MadsBuilderDatabaseExt};
 use mads_core::{
     AutoConfigurationStatus, Config, ConfigBuilder, DotenvSource, MADS003, Mads, MapSource,

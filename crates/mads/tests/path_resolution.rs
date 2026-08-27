@@ -65,3 +65,30 @@ fn conditional_routes_compile_and_register_in_both_feature_states() {
         );
     }
 }
+
+#[test]
+fn passport_without_cookies_reports_a_focused_cookie_source_error() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let target_dir = manifest_dir.join("../../target/macro-consumers");
+    let manifest = manifest_dir.join("tests/consumers/passport_without_cookies/Cargo.toml");
+    let output = Command::new(env!("CARGO"))
+        .args(["check", "--offline", "--manifest-path"])
+        .arg(&manifest)
+        .env("CARGO_TARGET_DIR", target_dir)
+        .output()
+        .expect("the nested Cargo check should start");
+
+    assert!(
+        !output.status.success(),
+        "cookie-source consumer unexpectedly compiled\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("cookie token sources require the `cookies` feature"),
+        "cookie-source consumer did not report the focused feature diagnostic\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}

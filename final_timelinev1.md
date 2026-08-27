@@ -25,7 +25,9 @@ Target utama v1:
   ↓
 0.5.0  Auto Configuration
   ↓
-0.5.5  HTTP Browser + Authentication Features
+0.5.5  Configuration Arrays + Cookies + Passport/JWT
+  ↓
+0.5.6  CORS + HTTP Auto-Binding
   ↓
 0.6.0  Modules + Visibility
   ↓
@@ -399,122 +401,128 @@ tidak pernah resolved configuration values atau credentials.
 
 ---
 
-# v0.5.5 — HTTP Auto-Binding, Browser, and Authentication Features
+# v0.5.5 — Configuration Arrays, Cookies, Passport, and JWT
 
 ## Objective
 
-Melengkapi HTTP runtime untuk browser application dengan CORS, cookie parsing,
-dan JWT authentication yang dapat diaktifkan melalui feature flags tanpa
-membuat `mads-core` bergantung pada HTTP atau cryptography.
+Menambahkan konfigurasi string-array, cookie request/response, JWT access dan
+refresh profiles, managed Passport strategies, typed principals, dan guard
+policies tanpa membuat `mads-core` bergantung pada HTTP atau cryptography.
 
-### HTTP Auto-Binding
+### Explicit Configuration and String Arrays
 
-Host/port configuration and automatic listener binding deferred from the v0.3
-HTTP runtime belong to this milestone, not the v0.5.0 auto-configuration
-engine. Before implementation, the v0.5.5 design must explicitly resolve its
-configuration keys and defaults, source precedence, activation conditions,
-explicit-binding back-off behavior, diagnostics, and lifecycle/bind ordering.
-This timeline placement intentionally does not decide those contracts.
+`ConfigBuilder` tetap explicit. Dotenv menyediakan interpolation values;
+process variables override dotenv values saat `${NAME}` di-resolve. Ordinary
+sources merge dari awal ke akhir, sehingga source terakhir menang. Scalar atau
+string array yang lebih akhir mengganti value shape sebelumnya secara penuh.
+TOML dan programmatic sources mendukung string arrays; `EnvSource` tetap
+scalar-only.
 
-### First-Class Browser CORS
+### Cookies
 
-Add an opt-in CORS configuration to the HTTP runtime. The default development
-profile must support the common local frontend origin:
+Feature `cookies` menyediakan strict `CookieJar`, parsing request cookie,
+checked `Set-Cookie` composition, `Path`, `Domain`, `Max-Age`, `Expires`,
+`HttpOnly`, `Secure`, dan `SameSite`. Ordinary malformed cookie extraction
+menghasilkan `400`; cookie authentication yang missing, malformed, atau
+duplicated menghasilkan generic `401`. Cookie-based JWT tidak menyediakan CSRF
+protection.
 
-```text
-http://localhost:5173
-```
+### JWT Service and Key Profiles
 
-Target API shape:
+`[passport] secret = "${JWT_SECRET}"` memilih HS256 dengan minimum 32 bytes.
+Allowlist mendukung HS256/384/512, RS256/384/512, dan ES256/384. Named key rings
+memiliki satu active signing key dan retained verification keys selected by
+`kid`; setiap key terikat pada tepat satu algorithm. Token header tidak pernah
+memperluas configured allowlist.
 
-```rust
-let cors = CorsConfig::new()
-    .allow_origin("http://localhost:5173")
-    .allow_methods([GET, POST, PUT, PATCH, DELETE])
-    .allow_headers([CONTENT_TYPE, AUTHORIZATION])
-    .allow_credentials(true);
+`JwtService` menyediakan typed signing/verification dan explicit untrusted
+decode APIs. Access dan refresh profiles mempunyai mutually exclusive `typ`
+header dan `token_use` claim. `JwtSignOptions::access`/`refresh` dan
+`JwtValidation::access`/`refresh` selalu meminta caller memilih kind.
 
-Mads::builder()
-    .cors(cors)
-    .build()
-    .await?;
-```
+### Managed Passport Strategies and Principals
 
-The implementation must cover configured origins, methods, request headers,
-exposed response headers, credentialed requests, OPTIONS preflight responses,
-`Access-Control-Max-Age`, and production-safe validation. Wildcard origins
-must never be combined with credentials. CORS must apply to generated MADS
-routes and native Axum routes while remaining composable with Axum/Tower
-layers.
+Custom strategy harus implement `PassportStrategy`, memakai
+`#[passport_strategy]`, dan concrete type-nya harus managed provider. Framework
+memverifikasi signature, registered claims, serta token kind sebelum strategy
+validation. `jwt` adalah built-in access strategy; satu custom `jwt` override
+built-in. Duplicate custom names ambiguous. `jwt-refresh` adalah
+application-defined refresh strategy, bukan built-in.
 
-### Cookie Parser and Response Support
+Strategy menghasilkan typed application principal seperti `UserPrincipal`.
+`PassportPrincipal` mengekspos role/permission membership dan dapat di-derive
+dengan `#[roles]` serta `#[permissions]`. Guarded handler mengekstrak
+`Authenticated<P>` dan `VerifiedToken<C>`.
 
-Provide an HTTP-facing cookie API for reading and writing browser cookies:
-
-```rust
-async fn profile(cookies: CookieJar) -> HttpResult<Json<Profile>> {
-    let session = cookies.get("session");
-    // resolve the session and return the profile
-    # let _ = session;
-    # todo!()
-}
-```
-
-The cookie surface must support parsing request `Cookie` headers, emitting
-`Set-Cookie` headers, and configuring `Path`, `Domain`, `Max-Age`, `Expires`,
-`HttpOnly`, `Secure`, and `SameSite`. Cookie values must be validated and
-secrets must not appear in diagnostics or logs. The API should compose with
-Axum responses and support credentialed browser requests when CORS allows them.
-
-### JWT Service and Algorithm Features
-
-Add an application-scoped `JwtService` with explicit encode/decode and claims
-validation APIs. Algorithm selection must be an allowlist configured by the
-application, never inferred from an untrusted token header.
-
-Initial algorithm targets:
+### Guards
 
 ```text
-HS256 / HS384 / HS512  (shared-secret deployments)
-RS256 / RS384 / RS512  (RSA key deployments)
-ES256 / ES384           (elliptic-curve key deployments)
+#[guard] on #[routes] trait       inherited policy
+#[guard] on route method         supplied fields replace inherited fields
+#[guard(skip)]                    sole inherited-policy opt-out
+source = bearer                  default, one source only
+source = cookie("literal-name")  requires cookies
 ```
 
-The service must support expiration, not-before, issuer, audience, subject,
-clock-skew policy, key rotation, and actionable validation errors. It must
-reject algorithm confusion, invalid signatures, expired tokens, and malformed
-claims without exposing key material.
+Roles, permissions, dan synchronous `fn(&Principal) -> bool` predicates adalah
+separate AND clauses. `any` dan `all` mengontrol matching di dalam satu role
+atau permission clause. Authentication/strategy rejection menghasilkan generic
+`401` plus `WWW-Authenticate: Bearer`, authorization failure `403`, dan
+operational failure `500`.
 
-### HTTP Feature Support
+Native Axum `PassportGuard<P>` adalah runtime escape hatch memakai pipeline yang
+sama. Karena tidak masuk static MADS guard catalog, native guards tidak dapat
+mengaktifkan JWT auto-configuration; application context harus sudah memiliki
+`JwtService`, atau guard build gagal dengan `MADS131`.
 
-Expose independent feature flags so applications can opt into only the HTTP
-capabilities they use:
+### Explicitly Out of Scope
 
-```text
-http / common runtime
-cors
-cookies
-jwt
-```
-
-Feature combinations must preserve the core-only dependency boundary. CORS,
-cookie, and JWT integrations belong in `mads-common`/`mads-extra` or dedicated
-integration crates; `mads-core` remains free of Axum, HTTP, cookie, and JWT
-dependencies.
+v0.5.5 tidak mengimplementasikan login/credential validation, built-in refresh
+endpoint, refresh persistence/rotation/revocation/reuse detection, password
+hashing, CSRF, CORS, HTTP auto-binding, remote JWKS, JWE, atau module scoping.
 
 ### Exit Criteria
 
-- the separately approved HTTP auto-binding contract is implemented and
-  covered by configuration, override, diagnostic, and runtime tests;
-- browser clients can call the API from `http://localhost:5173` with tested
-  preflight and credentialed requests;
-- cookie parsing and `Set-Cookie` response behavior are covered by integration
-  tests;
-- `JwtService` validates explicitly allowed algorithms and standard claims;
-- key rotation and invalid-token diagnostics are tested without leaking secrets;
-- HTTP, CORS, cookie, and JWT features compile independently and in supported
-  combinations;
-- native Axum middleware and response composition remain available.
+- string-array merge/interpolation/source attribution is deterministic;
+- all eight algorithms and active/previous key rotation are verified offline;
+- access and refresh profiles reject cross-kind substitution;
+- custom/built-in strategy resolution and principal types validate preflight;
+- inherited/overridden/skipped Bearer and cookie guards are covered;
+- cookies compose with native Axum requests and responses;
+- secrets, keys, tokens, claims, principals, and cookie values remain redacted;
+- core-only/JWT-only/cookie/Passport feature boundaries remain intact.
+
+---
+
+# v0.5.6 — CORS and HTTP Auto-Binding
+
+## Objective
+
+Melengkapi browser delivery dan listener configuration setelah authentication
+contracts v0.5.5 stabil.
+
+### CORS
+
+Add opt-in origin, method, request/exposed header, credentials, preflight, dan
+max-age configuration. Wildcard origin tidak boleh digabung credentials. CORS
+harus berlaku konsisten untuk generated MADS routes dan native Axum routes serta
+tetap composable dengan Tower.
+
+### HTTP Auto-Binding
+
+Tentukan host/port keys dan defaults, explicit-bind back-off, activation
+conditions, redacted diagnostics, serta lifecycle/bind ordering. Existing
+`serve(application, "127.0.0.1:3000")` tetap menjadi explicit escape hatch.
+
+### Exit Criteria
+
+```text
+configured browser origins and preflight behavior tested
+credentialed CORS validation is production-safe
+auto-binding activation and explicit-binding back-off deterministic
+bind failures preserve lifecycle rollback ordering
+native Axum composition remains available
+```
 
 ---
 
@@ -523,6 +531,12 @@ dependencies.
 ## Objective
 
 Membuat modules sebagai explicit architecture boundary tanpa mengubahnya menjadi DI manifest.
+
+Module reachability dan provider export eligibility diterapkan secara additive
+di atas provider/route/Passport strategy descriptors v0.5.5. Hanya descriptor
+dari owning module yang reachable dari root dan legally exported yang eligible
+untuk strategy name resolution; v0.5.5 complete-catalog behavior tidak diubah
+secara retroaktif.
 
 ### Implement
 
@@ -558,6 +572,7 @@ provider relationship = inferred
 - root application graph dapat dimulai dari `AppModule`;
 - dependency lintas module mengikuti visibility/export rules;
 - route prefix module bekerja;
+- Passport strategy selection ignores unreachable or non-exported providers;
 - module cycle diagnostic readable;
 - services/routes tidak perlu didaftarkan ulang secara manual.
 
