@@ -141,6 +141,7 @@ impl MadsBuilder {
                 descriptor.identifier(),
                 &self.config,
                 &self.auto_configuration_inputs,
+                module_graph.as_ref(),
             );
             let contribution = (descriptor.applier())(&context)?;
             let (provider, hooks) = contribution.into_parts();
@@ -200,6 +201,7 @@ impl MadsBuilder {
             &self.satisfied,
             &self.config,
             &self.auto_configuration_inputs,
+            Some(&module_graph),
         );
         let mut satisfied = self.satisfied.clone();
         satisfied.extend(auto_configuration.virtual_satisfied);
@@ -235,6 +237,7 @@ impl MadsBuilder {
             &self.satisfied,
             &self.config,
             &self.auto_configuration_inputs,
+            None,
         );
         let mut satisfied = self.satisfied.clone();
         satisfied.extend(auto_configuration.virtual_satisfied);

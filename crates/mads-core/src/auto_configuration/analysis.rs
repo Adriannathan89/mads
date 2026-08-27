@@ -146,6 +146,7 @@ mod tests {
             &[],
             &Config::empty(),
             &AutoConfigurationInputs::default(),
+            None,
         );
         assert_eq!(*EVALUATIONS.lock().unwrap(), ["alpha", "zeta"]);
         assert_eq!(
@@ -167,6 +168,7 @@ mod tests {
             &[],
             &Config::empty(),
             &AutoConfigurationInputs::default(),
+            None,
         );
         assert_eq!(EVALUATION_COUNT.load(Ordering::SeqCst), 0);
         assert_eq!(analysis.diagnostics[0].code(), MADS007);
@@ -188,6 +190,7 @@ mod tests {
             &[],
             &Config::empty(),
             &AutoConfigurationInputs::default(),
+            None,
         );
         assert_eq!(analysis.diagnostics[0].code(), MADS007);
         assert!(analysis.selected.is_empty());
@@ -208,6 +211,7 @@ mod tests {
             &satisfied,
             &Config::empty(),
             &AutoConfigurationInputs::default(),
+            None,
         );
         assert_eq!(
             analysis.reports[0].status(),
@@ -226,6 +230,7 @@ mod tests {
             &[],
             &Config::empty(),
             &AutoConfigurationInputs::default(),
+            None,
         );
         assert_eq!(
             analysis.reports[0].status(),
@@ -246,6 +251,7 @@ mod tests {
             &[],
             &Config::empty(),
             &AutoConfigurationInputs::default(),
+            None,
         );
         assert_eq!(
             analysis.reports[0].status(),
@@ -264,6 +270,7 @@ mod tests {
             &[],
             &Config::empty(),
             &AutoConfigurationInputs::default(),
+            None,
         );
         assert_eq!(
             analysis.reports[0].status(),
@@ -401,7 +408,7 @@ use std::collections::HashSet;
 use crate::graph::SatisfiedProvider;
 use crate::{
     AutoConfigurationReasonCode, AutoConfigurationReport, AutoConfigurationStatus, Config,
-    Diagnostic, Error, MADS007, ProviderDescriptor,
+    Diagnostic, Error, MADS007, ModuleGraph, ProviderDescriptor,
 };
 
 use super::{
@@ -425,6 +432,7 @@ pub(crate) fn analyze_parts(
     satisfied: &[SatisfiedProvider],
     config: &Config,
     inputs: &AutoConfigurationInputs,
+    module_graph: Option<&ModuleGraph>,
 ) -> AutoConfigurationAnalysis {
     let mut descriptors = descriptors.to_vec();
     descriptors.sort_by(|left, right| {
@@ -467,6 +475,7 @@ pub(crate) fn analyze_parts(
                 providers,
                 satisfied,
                 inputs,
+                module_graph,
             );
             let evaluation = (descriptor.evaluator())(&context);
             decisions.push(Decision {
