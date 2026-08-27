@@ -2,7 +2,7 @@
 
 use std::any::TypeId;
 
-use mads_core::{Mads, Result};
+use mads_core::{Catalog, Mads, ModuleDescriptor, ModuleGraph, Result};
 
 use crate::{ControllerRouteDescriptor, HttpMethod, RouteCatalog, RouteDescriptor};
 
@@ -132,16 +132,16 @@ impl HttpApplicationScope {
             .collect()
     }
 
-    fn rooted_controllers(graph: &mads_core::ModuleGraph) -> Vec<ScopedController> {
+    fn rooted_controllers(graph: &ModuleGraph) -> Vec<ScopedController> {
         let mut controllers = Vec::new();
 
         for descriptor in RouteCatalog::controllers() {
-            let Some(namespace) = descriptor.namespace() else {
+            let Some(owner) = owner_for_namespace(descriptor.namespace()) else {
                 continue;
             };
-            let Some(owner) = graph.owner_for_namespace(namespace) else {
+            if !is_reachable(graph, owner.type_id()) {
                 continue;
-            };
+            }
             let context_module = Some(owner.type_id());
             let mut selected_routes = Vec::new();
 
@@ -189,10 +189,9 @@ impl HttpApplicationScope {
                         route.guard().map(|guard| {
                             let route_context =
                                 route_context(graph, controller.context_module(), route);
-                            let context_module = guard
-                                .namespace()
-                                .and_then(|namespace| graph.owner_for_namespace(namespace))
-                                .map(mads_core::ModuleNode::type_id)
+                            let context_module = owner_for_namespace(guard.namespace())
+                                .filter(|owner| is_reachable(graph, owner.type_id()))
+                                .map(ModuleDescriptor::type_id)
                                 .or(route_context);
                             ScopedGuard {
                                 guard,
@@ -206,13 +205,39 @@ impl HttpApplicationScope {
 }
 
 fn route_context(
-    graph: &mads_core::ModuleGraph,
+    graph: &ModuleGraph,
     controller_context: Option<TypeId>,
     route: &RouteDescriptor,
 ) -> Option<TypeId> {
-    route
-        .namespace()
-        .and_then(|namespace| graph.owner_for_namespace(namespace))
-        .map(mads_core::ModuleNode::type_id)
-        .or(controller_context)
+    match owner_for_namespace(route.namespace()) {
+        Some(owner) if is_reachable(graph, owner.type_id()) => Some(owner.type_id()),
+        Some(_) => None,
+        None => controller_context,
+    }
+}
+
+fn owner_for_namespace(namespace: Option<&str>) -> Option<&'static ModuleDescriptor> {
+    let namespace = namespace?;
+    Catalog::modules()
+        .into_iter()
+        .filter(|module| {
+            module
+                .namespace()
+                .is_some_and(|owner| namespace_contains(owner, namespace))
+        })
+        .max_by_key(|module| module.namespace().map_or(0, str::len))
+}
+
+fn is_reachable(graph: &ModuleGraph, module: TypeId) -> bool {
+    graph
+        .modules()
+        .iter()
+        .any(|candidate| candidate.type_id() == module)
+}
+
+fn namespace_contains(parent: &str, child: &str) -> bool {
+    child == parent
+        || child
+            .strip_prefix(parent)
+            .is_some_and(|suffix| suffix.starts_with("::"))
 }

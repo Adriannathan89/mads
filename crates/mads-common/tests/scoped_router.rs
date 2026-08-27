@@ -113,6 +113,106 @@ mod duplicate_two {
     pub struct DuplicateTwoHttpModule;
 }
 
+mod nested_controller_scope {
+    use super::*;
+
+    pub mod reachable {
+        use super::*;
+
+        #[routes]
+        pub trait ReachableRoutes {
+            #[get("/nested-reachable-controller")]
+            async fn reachable(&self) -> &'static str;
+        }
+
+        #[controller(routes = [ReachableRoutes])]
+        pub struct ReachableController;
+
+        impl ReachableRoutes for ReachableController {
+            async fn reachable(&self) -> &'static str {
+                "reachable"
+            }
+        }
+
+        #[mads_common::core::module]
+        pub struct ReachableModule;
+    }
+
+    pub mod unimported {
+        use super::*;
+
+        #[routes]
+        pub trait UnreachableRoutes {
+            #[get("/nested-unreachable-controller")]
+            async fn unreachable(&self) -> &'static str;
+        }
+
+        #[controller(routes = [UnreachableRoutes])]
+        pub struct UnreachableController;
+
+        impl UnreachableRoutes for UnreachableController {
+            async fn unreachable(&self) -> &'static str {
+                "unreachable"
+            }
+        }
+
+        #[mads_common::core::module]
+        pub struct UnreachableModule;
+    }
+
+    #[mads_common::core::module(imports = [reachable::ReachableModule])]
+    pub struct ParentApplication;
+}
+
+mod nested_route_scope {
+    use super::*;
+
+    pub mod unimported {
+        use super::*;
+
+        #[routes]
+        pub trait UnreachableContract {
+            #[get("/nested-unreachable-contract")]
+            async fn unreachable(&self) -> &'static str;
+        }
+
+        #[mads_common::core::module]
+        pub struct UnreachableContractModule;
+    }
+
+    pub mod reachable {
+        use super::unimported::UnreachableContract;
+        use super::*;
+
+        #[routes]
+        pub trait ReachableRoutes {
+            #[get("/nested-reachable-contract")]
+            async fn reachable(&self) -> &'static str;
+        }
+
+        #[controller(routes = [ReachableRoutes, UnreachableContract])]
+        pub struct ReachableController;
+
+        impl ReachableRoutes for ReachableController {
+            async fn reachable(&self) -> &'static str {
+                "reachable"
+            }
+        }
+
+        impl UnreachableContract for ReachableController {
+            async fn unreachable(&self) -> &'static str {
+                "unreachable"
+            }
+        }
+
+        #[mads_common::core::module]
+        pub struct ReachableModule;
+    }
+
+    #[mads_common::core::module(imports = [reachable::ReachableModule])]
+    pub struct ParentApplication;
+}
+
 mod applications {
     #[mads_common::core::module(imports = [super::users::UserHttpModule])]
     pub struct UsersApplication;
@@ -179,6 +279,44 @@ async fn rooted_router_inherits_unowned_route_contracts_from_selected_controller
     let router = build_router(&application).unwrap();
 
     assert_eq!(request_status(router, "/shared").await, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn rooted_router_excludes_unimported_child_controllers_under_a_reachable_parent_namespace() {
+    let mut builder = Mads::builder();
+    builder
+        .root::<nested_controller_scope::ParentApplication>()
+        .unwrap();
+    let application = builder.build().await.unwrap();
+    let router = build_router(&application).unwrap();
+
+    assert_eq!(
+        request_status(router.clone(), "/nested-reachable-controller").await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        request_status(router, "/nested-unreachable-controller").await,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn rooted_router_excludes_routes_owned_by_unimported_child_modules() {
+    let mut builder = Mads::builder();
+    builder
+        .root::<nested_route_scope::ParentApplication>()
+        .unwrap();
+    let application = builder.build().await.unwrap();
+    let router = build_router(&application).unwrap();
+
+    assert_eq!(
+        request_status(router.clone(), "/nested-reachable-contract").await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        request_status(router, "/nested-unreachable-contract").await,
+        StatusCode::NOT_FOUND
+    );
 }
 
 #[tokio::test]
