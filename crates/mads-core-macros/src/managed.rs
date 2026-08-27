@@ -98,6 +98,14 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
     }
 
     let core = core_path()?;
+    expand_managed_with_core(kind, item, core)
+}
+
+fn expand_managed_with_core(
+    kind: ManagedKind,
+    item: ItemStruct,
+    core: syn::Path,
+) -> syn::Result<TokenStream> {
     let provider_kind = kind.provider_kind(&core);
     let provider_visibility = provider_visibility(&item.vis, &core);
     let ItemStruct {
@@ -217,6 +225,7 @@ fn expand_managed(kind: ManagedKind, item: ItemStruct) -> syn::Result<TokenStrea
                 #constructor_ident,
             )
             .with_runtime_type_name(#runtime_type_name_ident)
+            .with_namespace(module_path!())
         }
     })
 }

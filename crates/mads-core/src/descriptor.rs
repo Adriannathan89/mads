@@ -87,6 +87,7 @@ pub struct ProviderDescriptor {
     type_name: &'static str,
     type_id: fn() -> TypeId,
     runtime_type_name: Option<fn() -> &'static str>,
+    namespace: Option<&'static str>,
     dependencies: &'static [DependencyDescriptor],
     visibility: ProviderVisibility,
     location: SourceLocation,
@@ -109,6 +110,7 @@ impl ProviderDescriptor {
             type_name,
             type_id,
             runtime_type_name: None,
+            namespace: None,
             dependencies,
             visibility,
             location,
@@ -124,6 +126,13 @@ impl ProviderDescriptor {
     #[doc(hidden)]
     pub const fn with_runtime_type_name(mut self, runtime_type_name: fn() -> &'static str) -> Self {
         self.runtime_type_name = Some(runtime_type_name);
+        self
+    }
+
+    /// Attaches the Rust namespace containing this provider declaration.
+    #[must_use]
+    pub const fn with_namespace(mut self, namespace: &'static str) -> Self {
+        self.namespace = Some(namespace);
         self
     }
 
@@ -147,6 +156,11 @@ impl ProviderDescriptor {
     pub fn runtime_type_name(&self) -> Option<&'static str> {
         self.runtime_type_name
             .map(|runtime_type_name| runtime_type_name())
+    }
+
+    /// Returns the Rust namespace containing this provider declaration, when available.
+    pub const fn namespace(&self) -> Option<&'static str> {
+        self.namespace
     }
 
     /// Returns the static dependency descriptors required by this provider.

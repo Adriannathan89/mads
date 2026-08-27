@@ -73,6 +73,10 @@ fn validate_signature(item: &ItemFn) -> syn::Result<()> {
 
 fn expand_provider(item: ItemFn) -> syn::Result<TokenStream> {
     let core = core_path()?;
+    expand_provider_with_core(item, core)
+}
+
+fn expand_provider_with_core(item: ItemFn, core: syn::Path) -> syn::Result<TokenStream> {
     let provider_visibility = provider_visibility(&item.vis, &core);
     let ident = &item.sig.ident;
     let type_id_ident = format_ident!("__mads_type_id_{ident}");
@@ -167,6 +171,7 @@ fn expand_provider(item: ItemFn) -> syn::Result<TokenStream> {
                     __mads_construct,
                 )
                 .with_runtime_type_name(#runtime_type_name_ident)
+                .with_namespace(module_path!())
             }
         };
     })

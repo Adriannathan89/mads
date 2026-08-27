@@ -32,6 +32,24 @@
         }
 
         #[test]
+        fn managed_expansions_record_the_declaration_namespace() {
+            for kind in [ManagedKind::Service, ManagedKind::Repository] {
+                let item: ItemStruct = syn::parse_quote! {
+                    pub struct Managed;
+                };
+                let expanded =
+                    expand_managed_with_core(kind, item, syn::parse_quote!(mads_core))
+                        .expect("managed provider should expand")
+                        .to_string();
+
+                assert!(
+                    expanded.contains(". with_namespace (module_path ! ())"),
+                    "expanded descriptor did not record its namespace: {expanded}"
+                );
+            }
+        }
+
+        #[test]
         fn rejects_managed_provider_shapes_before_path_resolution() {
             for kind in [ManagedKind::Service, ManagedKind::Repository] {
                 let cases = [

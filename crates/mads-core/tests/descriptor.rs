@@ -72,6 +72,23 @@ async fn provider_descriptor_preserves_complete_construction_metadata() {
 }
 
 #[test]
+fn provider_namespace_is_additive_and_optional() {
+    let plain = ProviderDescriptor::new(
+        ProviderKind::Provider,
+        "descriptor::Output",
+        output_type_id,
+        &[],
+        ProviderVisibility::Public,
+        SourceLocation::new("provider.rs", 1, 1),
+        output_constructor,
+    );
+    assert_eq!(plain.namespace(), None);
+
+    let owned = plain.with_namespace("descriptor");
+    assert_eq!(owned.namespace(), Some("descriptor"));
+}
+
+#[test]
 fn module_descriptor_preserves_identity_and_location() {
     let location = SourceLocation::new("module.rs", 56, 78);
     let descriptor = ModuleDescriptor::new("descriptor::Module", output_type_id, location);
