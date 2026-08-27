@@ -15,6 +15,8 @@
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "http")]
+mod cors;
+#[cfg(feature = "http")]
 mod extract;
 #[cfg(feature = "http")]
 mod http_scope;
@@ -182,6 +184,11 @@ pub mod __private {
     /// Enables the private automatic HTTP server mode for integration tests.
     pub fn enable_automatic_server_for_test(builder: &mut mads_core::MadsBuilder) -> bool {
         crate::server_config::enable_automatic_server(builder)
+    }
+
+    /// Enables the private automatic CORS mode for integration tests.
+    pub fn enable_automatic_cors_for_test(builder: &mut mads_core::MadsBuilder) -> bool {
+        crate::cors::enable_automatic_cors(builder)
     }
 
     /// Returns the automatic server binding as an owned address tuple for integration tests.

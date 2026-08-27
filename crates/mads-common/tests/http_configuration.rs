@@ -4,15 +4,22 @@
 #![allow(missing_docs)]
 
 use mads_common::__private::{
-    enable_automatic_server_for_test, load_standard_config_from_for_test,
-    server_binding_address_for_test,
+    enable_automatic_cors_for_test, enable_automatic_server_for_test,
+    load_standard_config_from_for_test, server_binding_address_for_test,
 };
 use mads_common::core::{
-    AutoConfigurationReport, AutoConfigurationStatus, Config, ConfigBuilder, EnvSource, MADS020,
-    Mads, MadsBuilder, MapSource, Module,
+    AutoConfigurationReport, AutoConfigurationStatus, Config, ConfigBuilder, EnvSource,
+    GraphAnalysis, MADS020, Mads, MadsBuilder, MapSource, Module, TomlSource,
 };
 
+const CORS_ID: &str = "mads.common.http.cors";
 const SERVER_ID: &str = "mads.common.http.server";
+
+#[derive(Clone, Copy)]
+enum CorsValue {
+    Scalar(&'static str, &'static str),
+    StringArray(&'static str, &'static [&'static str]),
+}
 
 mod routed {
     #[mads_common::routes]
@@ -46,6 +53,48 @@ fn config(values: impl IntoIterator<Item = (&'static str, &'static str)>) -> Con
         .unwrap()
 }
 
+fn cors_config(values: impl IntoIterator<Item = CorsValue>) -> Config {
+    let mut builder = ConfigBuilder::new();
+    for value in values {
+        builder = match value {
+            CorsValue::Scalar(key, value) => builder.source(MapSource::new("test", [(key, value)])),
+            CorsValue::StringArray(key, values) => builder.source(
+                MapSource::new("test", std::iter::empty::<(&str, &str)>())
+                    .with_string_array(key, values.iter().copied()),
+            ),
+        };
+    }
+    builder.build().unwrap()
+}
+
+fn cors_analysis(config: Config) -> GraphAnalysis {
+    Mads::builder_with_config(config).analyze()
+}
+
+fn cors_report<'a>(reports: &'a [AutoConfigurationReport]) -> &'a AutoConfigurationReport {
+    reports
+        .iter()
+        .find(|report| report.identifier() == CORS_ID)
+        .expect("the CORS auto-configuration must be registered")
+}
+
+fn assert_invalid_cors(config: Config, redacted_value: Option<&str>) {
+    let analysis = cors_analysis(config);
+    let cors = cors_report(analysis.auto_configurations());
+    let diagnostics = analysis
+        .diagnostics()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<String>();
+
+    assert_eq!(cors.status(), AutoConfigurationStatus::Failed);
+    assert_eq!(cors.reason_code().as_str(), "invalid_configuration");
+    if let Some(redacted_value) = redacted_value {
+        assert!(!format!("{cors:?}").contains(redacted_value));
+        assert!(!diagnostics.contains(redacted_value));
+    }
+}
+
 fn automatic_builder<M: Module>(config: Config) -> MadsBuilder {
     let mut builder = Mads::builder_with_config(config);
     builder.root::<M>().unwrap();
@@ -56,6 +105,13 @@ fn automatic_builder<M: Module>(config: Config) -> MadsBuilder {
 fn automatic_rootless_builder(config: Config) -> MadsBuilder {
     let mut builder = Mads::builder_with_config(config);
     assert!(enable_automatic_server_for_test(&mut builder));
+    builder
+}
+
+fn automatic_cors_builder<M: Module>(config: Config) -> MadsBuilder {
+    let mut builder = Mads::builder_with_config(config);
+    builder.root::<M>().unwrap();
+    assert!(enable_automatic_cors_for_test(&mut builder));
     builder
 }
 
@@ -298,4 +354,250 @@ async fn low_level_builder_overrides_the_server_decision_without_parsing_server_
     let debug = format!("{server:?}");
     assert!(!debug.contains(configured_host));
     assert!(!debug.contains(configured_port));
+}
+
+async fn assert_valid_cors(config: Config) {
+    let application = Mads::builder_with_config(config).build().await.unwrap();
+    let cors = cors_report(application.auto_configurations());
+
+    assert_eq!(cors.status(), AutoConfigurationStatus::Active);
+    assert_eq!(cors.reason_code().as_str(), "conditions_matched");
+}
+
+#[test]
+fn absent_cors_configuration_is_skipped() {
+    let analysis = cors_analysis(cors_config([]));
+    let cors = cors_report(analysis.auto_configurations());
+
+    assert!(analysis.is_valid());
+    assert_eq!(cors.status(), AutoConfigurationStatus::Skipped);
+    assert_eq!(cors.reason_code().as_str(), "configuration_absent");
+}
+
+#[test]
+fn automatic_cors_skips_present_invalid_configuration_without_managed_routes() {
+    const INVALID_ORIGIN: &str = "https://app.example.com/";
+    let analysis = automatic_cors_builder::<empty::EmptyApp>(cors_config([
+        CorsValue::StringArray("server.cors.origins", &[INVALID_ORIGIN]),
+        CorsValue::StringArray("server.cors.methods", &["GET"]),
+    ]))
+    .analyze();
+    let cors = cors_report(analysis.auto_configurations());
+    let diagnostics = analysis
+        .diagnostics()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<String>();
+
+    assert!(analysis.is_valid());
+    assert_eq!(cors.status(), AutoConfigurationStatus::Skipped);
+    assert_eq!(cors.reason_code().as_str(), "no_managed_routes");
+    assert!(!diagnostics.contains(INVALID_ORIGIN));
+}
+
+#[test]
+fn cors_empty_table_is_present_and_requires_origins_and_methods() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("mads.toml");
+    std::fs::write(&path, "[server.cors]\n").unwrap();
+    let config = ConfigBuilder::new()
+        .source(TomlSource::file(&path))
+        .build()
+        .unwrap();
+
+    assert_invalid_cors(config, None);
+}
+
+#[test]
+fn cors_requires_both_origins_and_methods() {
+    assert_invalid_cors(
+        cors_config([CorsValue::StringArray("server.cors.methods", &["GET"])]),
+        None,
+    );
+    assert_invalid_cors(
+        cors_config([CorsValue::StringArray(
+            "server.cors.origins",
+            &["https://app.example.com"],
+        )]),
+        None,
+    );
+}
+
+#[tokio::test]
+async fn cors_accepts_wildcard_origins_and_normalizes_methods() {
+    assert_valid_cors(cors_config([
+        CorsValue::Scalar("server.cors.origins", "*"),
+        CorsValue::StringArray("server.cors.methods", &["GET", "post", "GET"]),
+    ]))
+    .await;
+}
+
+#[test]
+fn cors_rejects_ambiguous_and_credentialed_wildcards() {
+    assert_invalid_cors(
+        cors_config([
+            CorsValue::StringArray("server.cors.origins", &["*"]),
+            CorsValue::StringArray("server.cors.methods", &["GET"]),
+        ]),
+        None,
+    );
+    assert_invalid_cors(
+        cors_config([
+            CorsValue::Scalar("server.cors.origins", "*"),
+            CorsValue::StringArray("server.cors.methods", &["*"]),
+        ]),
+        None,
+    );
+    assert_invalid_cors(
+        cors_config([
+            CorsValue::Scalar("server.cors.origins", "*"),
+            CorsValue::StringArray("server.cors.methods", &["GET"]),
+            CorsValue::Scalar("server.cors.credentials", "true"),
+        ]),
+        None,
+    );
+    assert_invalid_cors(
+        cors_config([
+            CorsValue::StringArray("server.cors.origins", &["https://app.example.com"]),
+            CorsValue::StringArray("server.cors.methods", &["GET"]),
+            CorsValue::Scalar("server.cors.allowed_headers", "*"),
+            CorsValue::Scalar("server.cors.credentials", "true"),
+        ]),
+        None,
+    );
+    assert_invalid_cors(
+        cors_config([
+            CorsValue::StringArray("server.cors.origins", &["https://app.example.com"]),
+            CorsValue::StringArray("server.cors.methods", &["GET"]),
+            CorsValue::Scalar("server.cors.exposed_headers", "*"),
+            CorsValue::Scalar("server.cors.credentials", "true"),
+        ]),
+        None,
+    );
+}
+
+#[tokio::test]
+async fn cors_accepts_explicit_origins_with_credentials_and_defaults() {
+    assert_valid_cors(cors_config([
+        CorsValue::StringArray("server.cors.origins", &["https://app.example.com"]),
+        CorsValue::StringArray("server.cors.methods", &["GET"]),
+        CorsValue::Scalar("server.cors.credentials", "true"),
+    ]))
+    .await;
+}
+
+#[tokio::test]
+async fn cors_accepts_wildcard_headers_and_empty_explicit_header_lists() {
+    assert_valid_cors(cors_config([
+        CorsValue::StringArray("server.cors.origins", &["https://app.example.com"]),
+        CorsValue::StringArray("server.cors.methods", &["GET"]),
+        CorsValue::Scalar("server.cors.allowed_headers", "*"),
+        CorsValue::Scalar("server.cors.exposed_headers", "*"),
+    ]))
+    .await;
+    assert_valid_cors(cors_config([
+        CorsValue::StringArray("server.cors.origins", &["https://app.example.com"]),
+        CorsValue::StringArray("server.cors.methods", &["GET"]),
+        CorsValue::StringArray("server.cors.allowed_headers", &[]),
+        CorsValue::StringArray("server.cors.exposed_headers", &[]),
+        CorsValue::Scalar("server.cors.max_age_seconds", "0"),
+    ]))
+    .await;
+}
+
+#[test]
+fn cors_rejects_invalid_shapes_booleans_and_max_age() {
+    for invalid in [
+        cors_config([
+            CorsValue::Scalar("server.cors.origins", "https://app.example.com"),
+            CorsValue::StringArray("server.cors.methods", &["GET"]),
+        ]),
+        cors_config([
+            CorsValue::StringArray("server.cors.origins", &["https://app.example.com"]),
+            CorsValue::Scalar("server.cors.methods", "GET"),
+        ]),
+        cors_config([
+            CorsValue::StringArray("server.cors.origins", &["https://app.example.com"]),
+            CorsValue::StringArray("server.cors.methods", &["GET"]),
+            CorsValue::Scalar("server.cors.credentials", "TRUE"),
+        ]),
+        cors_config([
+            CorsValue::StringArray("server.cors.origins", &["https://app.example.com"]),
+            CorsValue::StringArray("server.cors.methods", &["GET"]),
+            CorsValue::Scalar("server.cors.max_age_seconds", "sixty"),
+        ]),
+    ] {
+        assert_invalid_cors(invalid, None);
+    }
+}
+
+#[test]
+fn cors_rejects_invalid_origins_and_headers_without_exposing_values() {
+    for (config, invalid_value) in [
+        (
+            cors_config([
+                CorsValue::StringArray("server.cors.origins", &["https://app.example.com/"]),
+                CorsValue::StringArray("server.cors.methods", &["GET"]),
+            ]),
+            "https://app.example.com/",
+        ),
+        (
+            cors_config([
+                CorsValue::StringArray("server.cors.origins", &["https://user@example.com"]),
+                CorsValue::StringArray("server.cors.methods", &["GET"]),
+            ]),
+            "https://user@example.com",
+        ),
+        (
+            cors_config([
+                CorsValue::StringArray("server.cors.origins", &["null"]),
+                CorsValue::StringArray("server.cors.methods", &["GET"]),
+            ]),
+            "null",
+        ),
+        (
+            cors_config([
+                CorsValue::StringArray("server.cors.origins", &["https://app.example.com"]),
+                CorsValue::StringArray("server.cors.methods", &["GET"]),
+                CorsValue::StringArray("server.cors.allowed_headers", &["bad header"]),
+            ]),
+            "bad header",
+        ),
+    ] {
+        assert_invalid_cors(config, Some(invalid_value));
+    }
+}
+
+#[test]
+fn cors_reports_only_approved_evidence_keys_and_sources() {
+    let analysis = cors_analysis(cors_config([
+        CorsValue::StringArray("server.cors.origins", &["https://app.example.com"]),
+        CorsValue::StringArray("server.cors.methods", &["GET"]),
+        CorsValue::StringArray("server.cors.allowed_headers", &["authorization"]),
+        CorsValue::StringArray("server.cors.exposed_headers", &["x-request-id"]),
+        CorsValue::Scalar("server.cors.credentials", "false"),
+        CorsValue::Scalar("server.cors.max_age_seconds", "600"),
+    ]));
+    let cors = cors_report(analysis.auto_configurations());
+
+    assert_eq!(cors.status(), AutoConfigurationStatus::Active);
+    assert_eq!(
+        cors.configuration()
+            .iter()
+            .map(|evidence| evidence.key())
+            .collect::<Vec<_>>(),
+        [
+            "server.cors.origins",
+            "server.cors.methods",
+            "server.cors.allowed_headers",
+            "server.cors.exposed_headers",
+            "server.cors.credentials",
+            "server.cors.max_age_seconds",
+        ]
+    );
+    assert!(
+        cors.configuration()
+            .iter()
+            .all(|evidence| evidence.source() == Some("test"))
+    );
 }
