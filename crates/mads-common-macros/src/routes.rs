@@ -184,7 +184,7 @@ fn expand_with_common(
         fn __mads_register(
             mut __mads_router: #common::__private::Router,
             __mads_controller: Self,
-            __mads_application_context: &#common::core::ApplicationContext,
+            __mads_runtime: &#common::__private::RouterBuildContext<'_>,
             __mads_routes: &mut #common::__private::ValidatedRouteIter<'_>,
         ) -> #common::core::Result<#common::__private::Router>
         where
@@ -408,10 +408,7 @@ impl RouteMetadata {
         let guard_layer = self.guard_ident.as_ref().map(|guard| {
             quote! {
                 .route_layer(#common::__private::PassportGuardLayer::new(
-                    #common::__private::PassportGuardState::new(
-                        __mads_application_context,
-                        &#guard,
-                    )?,
+                    __mads_runtime.passport_guard_state(&#guard)?,
                 ))
             }
         });

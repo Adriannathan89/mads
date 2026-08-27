@@ -4,7 +4,7 @@
 
 use std::any::TypeId;
 
-use mads_common::core::{ApplicationContext, MADS030, Result, SourceLocation};
+use mads_common::core::{MADS030, Result, SourceLocation};
 use mads_common::{
     ControllerRouteDescriptor, HttpMethod, RouteContractDescriptor, RouteDescriptor,
 };
@@ -22,7 +22,7 @@ fn second_type_id() -> TypeId {
 
 fn no_op_registrar(
     router: mads_common::axum::Router,
-    _: &ApplicationContext,
+    _: &mads_common::__private::RouterBuildContext<'_>,
     _: &mut mads_common::__private::ValidatedRouteIter<'_>,
 ) -> Result<mads_common::axum::Router> {
     Ok(router)

@@ -23,7 +23,9 @@ fn expands_a_concrete_controller_registrar_and_stores_its_pointer() {
 
     assert_eq!(
         expanded
-            .match_indices(&normalized(quote!(__mads_context.resolve::<Controller>()?)))
+            .match_indices(&normalized(quote!(
+                __mads_runtime.application().resolve::<Controller>()?
+            )))
             .count(),
         1,
         "the registrar must resolve Controller exactly once",
@@ -32,7 +34,7 @@ fn expands_a_concrete_controller_registrar_and_stores_its_pointer() {
         <Controller as UserRoutes>::__mads_register(
             __mads_router,
             __mads_controller.clone(),
-            __mads_context,
+            __mads_runtime,
             __mads_routes,
         )?
     })));
@@ -40,7 +42,7 @@ fn expands_a_concrete_controller_registrar_and_stores_its_pointer() {
         <Controller as AdminRoutes>::__mads_register(
             __mads_router,
             __mads_controller.clone(),
-            __mads_context,
+            __mads_runtime,
             __mads_routes,
         )?
     })));

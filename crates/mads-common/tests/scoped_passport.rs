@@ -4,18 +4,34 @@
 #![allow(missing_docs)]
 
 use std::any::TypeId;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
-use mads_common::{
-    ClaimsPrincipal, JwtClaims, JwtTokenKind, MADS130, PassportContext, PassportPrincipal,
-    PassportResult, PassportStrategy, PassportStrategyCatalog, PassportStrategyPreflight,
-    core::{Module, Result},
+use axum::{
+    body::Body,
+    http::{Request, StatusCode, header::AUTHORIZATION},
 };
 
-#[derive(serde::Deserialize)]
-pub struct FirstClaims;
+use mads_common::{
+    ClaimsPrincipal, JwtClaims, JwtService, JwtSignOptions, JwtTokenKind, MADS130, PassportContext,
+    PassportPrincipal, PassportResult, PassportStrategy, PassportStrategyCatalog,
+    PassportStrategyPreflight, build_router,
+    core::{Config, ConfigBuilder, Mads, MapSource, Module, Result},
+};
+use tower::ServiceExt;
 
-#[derive(serde::Deserialize)]
-pub struct SecondClaims;
+static FIRST_STRATEGY_CALLS: AtomicUsize = AtomicUsize::new(0);
+static SECOND_STRATEGY_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct FirstClaims {
+    marker: u8,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct SecondClaims {
+    marker: u8,
+}
 
 #[derive(serde::Deserialize)]
 pub struct CandidateClaims;
@@ -24,6 +40,10 @@ pub struct CandidateClaims;
 pub struct NoCustomClaims;
 
 pub struct NonBuiltinPrincipal;
+
+pub struct FirstPrincipal;
+
+pub struct SecondPrincipal;
 
 macro_rules! no_permissions {
     ($principal:ty) => {
@@ -44,6 +64,8 @@ no_permissions!(SecondClaims);
 no_permissions!(CandidateClaims);
 no_permissions!(NoCustomClaims);
 no_permissions!(NonBuiltinPrincipal);
+no_permissions!(FirstPrincipal);
+no_permissions!(SecondPrincipal);
 
 mod first {
     use super::*;
@@ -54,7 +76,7 @@ mod first {
     #[mads_common::passport_strategy(name = "jwt")]
     impl PassportStrategy for FirstJwtStrategy {
         type Claims = FirstClaims;
-        type Principal = ClaimsPrincipal<FirstClaims>;
+        type Principal = FirstPrincipal;
 
         const TOKEN_KIND: JwtTokenKind = JwtTokenKind::Access;
 
@@ -63,12 +85,13 @@ mod first {
             _context: &PassportContext<'_>,
             _claims: &JwtClaims<Self::Claims>,
         ) -> PassportResult<Self::Principal> {
-            unreachable!("preflight never executes a Passport strategy")
+            FIRST_STRATEGY_CALLS.fetch_add(1, Ordering::SeqCst);
+            Ok(FirstPrincipal)
         }
     }
 
     #[mads_common::routes]
-    #[mads_common::guard(strategy = "jwt", principal = ClaimsPrincipal<FirstClaims>)]
+    #[mads_common::guard(strategy = "jwt", principal = FirstPrincipal)]
     pub trait FirstRoutes {
         #[mads_common::get("/first")]
         async fn profile(&self) -> &'static str;
@@ -96,7 +119,7 @@ mod second {
     #[mads_common::passport_strategy(name = "jwt")]
     impl PassportStrategy for SecondJwtStrategy {
         type Claims = SecondClaims;
-        type Principal = ClaimsPrincipal<SecondClaims>;
+        type Principal = SecondPrincipal;
 
         const TOKEN_KIND: JwtTokenKind = JwtTokenKind::Access;
 
@@ -105,12 +128,13 @@ mod second {
             _context: &PassportContext<'_>,
             _claims: &JwtClaims<Self::Claims>,
         ) -> PassportResult<Self::Principal> {
-            unreachable!("preflight never executes a Passport strategy")
+            SECOND_STRATEGY_CALLS.fetch_add(1, Ordering::SeqCst);
+            Ok(SecondPrincipal)
         }
     }
 
     #[mads_common::routes]
-    #[mads_common::guard(strategy = "jwt", principal = ClaimsPrincipal<SecondClaims>)]
+    #[mads_common::guard(strategy = "jwt", principal = SecondPrincipal)]
     pub trait SecondRoutes {
         #[mads_common::get("/second")]
         async fn profile(&self) -> &'static str;
@@ -407,6 +431,33 @@ mod roots {
     pub struct NestedRoot;
 }
 
+fn config() -> Config {
+    ConfigBuilder::new()
+        .source(MapSource::new(
+            "mads.toml",
+            [("passport.secret", "01234567890123456789012345678901")],
+        ))
+        .build()
+        .unwrap()
+}
+
+async fn application_for<M: Module>() -> Mads {
+    let config = config();
+    let jwt = JwtService::from_config(&config).unwrap();
+    let mut builder = Mads::builder_with_config(config);
+    builder.provide(jwt).unwrap();
+    builder.root::<M>().unwrap();
+    builder.build().await.unwrap()
+}
+
+fn authenticated_request(path: &str, token: &str) -> Request<Body> {
+    Request::builder()
+        .uri(path)
+        .header(AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap()
+}
+
 fn preflight_for<M: Module>() -> Result<PassportStrategyPreflight<'static>> {
     let graph = mads_common::core::__private::build_module_graph::<M>()?;
     mads_common::__private::preflight_scoped(Some(&graph))
@@ -508,4 +559,53 @@ fn rootless_scoped_preflight_retains_global_duplicate_validation() {
             .code(),
         MADS130
     );
+}
+
+#[tokio::test]
+async fn request_uses_context_binding() {
+    let first_application = application_for::<roots::FirstRoot>().await;
+    let first_token = first_application
+        .context()
+        .resolve::<JwtService>()
+        .unwrap()
+        .sign(
+            FirstClaims { marker: 1 },
+            JwtSignOptions::access(Duration::from_secs(60)),
+        )
+        .unwrap();
+    FIRST_STRATEGY_CALLS.store(0, Ordering::SeqCst);
+    SECOND_STRATEGY_CALLS.store(0, Ordering::SeqCst);
+
+    let first_response = build_router(&first_application)
+        .unwrap()
+        .oneshot(authenticated_request("/first", &first_token))
+        .await
+        .unwrap();
+
+    assert_eq!(first_response.status(), StatusCode::OK);
+    assert_eq!(FIRST_STRATEGY_CALLS.load(Ordering::SeqCst), 1);
+    assert_eq!(SECOND_STRATEGY_CALLS.load(Ordering::SeqCst), 0);
+
+    let second_application = application_for::<roots::SecondRoot>().await;
+    let second_token = second_application
+        .context()
+        .resolve::<JwtService>()
+        .unwrap()
+        .sign(
+            SecondClaims { marker: 2 },
+            JwtSignOptions::access(Duration::from_secs(60)),
+        )
+        .unwrap();
+    FIRST_STRATEGY_CALLS.store(0, Ordering::SeqCst);
+    SECOND_STRATEGY_CALLS.store(0, Ordering::SeqCst);
+
+    let second_response = build_router(&second_application)
+        .unwrap()
+        .oneshot(authenticated_request("/second", &second_token))
+        .await
+        .unwrap();
+
+    assert_eq!(second_response.status(), StatusCode::OK);
+    assert_eq!(FIRST_STRATEGY_CALLS.load(Ordering::SeqCst), 0);
+    assert_eq!(SECOND_STRATEGY_CALLS.load(Ordering::SeqCst), 1);
 }

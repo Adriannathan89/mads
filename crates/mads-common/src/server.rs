@@ -213,10 +213,10 @@ mod tests {
 
     fn preflight_registrar(
         router: axum::Router,
-        context: &ApplicationContext,
+        context: &crate::__private::RouterBuildContext<'_>,
         routes: &mut crate::__private::ValidatedRouteIter<'_>,
     ) -> mads_core::Result<axum::Router> {
-        let _ = context.resolve::<PreflightPermit>()?;
+        let _ = context.application().resolve::<PreflightPermit>()?;
         let Some(path) = routes.next(HttpMethod::Get, "health")? else {
             routes.finish()?;
             return Ok(router);

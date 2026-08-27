@@ -46,6 +46,9 @@ fn expands_a_typed_route_registrar_with_fresh_arguments_and_ufcs_dispatch() {
     assert!(expanded.contains(&normalized(quote! {
         __mads_router: mads_common::__private::Router
     })));
+    assert!(expanded.contains(&normalized(quote! {
+        __mads_runtime: &mads_common::__private::RouterBuildContext<'_>
+    })));
     assert!(expanded.contains(&normalized(quote!(mads_common::__private::get))));
     assert!(
         expanded.contains("move|__mads_argument_0:Path<i64>,__mads_argument_1:Query<UserQuery>|{")

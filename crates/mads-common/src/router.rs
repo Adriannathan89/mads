@@ -4,10 +4,13 @@
 //! is built. Generated handlers capture that application-scoped controller
 //! handle and use typed trait calls for each request.
 
-use crate::RouteCatalog;
+use crate::{
+    http_scope::HttpApplicationScope,
+    route::{RouterBuildContext, validate_scoped_descriptors},
+};
 
 #[cfg(feature = "jwt")]
-use crate::{GuardCatalog, PassportStrategyCatalog};
+use crate::PassportStrategyCatalog;
 
 /// Builds an Axum router from the application's validated managed-controller registrations.
 ///
@@ -39,13 +42,20 @@ use crate::{GuardCatalog, PassportStrategyCatalog};
 /// ```
 #[allow(clippy::result_large_err)]
 pub fn build_router(application: &mads_core::Mads) -> mads_core::Result<axum::Router> {
+    let http_scope = HttpApplicationScope::for_application(application)?;
     #[cfg(feature = "jwt")]
-    PassportStrategyCatalog::preflight(&GuardCatalog::guards())?;
-    let controllers = RouteCatalog::validated_for(application)?;
+    let passport =
+        PassportStrategyCatalog::preflight_scoped(application.module_graph(), http_scope.guards())?;
+    let runtime = RouterBuildContext::new(
+        application.context(),
+        #[cfg(feature = "jwt")]
+        &passport,
+    );
+    let controllers = validate_scoped_descriptors(http_scope.controllers())?;
     let mut router = axum::Router::new();
     for controller in controllers {
         let mut routes = controller.routes();
-        router = (controller.registrar())(router, application.context(), &mut routes)?;
+        router = (controller.registrar())(router, &runtime, &mut routes)?;
         routes.finish()?;
     }
     Ok(router)

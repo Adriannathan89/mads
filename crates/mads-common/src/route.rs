@@ -19,6 +19,9 @@ use mads_core::{Diagnostic, Error, MADS030, Result, SourceLocation};
 use crate::http_scope::ScopedController;
 
 #[cfg(feature = "jwt")]
+use crate::passport::{GuardDescriptor, PassportGuardState, PassportStrategyPreflight};
+
+#[cfg(feature = "jwt")]
 #[derive(Clone, Copy)]
 struct GuardReference(&'static crate::passport::GuardDescriptor);
 
@@ -366,6 +369,62 @@ impl ControllerRouteDescriptor {
     }
 }
 
+/// Runtime state shared by generated controller and route registrars.
+#[doc(hidden)]
+pub struct RouterBuildContext<'a> {
+    application: &'a mads_core::ApplicationContext,
+    #[cfg(feature = "jwt")]
+    passport: &'a PassportStrategyPreflight<'static>,
+}
+
+impl<'a> RouterBuildContext<'a> {
+    pub(crate) const fn new(
+        application: &'a mads_core::ApplicationContext,
+        #[cfg(feature = "jwt")] passport: &'a PassportStrategyPreflight<'static>,
+    ) -> Self {
+        Self {
+            application,
+            #[cfg(feature = "jwt")]
+            passport,
+        }
+    }
+
+    /// Returns the completed application context for controller resolution.
+    #[doc(hidden)]
+    pub const fn application(&self) -> &'a mads_core::ApplicationContext {
+        self.application
+    }
+
+    /// Builds middleware state from the binding selected for one guarded route.
+    #[cfg(feature = "jwt")]
+    #[doc(hidden)]
+    #[allow(clippy::result_large_err)]
+    pub fn passport_guard_state(
+        &self,
+        guard: &'static GuardDescriptor,
+    ) -> Result<PassportGuardState> {
+        let binding = self
+            .passport
+            .binding_for(guard)
+            .ok_or_else(|| missing_scoped_binding_error(guard))?;
+        Ok(PassportGuardState::from_binding(self.application, binding))
+    }
+}
+
+#[cfg(feature = "jwt")]
+fn missing_scoped_binding_error(guard: &GuardDescriptor) -> Error {
+    Error::new(
+        Diagnostic::new(
+            crate::passport::MADS130,
+            "missing scoped Passport binding",
+            "the selected HTTP application has no preflight Passport strategy binding for this guard",
+        )
+        .with_subject(guard.requirement_subject())
+        .with_location(guard.location())
+        .with_suggestion("build the router from complete selected Passport guard metadata"),
+    )
+}
+
 /// Registers the validated routes for one controller on an Axum router.
 ///
 /// This function-pointer type is used by generated controller adapters. Normal
@@ -373,7 +432,7 @@ impl ControllerRouteDescriptor {
 /// registrar directly.
 pub type ControllerRegistrar = fn(
     axum::Router,
-    &mads_core::ApplicationContext,
+    &RouterBuildContext<'_>,
     &mut ValidatedRouteIter<'_>,
 ) -> mads_core::Result<axum::Router>;
 

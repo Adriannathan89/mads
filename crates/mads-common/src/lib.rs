@@ -177,5 +177,5 @@ pub mod __private {
         let scope = crate::http_scope::HttpApplicationScope::for_module_graph(module_graph)?;
         crate::passport::PassportStrategyCatalog::preflight_scoped(module_graph, scope.guards())
     }
-    pub use crate::route::{ValidatedRouteIter, validate_descriptors};
+    pub use crate::route::{RouterBuildContext, ValidatedRouteIter, validate_descriptors};
 }
