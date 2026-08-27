@@ -45,6 +45,9 @@ pub const MADS006: DiagnosticCode = DiagnosticCode::new("MADS006");
 /// Auto-configuration failure.
 pub const MADS007: DiagnosticCode = DiagnosticCode::new("MADS007");
 
+/// Invalid rooted module graph.
+pub const MADS008: DiagnosticCode = DiagnosticCode::new("MADS008");
+
 /// Invalid lifecycle state transition.
 pub const MADS010: DiagnosticCode = DiagnosticCode::new("MADS010");
 
