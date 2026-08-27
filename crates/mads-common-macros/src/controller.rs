@@ -269,6 +269,8 @@ fn expand_controller_with_common(
                 #core::SourceLocation::new(file!(), line!(), column!()),
                 #constructor_ident,
             )
+            .with_runtime_type_name(|| ::core::any::type_name::<#ident>())
+            .with_namespace(module_path!())
         }
 
         #(#cfg_attrs)*
@@ -279,6 +281,7 @@ fn expand_controller_with_common(
                 &[#(#route_contracts,)*],
                 #registrar_ident,
             )
+            .with_namespace(module_path!())
         }
     })
 }

@@ -165,6 +165,7 @@ fn expand_with_common(
                 #common::core::SourceLocation::new(file!(), line!(), column!()),
             )
             #guard
+            .with_namespace(module_path!())
         }
     });
     let metadata: TraitItem = parse_quote! {

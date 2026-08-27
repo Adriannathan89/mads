@@ -57,6 +57,9 @@ fn expands_a_typed_route_registrar_with_fresh_arguments_and_ufcs_dispatch() {
             __mads_argument_1,
         ).await
     })));
+    assert!(expanded.contains(&normalized(quote!(
+        .with_namespace(module_path!())
+    ))));
 }
 
 #[test]

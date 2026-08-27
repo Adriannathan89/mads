@@ -136,6 +136,7 @@ pub struct GuardDescriptor {
     route_trait: &'static str,
     handler: &'static str,
     requirement_subject: &'static str,
+    namespace: Option<&'static str>,
     strategy: &'static str,
     principal_type_id: Option<fn() -> TypeId>,
     principal_type_name: Option<fn() -> &'static str>,
@@ -172,6 +173,7 @@ impl GuardDescriptor {
             route_trait,
             handler,
             requirement_subject: "manual Passport guard",
+            namespace: None,
             strategy,
             principal_type_id,
             principal_type_name,
@@ -193,6 +195,20 @@ impl GuardDescriptor {
     pub const fn with_requirement_subject(mut self, subject: &'static str) -> Self {
         self.requirement_subject = subject;
         self
+    }
+
+    /// Attaches the Rust namespace containing this guard declaration.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_namespace(mut self, namespace: &'static str) -> Self {
+        self.namespace = Some(namespace);
+        self
+    }
+
+    /// Returns the Rust namespace containing this guard declaration, when available.
+    #[doc(hidden)]
+    pub const fn namespace(&self) -> Option<&'static str> {
+        self.namespace
     }
 
     /// Returns the route-contract trait name.
@@ -1006,6 +1022,7 @@ fn guard_order(left: &&'static GuardDescriptor, right: &&'static GuardDescriptor
     left.route_trait()
         .cmp(right.route_trait())
         .then_with(|| left.handler().cmp(right.handler()))
+        .then_with(|| left.namespace().cmp(&right.namespace()))
         .then_with(|| location_order(left.location(), right.location()))
 }
 

@@ -210,6 +210,7 @@ pub struct PassportStrategyDescriptor {
     name: &'static str,
     provider_type_id: fn() -> TypeId,
     provider_type_name: fn() -> &'static str,
+    namespace: Option<&'static str>,
     claims_type_id: fn() -> TypeId,
     claims_type_name: fn() -> &'static str,
     principal_type_id: fn() -> TypeId,
@@ -239,6 +240,7 @@ impl PassportStrategyDescriptor {
             name,
             provider_type_id,
             provider_type_name,
+            namespace: None,
             claims_type_id,
             claims_type_name,
             principal_type_id,
@@ -253,6 +255,20 @@ impl PassportStrategyDescriptor {
     #[must_use]
     pub const fn name(&self) -> &'static str {
         self.name
+    }
+
+    /// Attaches the Rust namespace containing this strategy declaration.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_namespace(mut self, namespace: &'static str) -> Self {
+        self.namespace = Some(namespace);
+        self
+    }
+
+    /// Returns the Rust namespace containing this strategy declaration, when available.
+    #[doc(hidden)]
+    pub const fn namespace(&self) -> Option<&'static str> {
+        self.namespace
     }
 
     /// Returns the concrete managed provider type identifier.
@@ -317,6 +333,7 @@ impl fmt::Debug for PassportStrategyDescriptor {
             .debug_struct("PassportStrategyDescriptor")
             .field("name", &self.name)
             .field("provider_type", &self.provider_type_name())
+            .field("namespace", &self.namespace)
             .field("claims_type", &self.claims_type_name())
             .field("principal_type", &self.principal_type_name())
             .field("token_kind", &self.token_kind)
@@ -484,6 +501,7 @@ fn strategy_order(
     left.name()
         .cmp(right.name())
         .then_with(|| left.provider_type_name().cmp(right.provider_type_name()))
+        .then_with(|| left.namespace().cmp(&right.namespace()))
         .then_with(|| location_order(left.location(), right.location()))
 }
 
@@ -491,6 +509,7 @@ fn guard_order(left: &&GuardDescriptor, right: &&GuardDescriptor) -> Ordering {
     left.route_trait()
         .cmp(right.route_trait())
         .then_with(|| left.handler().cmp(right.handler()))
+        .then_with(|| left.namespace().cmp(&right.namespace()))
         .then_with(|| location_order(left.location(), right.location()))
 }
 

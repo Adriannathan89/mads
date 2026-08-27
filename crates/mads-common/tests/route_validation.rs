@@ -333,6 +333,34 @@ fn rejects_duplicate_controller_identities_and_missing_registrars() {
 }
 
 #[test]
+fn descriptors_retain_optional_declaration_namespaces() {
+    let route = RouteDescriptor::new(
+        HttpMethod::Get,
+        "",
+        "/health",
+        "/health",
+        "health",
+        SourceLocation::new("routes.rs", 1, 1),
+    );
+    assert_eq!(route.namespace(), None);
+    assert_eq!(
+        route.with_namespace("delivery::health").namespace(),
+        Some("delivery::health")
+    );
+
+    let controller = ControllerRouteDescriptor::new(
+        "delivery::HealthController",
+        first_type_id,
+        FIRST_CONTRACTS,
+    );
+    assert_eq!(controller.namespace(), None);
+    assert_eq!(
+        controller.with_namespace("delivery::health").namespace(),
+        Some("delivery::health")
+    );
+}
+
+#[test]
 fn validated_routes_translate_parameters_for_axum() {
     let descriptor = controller("test::Controller", first_type_id, FIRST_CONTRACTS);
     let controllers = mads_common::__private::validate_descriptors(&[&descriptor])

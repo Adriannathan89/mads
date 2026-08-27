@@ -46,6 +46,14 @@ fn expands_a_concrete_controller_registrar_and_stores_its_pointer() {
     })));
     assert!(expanded.contains(&normalized(quote!(__mads_routes.finish()?))));
     assert!(expanded.contains("ControllerRouteDescriptor::with_registrar"));
+    assert!(expanded.contains(&normalized(quote! {
+        .with_runtime_type_name(|| ::core::any::type_name::<Controller>())
+    })));
+    assert_eq!(
+        expanded.matches("with_namespace(module_path!())").count(),
+        2,
+        "the provider and controller descriptors must retain their declaration namespace",
+    );
     assert!(expanded.contains("__mads_register_controller_"));
 }
 

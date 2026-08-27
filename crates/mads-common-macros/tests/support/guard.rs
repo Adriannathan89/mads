@@ -104,3 +104,20 @@ fn skip_requires_an_inherited_trait_guard() {
     };
     assert!(error.to_string().contains("requires a guard"));
 }
+
+#[test]
+fn generated_guard_descriptors_retain_the_declaration_namespace() {
+    let spec = parsed(r#"strategy = "jwt", principal = UserPrincipal"#);
+    let effective = merge(Some(&spec), None, Span::call_site())
+        .expect("the complete trait guard should merge")
+        .expect("the complete trait guard should remain effective");
+    let (_, expanded) = effective.static_tokens(
+        &syn::parse_quote!(mads_common),
+        &syn::parse_quote!(GuardedRoutes),
+        &syn::parse_quote!(profile),
+        &[],
+    );
+    let expanded = expanded.to_string().split_whitespace().collect::<String>();
+
+    assert!(expanded.contains("with_requirement_subject(concat!(stringify!(GuardedRoutes),\"::\",stringify!(profile))).with_namespace(module_path!())"));
+}

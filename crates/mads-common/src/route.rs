@@ -101,6 +101,7 @@ pub struct RouteDescriptor {
     path: &'static str,
     full_path: &'static str,
     handler: &'static str,
+    namespace: Option<&'static str>,
     location: SourceLocation,
     #[cfg(feature = "jwt")]
     guard: Option<GuardReference>,
@@ -146,10 +147,25 @@ impl RouteDescriptor {
             path,
             full_path,
             handler,
+            namespace: None,
             location,
             #[cfg(feature = "jwt")]
             guard: None,
         }
+    }
+
+    /// Attaches the Rust namespace containing this route declaration.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_namespace(mut self, namespace: &'static str) -> Self {
+        self.namespace = Some(namespace);
+        self
+    }
+
+    /// Returns the Rust namespace containing this route declaration, when available.
+    #[doc(hidden)]
+    pub const fn namespace(&self) -> Option<&'static str> {
+        self.namespace
     }
 
     /// Returns the HTTP method.
@@ -267,6 +283,7 @@ impl RouteContractDescriptor {
 pub struct ControllerRouteDescriptor {
     type_name: &'static str,
     type_id: fn() -> TypeId,
+    namespace: Option<&'static str>,
     contracts: &'static [RouteContractDescriptor],
     registrar: Option<ControllerRegistrar>,
 }
@@ -287,6 +304,7 @@ impl ControllerRouteDescriptor {
         Self {
             type_name,
             type_id,
+            namespace: None,
             contracts,
             registrar: None,
         }
@@ -306,9 +324,24 @@ impl ControllerRouteDescriptor {
         Self {
             type_name,
             type_id,
+            namespace: None,
             contracts,
             registrar: Some(registrar),
         }
+    }
+
+    /// Attaches the Rust namespace containing this controller declaration.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_namespace(mut self, namespace: &'static str) -> Self {
+        self.namespace = Some(namespace);
+        self
+    }
+
+    /// Returns the Rust namespace containing this controller declaration, when available.
+    #[doc(hidden)]
+    pub const fn namespace(&self) -> Option<&'static str> {
+        self.namespace
     }
 
     /// Returns the controller type name.
@@ -629,7 +662,11 @@ fn controller_cache() -> &'static Vec<&'static ControllerRouteDescriptor> {
             mads_core::__private::inventory::iter::<ControllerRouteDescriptor>
                 .into_iter()
                 .collect();
-        controllers.sort_by_key(|controller| controller.type_name());
+        controllers.sort_by(|left, right| {
+            left.type_name()
+                .cmp(right.type_name())
+                .then_with(|| left.namespace().cmp(&right.namespace()))
+        });
         controllers
     })
 }
@@ -909,10 +946,11 @@ fn to_axum_path(path: &str) -> String {
 
 fn controller_sort_key(
     controller: &ControllerRouteDescriptor,
-) -> (&'static str, &'static str, u32, u32) {
+) -> (&'static str, Option<&'static str>, &'static str, u32, u32) {
     let location = controller_location(controller).unwrap_or(SourceLocation::new("", 0, 0));
     (
         controller.type_name(),
+        controller.namespace(),
         location.file,
         location.line,
         location.column,
