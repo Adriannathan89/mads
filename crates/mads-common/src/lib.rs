@@ -169,5 +169,13 @@ pub mod __private {
 
     #[cfg(feature = "jwt")]
     pub use crate::passport::{PassportGuardLayer, PassportGuardState};
+    #[cfg(feature = "jwt")]
+    #[allow(clippy::result_large_err)]
+    pub fn preflight_scoped(
+        module_graph: Option<&mads_core::ModuleGraph>,
+    ) -> mads_core::Result<crate::passport::PassportStrategyPreflight<'static>> {
+        let scope = crate::http_scope::HttpApplicationScope::for_module_graph(module_graph)?;
+        crate::passport::PassportStrategyCatalog::preflight_scoped(module_graph, scope.guards())
+    }
     pub use crate::route::{ValidatedRouteIter, validate_descriptors};
 }

@@ -91,13 +91,17 @@ pub(crate) struct HttpApplicationScope {
 
 impl HttpApplicationScope {
     pub(crate) fn for_application(application: &Mads) -> Result<Self> {
-        let controllers = match application.module_graph() {
+        Self::for_module_graph(application.module_graph())
+    }
+
+    pub(crate) fn for_module_graph(module_graph: Option<&ModuleGraph>) -> Result<Self> {
+        let controllers = match module_graph {
             None => Self::complete_controllers(),
             Some(graph) => Self::rooted_controllers(graph),
         };
 
         #[cfg(feature = "jwt")]
-        let guards = Self::selected_guards(application, &controllers);
+        let guards = Self::selected_guards(module_graph, &controllers);
 
         Ok(Self {
             controllers,
@@ -165,8 +169,11 @@ impl HttpApplicationScope {
     }
 
     #[cfg(feature = "jwt")]
-    fn selected_guards(application: &Mads, controllers: &[ScopedController]) -> Vec<ScopedGuard> {
-        let Some(graph) = application.module_graph() else {
+    fn selected_guards(
+        module_graph: Option<&ModuleGraph>,
+        controllers: &[ScopedController],
+    ) -> Vec<ScopedGuard> {
+        let Some(graph) = module_graph else {
             return GuardCatalog::guards()
                 .into_iter()
                 .map(|guard| ScopedGuard {
@@ -216,7 +223,7 @@ fn route_context(
     }
 }
 
-fn owner_for_namespace(namespace: Option<&str>) -> Option<&'static ModuleDescriptor> {
+pub(crate) fn owner_for_namespace(namespace: Option<&str>) -> Option<&'static ModuleDescriptor> {
     let namespace = namespace?;
     Catalog::modules()
         .into_iter()

@@ -23,7 +23,8 @@ use tower::{Layer, Service};
 
 use super::{
     ErasedAuthentication, MADS131, PassportContext, PassportError, PassportResult,
-    PassportStrategyAdapter, PassportStrategyCatalog, PassportStrategyFuture,
+    PassportStrategyAdapter, PassportStrategyBinding, PassportStrategyCatalog,
+    PassportStrategyFuture,
 };
 use crate::{ClaimsPrincipal, JwtService, JwtValidation, PassportPrincipal};
 
@@ -338,6 +339,19 @@ pub struct PassportGuardState {
 }
 
 impl PassportGuardState {
+    /// Constructs middleware state from an already selected static binding.
+    #[doc(hidden)]
+    pub fn from_binding(
+        application: &mads_core::ApplicationContext,
+        binding: &PassportStrategyBinding<'static>,
+    ) -> Self {
+        Self {
+            application: application.clone(),
+            guard: binding.guard(),
+            adapter: binding.adapter(),
+        }
+    }
+
     /// Selects the one strategy adapter for a static guard descriptor.
     #[doc(hidden)]
     #[allow(clippy::result_large_err)]
