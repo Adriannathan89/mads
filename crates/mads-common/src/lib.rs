@@ -26,6 +26,8 @@ mod route;
 mod router;
 #[cfg(feature = "http")]
 mod server;
+#[cfg(feature = "http")]
+mod server_config;
 
 /// Strict cookie extraction, response composition, and established cookie types.
 #[cfg(feature = "cookies")]
@@ -166,6 +168,16 @@ pub use route::{
 pub mod __private {
     pub use axum::Router;
     pub use axum::routing::{delete, get, patch, post, put};
+
+    /// Loads conventional sources with an injected environment source for tests.
+    #[cfg(feature = "http")]
+    #[allow(clippy::result_large_err)]
+    pub fn load_standard_config_from_for_test(
+        root: &std::path::Path,
+        environment: mads_core::EnvSource,
+    ) -> mads_core::Result<mads_core::Config> {
+        crate::server_config::load_standard_config_from_with_environment(root, environment)
+    }
 
     #[cfg(feature = "jwt")]
     pub use crate::passport::{PassportGuardLayer, PassportGuardState};

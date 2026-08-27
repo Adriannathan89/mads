@@ -367,6 +367,78 @@ fn missing_toml_reports_only_its_path() {
 }
 
 #[test]
+fn missing_optional_toml_is_empty_but_present_invalid_toml_fails() {
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("mads.toml");
+    let config = ConfigBuilder::new()
+        .source(TomlSource::optional(&missing))
+        .build()
+        .unwrap();
+    assert!(config.is_empty());
+
+    fs::write(&missing, "[server\nport = 3000").unwrap();
+    assert_eq!(
+        ConfigBuilder::new()
+            .source(TomlSource::optional(&missing))
+            .build()
+            .unwrap_err()
+            .code(),
+        MADS020,
+    );
+}
+
+#[test]
+fn optional_toml_directory_is_an_unreadable_file_error() {
+    let directory = tempfile::tempdir().unwrap();
+    let error = ConfigBuilder::new()
+        .source(TomlSource::optional(directory.path()))
+        .build()
+        .unwrap_err();
+
+    assert_eq!(error.code(), MADS020);
+    assert!(
+        error
+            .to_string()
+            .contains(directory.path().to_str().unwrap())
+    );
+}
+
+#[test]
+fn empty_toml_tables_remain_observable_without_becoming_values() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("mads.toml");
+    fs::write(&path, "[server.cors]").unwrap();
+    let config = ConfigBuilder::new()
+        .source(TomlSource::file(&path))
+        .build()
+        .unwrap();
+
+    assert!(config.contains_table("server.cors"));
+    assert_eq!(config.table_source("server.cors"), path.to_str());
+    assert!(config.is_empty());
+    assert_eq!(config.len(), 0);
+}
+
+#[test]
+fn later_toml_table_declaration_supplies_the_table_source() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = directory.path().join("first.toml");
+    let second = directory.path().join("second.toml");
+    fs::write(&first, "[server.cors]").unwrap();
+    fs::write(&second, "[server.cors]").unwrap();
+
+    let config = ConfigBuilder::new()
+        .source(TomlSource::file(&first))
+        .source(TomlSource::file(&second))
+        .build()
+        .unwrap();
+
+    assert_eq!(config.table_source("server.cors"), second.to_str());
+    assert!(config.is_empty());
+    assert_eq!(config.len(), 0);
+}
+
+#[test]
 fn malformed_toml_is_redacted_and_has_no_parser_source() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("mads.toml");

@@ -23,7 +23,7 @@
 //! environment variables override dotenv variables during `${NAME}`
 //! interpolation; [`EnvSource`] itself remains scalar-only.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -35,6 +35,7 @@ use crate::{Diagnostic, Error, MADS020, Result};
 pub struct ConfigDocument {
     scalars: BTreeMap<String, String>,
     string_arrays: BTreeMap<String, Vec<String>>,
+    tables: BTreeSet<String>,
 }
 
 impl fmt::Debug for ConfigDocument {
@@ -58,6 +59,7 @@ impl ConfigDocument {
         Self {
             scalars: values,
             string_arrays: BTreeMap::new(),
+            tables: BTreeSet::new(),
         }
     }
 
@@ -78,6 +80,11 @@ impl ConfigDocument {
         self.scalars.remove(&key);
         self.string_arrays
             .insert(key, values.into_iter().map(Into::into).collect());
+    }
+
+    /// Records a table path without adding a configuration value.
+    pub fn insert_table(&mut self, key: impl Into<String>) {
+        self.tables.insert(key.into());
     }
 
     /// Returns the number of configuration entries across all value shapes.
@@ -176,6 +183,7 @@ impl ConfigSource for MapSource {
         Ok(ConfigDocument {
             scalars: self.scalars.clone(),
             string_arrays: self.string_arrays.clone(),
+            tables: BTreeSet::new(),
         })
     }
 }
@@ -245,6 +253,7 @@ impl ConfigSource for EnvSource {
 pub struct TomlSource {
     path: PathBuf,
     name: String,
+    required: bool,
 }
 
 impl TomlSource {
@@ -252,7 +261,22 @@ impl TomlSource {
     pub fn file(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
         let name = path.to_string_lossy().into_owned();
-        Self { path, name }
+        Self {
+            path,
+            name,
+            required: true,
+        }
+    }
+
+    /// Creates a TOML source that is ignored when the file does not exist.
+    pub fn optional(path: impl Into<PathBuf>) -> Self {
+        let path = path.into();
+        let name = path.to_string_lossy().into_owned();
+        Self {
+            path,
+            name,
+            required: false,
+        }
     }
 }
 
@@ -276,17 +300,23 @@ impl ConfigSource for TomlSource {
 
 impl TomlSource {
     fn parse(&self, array_mode: TomlArrayMode) -> Result<ConfigDocument> {
-        let input = std::fs::read_to_string(&self.path).map_err(|source| {
-            Error::with_source(
-                Diagnostic::new(
-                    MADS020,
-                    "configuration file could not be read",
-                    format!("could not read configuration file `{}`", self.name),
-                )
-                .with_subject(&self.name),
-                source,
-            )
-        })?;
+        let input = match std::fs::read_to_string(&self.path) {
+            Ok(input) => input,
+            Err(source) if !self.required && source.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(ConfigDocument::new());
+            }
+            Err(source) => {
+                return Err(Error::with_source(
+                    Diagnostic::new(
+                        MADS020,
+                        "configuration file could not be read",
+                        format!("could not read configuration file `{}`", self.name),
+                    )
+                    .with_subject(&self.name),
+                    source,
+                ));
+            }
+        };
         parse_toml_document(&input, &self.name, array_mode)
     }
 }
@@ -361,6 +391,9 @@ fn flatten_toml(
 ) -> Result<()> {
     match value {
         toml::Value::Table(table) => {
+            if !prefix.is_empty() {
+                output.insert_table(prefix);
+            }
             if prefix.is_empty() && table.is_empty() {
                 return Ok(());
             }
@@ -496,10 +529,21 @@ impl ConfigValue {
 }
 
 /// Configuration values merged in source insertion order.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Default, Eq, PartialEq)]
 pub struct Config {
     values: BTreeMap<String, ConfigValue>,
     string_arrays: BTreeMap<String, ConfigStringArrayValue>,
+    tables: BTreeMap<String, ConfigOrigin>,
+}
+
+impl fmt::Debug for Config {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Config")
+            .field("entries", &self.len())
+            .field("values", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl Config {
@@ -516,6 +560,16 @@ impl Config {
     /// Returns the source name for a configuration key.
     pub fn source_of(&self, key: &str) -> Option<&str> {
         self.values.get(key).map(ConfigValue::source)
+    }
+
+    /// Returns whether a source declared a TOML table at `key`.
+    pub fn contains_table(&self, key: &str) -> bool {
+        self.tables.contains_key(key)
+    }
+
+    /// Returns the source name for a declared TOML table.
+    pub fn table_source(&self, key: &str) -> Option<&str> {
+        self.tables.get(key).map(|origin| origin.label.as_str())
     }
 
     /// Iterates over keys and their attributed values in lexical key order.
@@ -632,6 +686,7 @@ impl ConfigBuilder {
 
         let mut values = BTreeMap::new();
         let mut string_arrays = BTreeMap::new();
+        let mut tables = BTreeMap::new();
         for source in self.sources {
             let origin = ConfigOrigin {
                 label: source.name().to_owned(),
@@ -658,6 +713,9 @@ impl ConfigBuilder {
                     },
                 );
             }
+            for key in document.tables {
+                tables.insert(key, origin.clone());
+            }
         }
         for (key, value) in &mut values {
             if let Some(variable) = exact_variable_name(&value.value) {
@@ -676,6 +734,7 @@ impl ConfigBuilder {
         Ok(Config {
             values,
             string_arrays,
+            tables,
         })
     }
 }
