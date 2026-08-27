@@ -4,7 +4,8 @@ use std::any::TypeId;
 use std::sync::OnceLock;
 
 use crate::{
-    Diagnostic, Error, MADS001, MADS002, MADS003, ModuleDescriptor, ProviderDescriptor, Result,
+    Diagnostic, Error, MADS001, MADS002, MADS003, Module, ModuleDescriptor, ProviderDescriptor,
+    Result,
 };
 
 inventory::collect!(ProviderDescriptor);
@@ -28,6 +29,50 @@ impl Catalog {
                 .then_with(|| compare_locations(left.location(), right.location()))
         });
         modules
+    }
+
+    /// Selects the single static module descriptor registered for `M`.
+    #[allow(clippy::result_large_err)]
+    pub fn module_for<M: Module>() -> Result<&'static ModuleDescriptor> {
+        let type_id = TypeId::of::<M>();
+        let modules: Vec<_> = Self::modules()
+            .into_iter()
+            .filter(|descriptor| descriptor.type_id() == type_id)
+            .collect();
+
+        match modules.as_slice() {
+            [] => Err(Error::new(
+                Diagnostic::new(
+                    MADS003,
+                    "missing module metadata",
+                    "no statically declared module exists for this type",
+                )
+                .with_subject(std::any::type_name::<M>()),
+            )),
+            [module] => Ok(module),
+            [first, rest @ ..]
+                if rest
+                    .iter()
+                    .all(|module| module_exact_identity(first, module)) =>
+            {
+                Err(Error::new(
+                    Diagnostic::new(
+                        MADS001,
+                        "duplicate module declaration",
+                        "the same module declaration was registered more than once",
+                    )
+                    .with_subject(std::any::type_name::<M>()),
+                ))
+            }
+            _ => Err(Error::new(
+                Diagnostic::new(
+                    MADS002,
+                    "ambiguous module declaration",
+                    "multiple module declarations describe the same module type",
+                )
+                .with_subject(std::any::type_name::<M>()),
+            )),
+        }
     }
 
     /// Selects the single static provider registered for `T`.
@@ -111,4 +156,19 @@ fn exact_identity(left: &ProviderDescriptor, right: &ProviderDescriptor) -> bool
             .iter()
             .zip(right.dependencies())
             .all(|(left, right)| left.type_id() == right.type_id())
+}
+
+fn module_exact_identity(left: &ModuleDescriptor, right: &ModuleDescriptor) -> bool {
+    left.type_id() == right.type_id()
+        && left.type_name() == right.type_name()
+        && left.namespace() == right.namespace()
+        && left.location() == right.location()
+        && left.imports().len() == right.imports().len()
+        && left
+            .imports()
+            .iter()
+            .zip(right.imports())
+            .all(|(left, right)| {
+                left.type_id() == right.type_id() && left.type_name() == right.type_name()
+            })
 }

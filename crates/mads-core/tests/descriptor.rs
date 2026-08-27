@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use mads_core::{
     Config, ConstructionContext, DependencyDescriptor, ErasedProvider, ModuleDescriptor,
-    ProviderDescriptor, ProviderFuture, ProviderKind, ProviderRegistry, ProviderVisibility,
-    SourceLocation,
+    ModuleImportDescriptor, ProviderDescriptor, ProviderFuture, ProviderKind, ProviderRegistry,
+    ProviderVisibility, SourceLocation,
 };
 
 struct Dependency;
@@ -26,6 +26,11 @@ fn output_constructor<'a>(_: &'a ConstructionContext<'a>) -> ProviderFuture<'a> 
 
 static DEPENDENCIES: [DependencyDescriptor; 1] = [DependencyDescriptor::new(
     "descriptor::Dependency",
+    dependency_type_id,
+)];
+
+static MODULE_IMPORTS: [ModuleImportDescriptor; 1] = [ModuleImportDescriptor::new(
+    "descriptor::DependencyModule",
     dependency_type_id,
 )];
 
@@ -74,4 +79,25 @@ fn module_descriptor_preserves_identity_and_location() {
     assert_eq!(descriptor.type_name(), "descriptor::Module");
     assert_eq!(descriptor.type_id(), TypeId::of::<Output>());
     assert_eq!(descriptor.location(), location);
+    assert_eq!(descriptor.namespace(), None);
+    assert!(descriptor.imports().is_empty());
+}
+
+#[test]
+fn module_descriptor_preserves_namespace_and_imports() {
+    let location = SourceLocation::new("module.rs", 56, 78);
+    let descriptor = ModuleDescriptor::new("descriptor::Root", output_type_id, location)
+        .with_namespace("descriptor")
+        .with_imports(&MODULE_IMPORTS);
+
+    assert_eq!(descriptor.namespace(), Some("descriptor"));
+    assert_eq!(descriptor.imports().len(), 1);
+    assert_eq!(
+        descriptor.imports()[0].type_name(),
+        "descriptor::DependencyModule"
+    );
+    assert_eq!(
+        descriptor.imports()[0].type_id(),
+        TypeId::of::<Dependency>()
+    );
 }

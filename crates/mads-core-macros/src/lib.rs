@@ -27,6 +27,8 @@ pub fn main(arguments: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Declares a non-generic unit struct as an application module.
+///
+/// Use `imports = [Module, ...]` to declare direct module dependencies.
 #[proc_macro_attribute]
 pub fn module(arguments: TokenStream, item: TokenStream) -> TokenStream {
     module::expand(arguments.into(), item.into())
