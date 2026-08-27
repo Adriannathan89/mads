@@ -53,6 +53,12 @@ fn automatic_builder<M: Module>(config: Config) -> MadsBuilder {
     builder
 }
 
+fn automatic_rootless_builder(config: Config) -> MadsBuilder {
+    let mut builder = Mads::builder_with_config(config);
+    assert!(enable_automatic_server_for_test(&mut builder));
+    builder
+}
+
 fn report<'a>(reports: &'a [AutoConfigurationReport]) -> &'a AutoConfigurationReport {
     reports
         .iter()
@@ -230,6 +236,33 @@ fn server_invalid_automatic_configuration_is_failed_and_redacted() {
             assert!(!diagnostics.contains(redaction_marker));
         }
     }
+}
+
+#[test]
+fn rootless_automatic_mode_skips_without_parsing_server_values() {
+    let invalid_host = "rootless-secret\nexample";
+    let analysis = automatic_rootless_builder(config([
+        ("server.host", invalid_host),
+        ("server.port", "0"),
+    ]))
+    .analyze();
+    let server = report(analysis.auto_configurations());
+    let diagnostics = analysis
+        .diagnostics()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<String>();
+
+    assert!(analysis.is_valid());
+    assert_eq!(server.status(), AutoConfigurationStatus::Skipped);
+    assert_eq!(server.reason_code().as_str(), "no_managed_routes");
+    assert!(
+        analysis
+            .diagnostics()
+            .iter()
+            .all(|diagnostic| diagnostic.code() != MADS020)
+    );
+    assert!(!diagnostics.contains(invalid_host));
 }
 
 #[tokio::test]

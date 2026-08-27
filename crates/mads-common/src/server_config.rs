@@ -95,7 +95,16 @@ fn evaluate(context: &AutoConfigurationContext<'_>) -> AutoConfigurationEvaluati
         );
     }
 
-    let http = match HttpApplicationScope::for_module_graph(context.module_graph()) {
+    let Some(module_graph) = context.module_graph() else {
+        return AutoConfigurationEvaluation::skipped(
+            AutoConfigurationReasonCode::new("no_managed_routes"),
+            "the selected application has no managed HTTP routes",
+            Vec::new(),
+            server_evidence(context),
+        );
+    };
+
+    let http = match HttpApplicationScope::for_module_graph(Some(module_graph)) {
         Ok(http) => http,
         Err(error) => {
             return AutoConfigurationEvaluation::failed(
