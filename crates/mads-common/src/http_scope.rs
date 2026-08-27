@@ -11,14 +11,12 @@ use crate::{GuardCatalog, GuardDescriptor};
 
 /// A selected Passport guard and the module context that selected it.
 #[cfg(feature = "jwt")]
-#[allow(dead_code)]
 pub(crate) struct ScopedGuard {
     guard: &'static GuardDescriptor,
     context_module: Option<TypeId>,
 }
 
 #[cfg(feature = "jwt")]
-#[allow(dead_code)]
 impl ScopedGuard {
     pub(crate) const fn guard(&self) -> &'static GuardDescriptor {
         self.guard
@@ -85,7 +83,6 @@ impl ScopedController {
 pub(crate) struct HttpApplicationScope {
     controllers: Vec<ScopedController>,
     #[cfg(feature = "jwt")]
-    #[allow(dead_code)]
     guards: Vec<ScopedGuard>,
 }
 
@@ -115,7 +112,6 @@ impl HttpApplicationScope {
     }
 
     #[cfg(feature = "jwt")]
-    #[allow(dead_code)]
     pub(crate) fn guards(&self) -> &[ScopedGuard] {
         &self.guards
     }
