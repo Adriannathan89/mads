@@ -200,6 +200,12 @@ impl ConstructionStep {
         self.descriptor
     }
 
+    /// Returns the underlying descriptor for framework integration and testing.
+    #[doc(hidden)]
+    pub const fn __descriptor(&self) -> &'static ProviderDescriptor {
+        self.descriptor
+    }
+
     /// Returns the stable output type name of the provider to construct.
     pub const fn type_name(&self) -> &str {
         self.type_name
@@ -260,6 +266,15 @@ impl GraphAnalysis {
     /// Reports whether analysis produced a construction plan without diagnostics.
     pub fn is_valid(&self) -> bool {
         self.diagnostics.is_empty() && self.construction_plan.is_some()
+    }
+
+    pub(crate) fn prepend_diagnostics(&mut self, mut diagnostics: Vec<Diagnostic>) {
+        if diagnostics.is_empty() {
+            return;
+        }
+        self.construction_plan = None;
+        diagnostics.append(&mut self.diagnostics);
+        self.diagnostics = diagnostics;
     }
 
     pub(crate) fn into_valid_parts(
