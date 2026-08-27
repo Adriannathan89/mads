@@ -217,7 +217,10 @@ mod tests {
         routes: &mut crate::__private::ValidatedRouteIter<'_>,
     ) -> mads_core::Result<axum::Router> {
         let _ = context.resolve::<PreflightPermit>()?;
-        let path = routes.next(HttpMethod::Get, "health")?;
+        let Some(path) = routes.next(HttpMethod::Get, "health")? else {
+            routes.finish()?;
+            return Ok(router);
+        };
         routes.finish()?;
         Ok(router.route(path, axum::routing::get(|| async { "ok" })))
     }

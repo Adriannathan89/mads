@@ -424,21 +424,22 @@ impl RouteMetadata {
         quote! {
             #(#conditional_attributes)*
             {
-                let __mads_path = __mads_routes.next(#method, #handler)?;
-                let __mads_handler_controller = __mads_controller.clone();
-                __mads_router = __mads_router.route(
-                    __mads_path,
-                    #routing(move |#(#arguments: #argument_types),*| {
-                        let __mads_controller = __mads_handler_controller.clone();
-                        async move {
-                            <Self as #trait_ident>::#handler_ident(
-                                &__mads_controller,
-                                #(#arguments,)*
-                            ).await
-                        }
-                    })
-                    #guard_layer,
-                );
+                if let Some(__mads_path) = __mads_routes.next(#method, #handler)? {
+                    let __mads_handler_controller = __mads_controller.clone();
+                    __mads_router = __mads_router.route(
+                        __mads_path,
+                        #routing(move |#(#arguments: #argument_types),*| {
+                            let __mads_controller = __mads_handler_controller.clone();
+                            async move {
+                                <Self as #trait_ident>::#handler_ident(
+                                    &__mads_controller,
+                                    #(#arguments,)*
+                                ).await
+                            }
+                        })
+                        #guard_layer,
+                    );
+                }
             }
         }
     }

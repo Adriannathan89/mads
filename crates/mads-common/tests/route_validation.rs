@@ -371,7 +371,7 @@ fn validated_routes_translate_parameters_for_axum() {
         routes
             .next(HttpMethod::Get, "get_user")
             .expect("validated route must preserve method and handler"),
-        "/users/{id}"
+        Some("/users/{id}")
     );
     routes
         .finish()
@@ -386,7 +386,7 @@ fn validates_root_routes_and_reports_registrar_metadata_mismatches() {
     let mut routes = controllers[0].routes();
     assert_eq!(
         routes.next(HttpMethod::Get, "root").expect("root path"),
-        "/"
+        Some("/")
     );
     routes.finish().expect("root route consumed");
 

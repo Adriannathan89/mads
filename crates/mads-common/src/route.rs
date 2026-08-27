@@ -16,6 +16,8 @@ use std::sync::OnceLock;
 
 use mads_core::{Diagnostic, Error, MADS030, Result, SourceLocation};
 
+use crate::http_scope::ScopedController;
+
 #[cfg(feature = "jwt")]
 #[derive(Clone, Copy)]
 struct GuardReference(&'static crate::passport::GuardDescriptor);
@@ -405,7 +407,8 @@ impl ValidatedController {
 struct ValidatedRoute {
     method: HttpMethod,
     handler: &'static str,
-    axum_path: String,
+    selected: bool,
+    axum_path: Option<String>,
 }
 
 /// Iterates validated Axum paths for a generated controller registrar.
@@ -418,10 +421,10 @@ pub struct ValidatedRouteIter<'a> {
 }
 
 impl<'a> ValidatedRouteIter<'a> {
-    /// Returns the next validated Axum path when its metadata matches.
+    /// Returns the next selected Axum path when its metadata matches.
     #[allow(clippy::result_large_err)]
     #[doc(hidden)]
-    pub fn next(&mut self, method: HttpMethod, handler: &str) -> Result<&'a str> {
+    pub fn next(&mut self, method: HttpMethod, handler: &str) -> Result<Option<&'a str>> {
         let Some(route) = self.routes.next() else {
             return Err(metadata_error(
                 "route registration",
@@ -444,7 +447,12 @@ impl<'a> ValidatedRouteIter<'a> {
                 None,
             ));
         }
-        Ok(route.axum_path.as_str())
+        Ok(route.selected.then(|| {
+            route
+                .axum_path
+                .as_deref()
+                .expect("selected routes retain a validated Axum path")
+        }))
     }
 
     /// Verifies that the generated registrar consumed every validated route.
@@ -595,6 +603,14 @@ impl RouteCatalog {
         let controllers = Self::controllers();
         validate_descriptors(&controllers)
     }
+
+    /// Returns controllers selected for `application` after scoped route validation.
+    #[allow(clippy::result_large_err)]
+    #[doc(hidden)]
+    pub fn validated_for(application: &mads_core::Mads) -> Result<Vec<ValidatedController>> {
+        let scope = crate::http_scope::HttpApplicationScope::for_application(application)?;
+        validate_scoped_descriptors(scope.controllers())
+    }
 }
 
 /// Validates an explicit controller descriptor slice for generated adapters.
@@ -605,6 +621,28 @@ impl RouteCatalog {
 #[doc(hidden)]
 pub fn validate_descriptors(
     descriptors: &[&ControllerRouteDescriptor],
+) -> Result<Vec<ValidatedController>> {
+    validate_with_selection(descriptors, |_, _| true)
+}
+
+pub(crate) fn validate_scoped_descriptors(
+    descriptors: &[ScopedController],
+) -> Result<Vec<ValidatedController>> {
+    let controllers = descriptors
+        .iter()
+        .map(ScopedController::descriptor)
+        .collect::<Vec<_>>();
+    validate_with_selection(&controllers, |controller, route| {
+        descriptors
+            .iter()
+            .find(|scoped| std::ptr::eq(scoped.descriptor(), controller))
+            .is_some_and(|scoped| scoped.selects(route))
+    })
+}
+
+fn validate_with_selection(
+    descriptors: &[&ControllerRouteDescriptor],
+    is_selected: impl Fn(&ControllerRouteDescriptor, &RouteDescriptor) -> bool,
 ) -> Result<Vec<ValidatedController>> {
     let mut controllers = descriptors.to_vec();
     controllers.sort_by(|left, right| controller_sort_key(left).cmp(&controller_sort_key(right)));
@@ -627,23 +665,27 @@ pub fn validate_descriptors(
         let mut routes = Vec::new();
         for contract in controller.contracts() {
             for route in contract.routes() {
-                validate_route(route)?;
-                let key = (route.method(), canonical_pattern(route.full_path()));
-                if let Some((previous_controller, previous_route)) =
-                    seen_routes.insert(key, (controller.type_name(), *route))
-                {
-                    return Err(conflicting_routes(
-                        controller.type_name(),
-                        *route,
-                        previous_controller,
-                        previous_route,
-                        "application",
-                    ));
+                let selected = is_selected(controller, route);
+                if selected {
+                    validate_route(route)?;
+                    let key = (route.method(), canonical_pattern(route.full_path()));
+                    if let Some((previous_controller, previous_route)) =
+                        seen_routes.insert(key, (controller.type_name(), *route))
+                    {
+                        return Err(conflicting_routes(
+                            controller.type_name(),
+                            *route,
+                            previous_controller,
+                            previous_route,
+                            "application",
+                        ));
+                    }
                 }
                 routes.push(ValidatedRoute {
                     method: route.method(),
                     handler: route.handler(),
-                    axum_path: to_axum_path(route.full_path()),
+                    selected,
+                    axum_path: selected.then(|| to_axum_path(route.full_path())),
                 });
             }
         }

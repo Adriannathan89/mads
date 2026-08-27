@@ -5,7 +5,7 @@
 //! boundary is always available through [`core`].
 #![cfg_attr(
     feature = "http",
-    doc = "\nThe `http` feature provides compile-time controller and route contracts and the Axum runtime. [`build_router`] validates every registered controller before it resolves a controller or invokes a typed registrar; [`serve`] performs that same validation before lifecycle startup or socket binding. Use [`routes`] to declare a route contract and [`controller`] to bind it to a managed controller. The resulting descriptors can be inspected through [`RouteCatalog`] before the HTTP runtime installs handlers. [`axum`] is deliberately re-exported for native extractors, response types, routers, middleware, and Tower composition."
+    doc = "\nThe `http` feature provides compile-time controller and route contracts and the Axum runtime. [`build_router`] validates every controller selected for the application before it resolves a controller or invokes a typed registrar; [`serve`] performs that same validation before lifecycle startup or socket binding. Use [`routes`] to declare a route contract and [`controller`] to bind it to a managed controller. The resulting descriptors can be inspected through [`RouteCatalog`] before the HTTP runtime installs handlers. [`axum`] is deliberately re-exported for native extractors, response types, routers, middleware, and Tower composition."
 )]
 #![cfg_attr(
     feature = "database",
@@ -16,6 +16,8 @@
 
 #[cfg(feature = "http")]
 mod extract;
+#[cfg(feature = "http")]
+mod http_scope;
 #[cfg(feature = "http")]
 mod response;
 #[cfg(feature = "http")]

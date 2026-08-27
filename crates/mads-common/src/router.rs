@@ -9,9 +9,9 @@ use crate::RouteCatalog;
 #[cfg(feature = "jwt")]
 use crate::{GuardCatalog, PassportStrategyCatalog};
 
-/// Builds an Axum router from every validated managed-controller registration.
+/// Builds an Axum router from the application's validated managed-controller registrations.
 ///
-/// The complete route catalog is validated before any generated registrar is
+/// The selected route scope is validated before any generated registrar is
 /// invoked, so invalid metadata cannot install a partial router. Each
 /// application-scoped controller is resolved once while the router is being
 /// assembled; requests then use the generated typed trait calls.
@@ -41,7 +41,7 @@ use crate::{GuardCatalog, PassportStrategyCatalog};
 pub fn build_router(application: &mads_core::Mads) -> mads_core::Result<axum::Router> {
     #[cfg(feature = "jwt")]
     PassportStrategyCatalog::preflight(&GuardCatalog::guards())?;
-    let controllers = RouteCatalog::validated()?;
+    let controllers = RouteCatalog::validated_for(application)?;
     let mut router = axum::Router::new();
     for controller in controllers {
         let mut routes = controller.routes();
