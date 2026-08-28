@@ -6,7 +6,11 @@
 
 MADS.rs adalah opinionated, auto-configuring backend application framework untuk Rust. MADS berdiri di atas ekosistem yang sudah matang—terutama Axum/Tower/Tokio untuk HTTP/runtime dan Diesel untuk persistence—dan berfokus pada application structure, type-driven dependency wiring, conventions, diagnostics, serta developer experience.
 
-Dokumen ini adalah baseline desain **MADS v1**. Cache dan rate limiting sengaja **tidak termasuk scope v1**. Keduanya direncanakan sebagai capability opsional di `mads/extra` setelah fondasi v1 stabil.
+Dokumen ini adalah baseline desain **MADS v1**. Bagian yang ditandai target
+atau future menjelaskan arah setelah v0.6.0, bukan API yang sudah dikirim pada
+v0.6.0. Cache dan rate limiting sengaja **tidak termasuk scope v1**. Keduanya
+direncanakan sebagai capability opsional di `mads/extra` setelah fondasi v1
+stabil.
 
 ---
 
@@ -335,12 +339,24 @@ GET /users/:id
 
 ## 9. Module Model
 
-Module adalah architecture boundary, bukan manual DI manifest.
+Module adalah architecture boundary, bukan manual DI manifest. Pada v0.6.0,
+ownership berasal dari Rust namespace dan root menentukan reachable module
+graph; module tidak memiliki HTTP path.
 
 ```rust
-#[module(path = "/users")]
+#[module]
 pub struct UserModule;
 ```
+
+Prefix HTTP dimiliki secara eksklusif oleh contract route:
+
+```rust
+#[routes(prefix = "/users")]
+pub trait UserRoutes {}
+```
+
+Dependency lintas module memerlukan direct import dan plain `pub` pada item
+yang dipakai. Tidak ada daftar `exports` terpisah, dan import tidak transitif.
 
 Root module mendeskripsikan high-level application architecture:
 
@@ -555,7 +571,7 @@ impl UserRoutes for UserController {
 MADS mengklasifikasikan parameter melalui type metadata:
 
 ```text
-Json<CreateUser> → HTTP body / validation
+Json<CreateUser> → HTTP body; validation adalah target v1
 Path<i64>        → HTTP path
 Query<T>         → HTTP query
 UserService      → controller/application dependency
@@ -565,9 +581,9 @@ Common path tidak memerlukan `State<AppState>` atau `Arc<UserService>`.
 
 ---
 
-## 15. Validation and Errors
+## 15. Validation and Errors (target v1, not shipped in v0.6.0)
 
-Input:
+Future input API:
 
 ```rust
 #[derive(Input)]
@@ -694,11 +710,11 @@ mads db rollback
 mads db status
 ```
 
-`mads graph`:
+`mads graph` future:
 
 ```text
 AppModule
-└── UserModule [/users]
+└── UserModule (route prefix: /users)
     ├── UserRepository
     │   └── Database
     │       └── DieselPool

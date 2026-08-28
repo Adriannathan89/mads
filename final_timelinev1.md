@@ -27,9 +27,7 @@ Target utama v1:
   ↓
 0.5.5  Configuration Arrays + Cookies + Passport/JWT
   ↓
-0.5.6  CORS + HTTP Auto-Binding
-  ↓
-0.6.0  Modules + Visibility
+0.6.0  Modules + Scoped HTTP Runtime
   ↓
 0.7.0  Validation + Errors
   ↓
@@ -494,87 +492,65 @@ hashing, CSRF, CORS, HTTP auto-binding, remote JWKS, JWE, atau module scoping.
 
 ---
 
-# v0.5.6 — CORS and HTTP Auto-Binding
+# v0.6.0 — Modules, CORS, and Automatic HTTP Runtime
 
 ## Objective
 
-Melengkapi browser delivery dan listener configuration setelah authentication
-contracts v0.5.5 stabil.
-
-### CORS
-
-Add opt-in origin, method, request/exposed header, credentials, preflight, dan
-max-age configuration. Wildcard origin tidak boleh digabung credentials. CORS
-harus berlaku konsisten untuk generated MADS routes dan native Axum routes serta
-tetap composable dengan Tower.
-
-### HTTP Auto-Binding
-
-Tentukan host/port keys dan defaults, explicit-bind back-off, activation
-conditions, redacted diagnostics, serta lifecycle/bind ordering. Existing
-`serve(application, "127.0.0.1:3000")` tetap menjadi explicit escape hatch.
-
-### Exit Criteria
-
-```text
-configured browser origins and preflight behavior tested
-credentialed CORS validation is production-safe
-auto-binding activation and explicit-binding back-off deterministic
-bind failures preserve lifecycle rollback ordering
-native Axum composition remains available
-```
-
----
-
-# v0.6.0 — Modules and Architectural Boundaries
-
-## Objective
-
-Membuat modules sebagai explicit architecture boundary tanpa mengubahnya menjadi DI manifest.
-
-Module reachability dan provider export eligibility diterapkan secara additive
-di atas provider/route/Passport strategy descriptors v0.5.5. Hanya descriptor
-dari owning module yang reachable dari root dan legally exported yang eligible
-untuk strategy name resolution; v0.5.5 complete-catalog behavior tidak diubah
-secara retroaktif.
+Menggabungkan architecture boundary, scoped automatic wiring, browser delivery,
+dan conventional HTTP runtime dalam satu aplikasi berakar. Module bukan DI
+manifest: Rust namespace menentukan ownership, sedangkan provider relationship
+tetap diinfer dari dependency concrete type.
 
 ### Implement
 
-```text
-#[module]
-module imports
-module path prefix
-exports / visibility
-cross-module dependency validation
-module cycle detection
-root AppModule
-```
+~~~text
+#[module(imports = [UserHttpModule])]
+Rust-namespace ownership
+direct imports + plain pub cross-module access
+unowned dependency closure with propagated module context
+scoped providers/controllers/routes/guards/strategies/auto-configuration
+Mads::run::<AppModule>().await
+optional .env + optional mads.toml + MADS_* overrides
+server.host/server.port defaults and explicit serve override
+strict application-wide CORS
+native router composition
+~~~
 
-Target:
+Module graph dilalui dari root dengan direct imports saja. Provider, controller,
+route, guard, dan strategy dimiliki oleh nearest annotated Rust namespace.
+Provider unowned ikut hanya melalui dependency closure dan mempertahankan module
+context pemanggil, sehingga tidak dapat melewati import langsung yang hilang.
+Provider lintas module harus public dan module pemiliknya harus di-import
+langsung; pub menggantikan exports manifest. Route contract secara eksklusif
+memiliki prefix HTTP melalui #[routes(prefix = "...")]; #[module] tidak
+menerima path HTTP.
 
-```rust
-#[module]
-pub struct UserModule;
+Standard run memuat optional .env untuk interpolation, optional mads.toml,
+kemudian override MADS_* dari current working directory. Defaults automatic
+server adalah server.host = 127.0.0.1 dan server.port = 3000. Explicit
+serve/serve_router address mengambil alih binding, termasuk port zero.
 
-#[module(imports = [UserModule])]
-pub struct AppModule;
-```
+CORS adalah opt-in dan divalidasi ketat sebelum lifecycle; konfigurasi final
+diterapkan satu kali sebagai layer terluar setelah generated dan native router
+digabung. Native Axum router tetap escape hatch yang didukung.
 
-Rule:
-
-```text
-module relationship   = explicit
-provider relationship = inferred
-```
+Builder tanpa root tetap mempertahankan complete-catalog behavior v0.5.5 untuk
+compatibility low-level.
 
 ### Exit Criteria
 
-- root application graph dapat dimulai dari `AppModule`;
-- dependency lintas module mengikuti visibility/export rules;
-- route prefix module bekerja;
-- Passport strategy selection ignores unreachable or non-exported providers;
-- module cycle diagnostic readable;
-- services/routes tidak perlu didaftarkan ulang secara manual.
+- root application graph dapat dimulai dari AppModule dan direct import cycle
+  diagnostic tetap readable;
+- namespace ownership, direct public access, dan unowned context propagation
+  memvalidasi dependency lintas module;
+- hanya provider, controller, route, guard, strategy, dan official
+  auto-configuration dari application scope yang selected;
+- standard Mads::run memuat source konvensional, memvalidasi router/CORS,
+  kemudian bind satu listener dengan rollback lifecycle yang deterministik;
+- CORS credential dan wildcard validation production-safe untuk generated dan
+  native routes;
+- explicit low-level builder, server address, dan native router composition
+  tetap tersedia.
 
 ---
 

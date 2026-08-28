@@ -1,9 +1,28 @@
 # MADS.rs
 
-MADS.rs 0.5.5 is a Rust application framework with a framework-neutral core, an
-Axum HTTP runtime, and an explainable PostgreSQL/Diesel conditional default.
-It validates every declared route before it starts lifecycle hooks, checks the
-database, or binds a socket.
+MADS.rs 0.6.0 is a Rust application framework with a framework-neutral core,
+a scoped Axum HTTP runtime, and explainable PostgreSQL/Diesel conditional
+defaults. A root module selects one application; startup validates its scoped
+graph and routes before it starts lifecycle hooks, checks a database, or binds
+a socket.
+
+## Standard application
+
+```rust
+use mads::prelude::*;
+
+#[module(imports = [UserHttpModule])]
+struct AppModule;
+
+#[mads::main]
+async fn main() -> Result<(), HttpRuntimeError> {
+    Mads::run::<AppModule>().await
+}
+```
+
+`Mads::run` is the recommended application entry point. The root module
+selects its direct imports and the providers, controllers, routes, guards,
+strategies, and official auto-configurations reachable through that graph.
 
 ## Crates and boundaries
 
@@ -19,7 +38,7 @@ database, or binds a socket.
 
 ```toml
 [dependencies]
-mads = { version = "0.5.5", features = ["jwt", "cookies"] }
+mads = "0.6.0"
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
@@ -35,61 +54,82 @@ Diesel, use `default-features = false` with `features = ["http", "jwt",
 `cookies` includes HTTP. Passport strategies and Bearer guards require `http +
 jwt`; cookie guards additionally require `cookies`.
 
-## Explicit configuration, zero database bootstrap
+## Conventional configuration and HTTP
 
-Commit configuration shape, never a connection secret:
+Only `Mads::run` loads conventional configuration. It reads the process
+current working directory in this order:
+
+1. optional `.env`, used only for interpolation;
+2. optional `mads.toml` as ordinary configuration;
+3. final `MADS_*` environment overrides.
+
+Process variables win during `${NAME}` interpolation, dotenv loading never
+mutates the process environment, and `MADS_SERVER__PORT` maps to
+`server.port`. Both files may be absent; a present unreadable or malformed file
+is a bootstrap failure. MADS does not search parent directories or
+`CARGO_MANIFEST_DIR`.
 
 ```toml
 # mads.toml
-[database]
-url = "${DATABASE_URL}"
-pool_size = 10 # default: 10
-migrate = true # default: false
+[server]
+host = "127.0.0.1" # default
+port = 3000        # default
+
+[server.cors]
+origins = ["https://app.example.com"]
+methods = ["GET", "POST"]
+allowed_headers = ["authorization", "content-type"]
+exposed_headers = ["x-request-id"]
+credentials = false
+max_age_seconds = 600
 ```
+
+Wildcard-capable CORS fields use a scalar, not a one-element list:
+
+```toml
+[server.cors]
+origins = "*"
+methods = ["GET", "POST"]
+allowed_headers = "*"
+exposed_headers = "*"
+```
+
+CORS is opt-in, validated before lifecycle startup, and applied as the
+outermost layer to both generated and native routes. Wildcard origins or
+headers cannot be combined with credentials. It is a browser response-access
+policy, not authorization or CSRF protection.
 
 Use the tracked [`.env.example`](.env.example) as a local template, copy it to
 the ignored `.env`, and put real secrets in process variables in CI and
-production. The repository safety pattern is:
+production.
 
-```gitignore
-.env
-.env.*
-!.env.example
-```
+## Low-level builder
 
-Dotenv loading is generic: `redis.url = "${REDIS_URL}"` needs no
-database-specific loader in a future integration. Dotenv files are read into a
-temporary interpolation map and never mutate the process environment. Process
-variables win over dotenv variables. Configuration sources merge in order, so
-the final `EnvSource::new("MADS_")` makes `MADS_DATABASE__URL` a direct
-`database.url` override (and likewise `MADS_DATABASE__POOL_SIZE` and
-`MADS_DATABASE__MIGRATE`). MADS does not auto-load `.env`, `mads.toml`, or
-`MADS_*` variables; applications assemble this configuration explicitly.
+Use the builder when configuration, migrations, hooks, binding, or router
+composition must be explicit. It never loads `.env`, `mads.toml`, or `MADS_*`
+on its own. The explicit address overrides `[server]` binding and may use port
+zero; merge native Axum routes before passing the raw router to `serve_router`.
 
 ```rust,ignore
-use mads::{
-    core::{ConfigBuilder, DotenvSource, EnvSource, TomlSource},
-    diesel_migrations::{EmbeddedMigrations, embed_migrations},
-    prelude::*,
-};
-
-const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
-
-let config = ConfigBuilder::new()
-    .dotenv(DotenvSource::optional(".env"))
-    .source(TomlSource::file("mads.toml"))
-    .source(EnvSource::new("MADS_"))
-    .build()?;
 let mut builder = Mads::builder_with_config(config);
+builder.root::<AppModule>()?;
 builder.database_migrations(MIGRATIONS)?;
+// builder.lifecycle_hook(MyHook);
 let application = builder.build().await?;
-# Ok::<(), Box<dyn std::error::Error>>(())
+let router = build_router(&application)?.merge(native_router);
+serve_router(application, router, "127.0.0.1:0").await?;
 ```
 
+For direct in-process router use, call `configure_router(&application, router)`
+after the merge. A builder without `root::<AppModule>()` intentionally retains
+the complete-catalog compatibility behavior.
+
+## Database provisioning
+
 This is zero **database** bootstrap, not zero application configuration. A
-provider that directly requires `Database` activates the linked default only
-after the complete catalog, explicit configuration, and virtual graph all
-validate. `database_migrations` separately registers one embedded source; it
+provider in the selected application scope that directly requires `Database`
+activates the linked default only after configuration and virtual graph
+validation. `database_migrations` separately registers one embedded source; it
 does not create a pool, connect, or run migrations. It is required only when
 `database.migrate = true`; existing pending embedded migrations then run after
 readiness, and no pending migrations are a successful no-op. MADS never
@@ -135,18 +175,20 @@ Use the direct `mads::diesel` and
 `mads::diesel_migrations` re-exports when native Diesel APIs are the right
 tool.
 
-Listener addresses remain explicit, for example
-`serve(application, "127.0.0.1:3000")`. HTTP host/port auto-binding is deferred
-to v0.5.6.
+`serve(application, "127.0.0.1:3000")` remains the explicit generated-router
+escape hatch. Its address overrides automatic server binding; use
+`serve_router` when the raw generated router has been merged with native Axum
+routes.
 
 ## Passport configuration and JWT profiles
 
-Configuration is never loaded implicitly. Dotenv sources provide interpolation
-values, and ordinary sources merge from first to last; a later scalar or string
-array replaces an earlier value at the same key completely. Process variables
-override dotenv values during `${NAME}` interpolation. `EnvSource` is
-scalar-only, so arrays such as `algorithms` and `audiences` belong in TOML or a
-programmatic `ConfigDocument`/`MapSource`.
+`Mads::run` supplies the standard conventional source order; the low-level
+builder stays explicit. Dotenv sources provide interpolation values, and
+ordinary sources merge from first to last; a later scalar or string array
+replaces an earlier value at the same key completely. Process variables override
+dotenv values during `${NAME}` interpolation. `EnvSource` is scalar-only, so
+arrays such as `algorithms` and `audiences` belong in TOML or a programmatic
+`ConfigDocument`/`MapSource`.
 
 ```toml
 # mads.toml
@@ -352,18 +394,20 @@ impl UserRoutes for UserController {
     }
 }
 
+#[module]
+struct AppModule;
+
 #[mads::main]
-async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let application = Mads::builder().build().await?;
-    serve(application, "127.0.0.1:3000").await?;
-    Ok(())
+async fn main() -> Result<(), HttpRuntimeError> {
+    Mads::run::<AppModule>().await
 }
 ```
 
 ## Extractors, responses, and routing
 
 The prelude exports `Path<T>`, `Query<T>`, `Json<T>`, `Header<T>`, `Request`,
-`HttpResult<T>`, `Created<T>`, `NoContent`, `build_router`, and `serve`.
+`HttpResult<T>`, `Created<T>`, `NoContent`, `build_router`, `configure_router`,
+`serve`, and `serve_router`.
 `mads::common::axum` remains the native Axum escape hatch for extractors,
 responses, routers, middleware, and Tower composition.
 
@@ -371,22 +415,27 @@ MADS route metadata uses `/:parameter`; the validated adapter translates it to
 Axum 0.8 syntax only while registering the route. Invalid metadata and
 conflicts fail with `MADS030` before router construction. GET also handles
 HEAD, OPTIONS is not synthesized, static routes win over parameter routes, and
-trailing slashes remain strict. Use `build_router(&application)` with Tower's
-`ServiceExt::oneshot` for in-process route tests without binding a listener.
+trailing slashes remain strict. `build_router(&application)` returns the raw
+generated router; merge native routes before `configure_router` or
+`serve_router` applies final application-wide CORS. Use the configured router
+with Tower's `ServiceExt::oneshot` for in-process route tests without binding a
+listener.
 
 ## Current scope
 
-Version 0.5.5 provides PostgreSQL-only Diesel conditional defaults, explicit
-scalar/array configuration, cookies, typed access/refresh JWTs, managed Passport
-strategies, principals, and route/native guards. It does **not** implement login
-or credential validation, refresh endpoints, refresh persistence/rotation/
-revocation, password hashing, CSRF, CORS, HTTP auto-binding, remote JWKS, JWE,
-or module scoping. Database errors are not automatically mapped to HTTP
-responses; applications choose their delivery policy.
+Version 0.6.0 provides root-module scope, Rust-namespace ownership, direct
+public cross-module access, scoped providers/controllers/routes/guards/
+strategies/auto-configuration, conventional configuration, automatic one-listener
+HTTP startup, strict application-wide CORS, and raw native-router composition.
+It preserves the low-level builder and complete-catalog rootless compatibility.
 
-v0.5.6 owns CORS and HTTP auto-binding. v0.6.0 will restrict currently global
-strategy descriptors to root-module-reachable providers and enforce export
-eligibility; v0.5.5 deliberately does not implement that scoping.
+It does **not** implement trait or interface bindings, `Inject<dyn Trait>`,
+request-validation derives or schemas, login or credential validation, refresh
+endpoints or persistence/rotation/revocation, password hashing, CSRF, remote
+JWKS, JWE, generic typed configuration, third-party auto-configuration, or
+multiple-listener/TLS/HTTP2 server configuration. Database errors are not
+automatically mapped to HTTP responses; applications choose their delivery
+policy.
 
 ## Development
 

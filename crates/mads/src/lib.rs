@@ -7,14 +7,15 @@
 //! visibility govern access across module boundaries.
 //!
 //! The standard startup path loads optional `.env`, optional `mads.toml`, and
-//! final `MADS_*` overrides from the current working directory, builds the root
-//! module, configures the complete router, starts lifecycle hooks, and serves
-//! the configured listener:
+//! final `MADS_*` overrides from the current working directory in that order.
+//! It builds the root module, configures the complete router, starts lifecycle
+//! hooks, and serves the configured listener. The automatic server defaults are
+//! `127.0.0.1:3000`; `[server.cors]` is an opt-in strict outer router layer:
 //!
 //! ```no_run
 //! use mads::prelude::*;
 //!
-//! #[module]
+//! #[module(imports = [UserHttpModule])]
 //! struct AppModule;
 //!
 //! #[mads::main]
@@ -24,50 +25,37 @@
 //! ```
 //!
 //! Use the low-level builder for explicit configuration, embedded migrations,
-//! lifecycle hooks, native routers, or listener addresses. [`build_router`]
-//! returns an unconfigured generated router so native routes can be merged
-//! before [`configure_router`] or [`serve_router`] applies application-wide
-//! configuration. A builder without [`core::MadsBuilder::root`] retains
-//! complete-catalog compatibility.
+//! lifecycle hooks, native routers, or listener addresses. It never loads
+//! conventional sources. [`build_router`] returns an unconfigured generated
+//! router so native routes can be merged before [`configure_router`] or
+//! [`serve_router`] applies application-wide configuration. A builder without
+//! [`core::MadsBuilder::root`] retains complete-catalog compatibility.
 //!
 //! ```no_run
 //! use mads::prelude::*;
 //!
-//! #[mads::main]
-//! async fn main() {
-//!     let application = Mads::builder().build().await.unwrap();
-//!     let raw_router = build_router(&application).unwrap();
-//!     serve_router(application, raw_router, "127.0.0.1:3000")
-//!         .await
-//!         .unwrap();
-//! }
+//! # async fn low_level(config: mads::Config, native_router: mads::axum::Router)
+//! # -> Result<(), Box<dyn std::error::Error>> {
+//! # let migrations = mads::diesel_migrations::embed_migrations!("migrations");
+//! let mut builder = Mads::builder_with_config(config);
+//! builder.root::<AppModule>()?;
+//! builder.database_migrations(migrations)?;
+//! // builder.lifecycle_hook(MyHook);
+//! let application = builder.build().await?;
+//! let router = build_router(&application)?.merge(native_router);
+//! serve_router(application, router, "127.0.0.1:0").await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
-//! [`core::Mads::builder`] never loads conventional configuration sources.
+//! The explicit address overrides `[server]` binding and may use port zero.
+//! `configure_router` is the alternative for direct in-process router use after
+//! the merge; do not pass an already configured router to `serve_router`.
 //! Database provisioning remains conditional on the selected application, and
 //! embedded migrations require explicit
 //! [`MadsBuilderDatabaseExt::database_migrations`] registration. The retained
 //! [`AutoConfigurationReport`] records expose redacted decision evidence only.
 //! `DatabaseBootstrap` remains the native Diesel override.
-//!
-//! ```no_run
-//! use mads::{
-//!     core::{ConfigBuilder, MapSource},
-//!     prelude::*,
-//! };
-//!
-//! #[mads::main]
-//! async fn main() {
-//!     let config = ConfigBuilder::new()
-//!         .source(MapSource::new(
-//!             "application",
-//!             [("database.url", "postgres://localhost/mads")],
-//!         ))
-//!         .build()
-//!         .unwrap();
-//!     let _application = Mads::builder_with_config(config).build().await.unwrap();
-//! }
-//! ```
 //!
 //! Register custom access and refresh strategies as managed providers. MADS
 //! verifies JWT cryptography, registered claims, and token kind before either
