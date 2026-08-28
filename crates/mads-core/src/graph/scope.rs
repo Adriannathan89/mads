@@ -28,14 +28,14 @@ pub(crate) fn select_scoped_providers(
         .collect::<HashSet<_>>();
     let mut queue = VecDeque::new();
 
-    for descriptor in descriptors {
+    for (descriptor_index, descriptor) in descriptors.iter().copied().enumerate() {
         if satisfied_types.contains(&descriptor.type_id()) {
             continue;
         }
         let owner = owner_of(descriptor.namespace(), &modules);
         if owner.is_some_and(|owner| graph.is_reachable(owner.type_id())) {
             queue.push_back(WorkItem {
-                provider: descriptor.type_id(),
+                descriptor_index,
                 context: owner.map(ModuleDescriptor::type_id),
                 dependency_path: vec![descriptor.type_name()],
             });
@@ -43,19 +43,17 @@ pub(crate) fn select_scoped_providers(
     }
 
     let mut processed = HashSet::new();
-    let mut selected_types = HashSet::new();
-    let mut selected = Vec::new();
+    let mut selected_indices = HashSet::new();
+    let mut selected: Vec<&'static ProviderDescriptor> = Vec::new();
     let mut diagnostics = Vec::new();
     let mut covered_missing = Vec::new();
 
     while let Some(work) = queue.pop_front() {
-        if !processed.insert((work.provider, work.context)) {
+        if !processed.insert((work.descriptor_index, work.context)) {
             continue;
         }
-        let Some(descriptor) = descriptor_for(work.provider, descriptors) else {
-            continue;
-        };
-        if selected_types.insert(descriptor.type_id()) {
+        let descriptor = descriptors[work.descriptor_index];
+        if selected_indices.insert(work.descriptor_index) {
             selected.push(descriptor);
         }
 
@@ -64,71 +62,102 @@ pub(crate) fn select_scoped_providers(
             if satisfied_types.contains(&dependency_type) {
                 continue;
             }
-            let Some(dependency_descriptor) = descriptor_for(dependency_type, descriptors) else {
-                continue;
-            };
-            let mut dependency_path = work.dependency_path.clone();
-            dependency_path.push(dependency_descriptor.type_name());
-            let owner = owner_of(dependency_descriptor.namespace(), &modules);
+            let mut matching_descriptor_found = false;
+            let mut admissible = Vec::new();
+            let mut boundary_failures = Vec::new();
+            let mut owned_outside_scope = false;
+            for (dependency_index, dependency_descriptor) in descriptors
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|(_, descriptor)| descriptor.type_id() == dependency_type)
+            {
+                matching_descriptor_found = true;
+                let mut dependency_path = work.dependency_path.clone();
+                dependency_path.push(dependency_descriptor.type_name());
+                let owner = owner_of(dependency_descriptor.namespace(), &modules);
 
-            match (work.context, owner) {
-                (context, None) => queue.push_back(WorkItem {
-                    provider: dependency_type,
-                    context,
-                    dependency_path,
-                }),
-                (Some(context), Some(owner)) if owner.type_id() == context => {
-                    queue.push_back(WorkItem {
-                        provider: dependency_type,
-                        context: Some(owner.type_id()),
-                        dependency_path,
-                    });
-                }
-                (Some(context), Some(owner))
-                    if can_access(
-                        graph,
+                match (work.context, owner) {
+                    (context, None) => admissible.push(WorkItem {
+                        descriptor_index: dependency_index,
                         context,
-                        owner.type_id(),
-                        dependency_descriptor.visibility(),
-                    ) =>
+                        dependency_path,
+                    }),
+                    (Some(context), Some(owner)) if owner.type_id() == context => {
+                        admissible.push(WorkItem {
+                            descriptor_index: dependency_index,
+                            context: Some(owner.type_id()),
+                            dependency_path,
+                        });
+                    }
+                    (Some(context), Some(owner))
+                        if can_access(
+                            graph,
+                            context,
+                            owner.type_id(),
+                            dependency_descriptor.visibility(),
+                        ) =>
+                    {
+                        admissible.push(WorkItem {
+                            descriptor_index: dependency_index,
+                            context: Some(owner.type_id()),
+                            dependency_path,
+                        });
+                    }
+                    (Some(context), Some(owner)) => {
+                        boundary_failures.push((
+                            context,
+                            owner,
+                            dependency_descriptor,
+                            dependency_path,
+                        ));
+                    }
+                    (None, Some(owner)) if graph.is_reachable(owner.type_id()) => {
+                        admissible.push(WorkItem {
+                            descriptor_index: dependency_index,
+                            context: Some(owner.type_id()),
+                            dependency_path,
+                        });
+                    }
+                    (None, Some(_)) => {
+                        owned_outside_scope = true;
+                    }
+                }
+            }
+            if admissible.is_empty() {
+                let boundary_failed = !boundary_failures.is_empty();
+                diagnostics.extend(boundary_failures.into_iter().map(
+                    |(context, owner, dependency_descriptor, dependency_path)| {
+                        boundary_error(
+                            graph,
+                            context,
+                            owner,
+                            dependency_descriptor,
+                            &dependency_path,
+                        )
+                    },
+                ));
+                if matching_descriptor_found
+                    && (owned_outside_scope || boundary_failed)
+                    && !covered_missing.contains(&dependency_type)
                 {
-                    queue.push_back(WorkItem {
-                        provider: dependency_type,
-                        context: Some(owner.type_id()),
-                        dependency_path,
-                    });
+                    covered_missing.push(dependency_type);
                 }
-                (Some(context), Some(owner)) => {
-                    diagnostics.push(boundary_error(
-                        graph,
-                        context,
-                        owner,
-                        dependency_descriptor,
-                        &dependency_path,
-                    ));
-                    if !covered_missing.contains(&dependency_type) {
-                        covered_missing.push(dependency_type);
-                    }
-                }
-                (None, Some(owner)) if graph.is_reachable(owner.type_id()) => {
-                    queue.push_back(WorkItem {
-                        provider: dependency_type,
-                        context: Some(owner.type_id()),
-                        dependency_path,
-                    });
-                }
-                (None, Some(_)) => {
-                    if !covered_missing.contains(&dependency_type) {
-                        covered_missing.push(dependency_type);
-                    }
-                }
+            } else {
+                queue.extend(admissible);
             }
         }
     }
 
-    let mut ownership_with_types = selected
-        .iter()
-        .map(|descriptor| {
+    let mut ownership_with_types = Vec::new();
+    for descriptor in &selected {
+        if ownership_with_types
+            .iter()
+            .any(|(type_id, _)| *type_id == descriptor.type_id())
+        {
+            continue;
+        }
+        ownership_with_types.push({
             let owner = owner_of(descriptor.namespace(), &modules);
             (
                 descriptor.type_id(),
@@ -137,8 +166,8 @@ pub(crate) fn select_scoped_providers(
                     module_type_name: owner.map(ModuleDescriptor::type_name),
                 },
             )
-        })
-        .collect::<Vec<_>>();
+        });
+    }
     for provider in satisfied {
         if ownership_with_types
             .iter()
@@ -178,16 +207,6 @@ fn can_access(
 ) -> bool {
     context == owner
         || (visibility == ProviderVisibility::Public && graph.directly_imports(context, owner))
-}
-
-fn descriptor_for(
-    type_id: TypeId,
-    descriptors: &[&'static ProviderDescriptor],
-) -> Option<&'static ProviderDescriptor> {
-    descriptors
-        .iter()
-        .copied()
-        .find(|descriptor| descriptor.type_id() == type_id)
 }
 
 fn owner_of(
@@ -248,7 +267,7 @@ fn boundary_error(
 }
 
 struct WorkItem {
-    provider: TypeId,
+    descriptor_index: usize,
     context: Option<TypeId>,
     dependency_path: Vec<&'static str>,
 }

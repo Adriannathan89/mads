@@ -16,7 +16,7 @@ pub use model::{
 pub use module::{ModuleGraph, ModuleImportEdge, ModuleNode, ProviderOwnership};
 
 pub(crate) use model::SatisfiedProvider;
-pub(crate) use module::build_module_graph;
+pub(crate) use module::{build_module_graph, validate_module_catalog};
 pub(crate) use scope::select_scoped_providers;
 
 pub(crate) fn analyze_descriptors(

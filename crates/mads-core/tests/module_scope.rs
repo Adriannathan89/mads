@@ -1,9 +1,13 @@
 //! Integration tests for rooted provider selection and module boundaries.
 
+use std::any::TypeId;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mads_core::{
-    Config, ConstructionContext, GraphAnalysis, MADS009, Mads, Module, ProviderRegistry,
+    Config, ConstructionContext, ErasedProvider, GraphAnalysis, MADS001, MADS002, MADS009, Mads,
+    Module, ProviderDescriptor, ProviderFuture, ProviderKind, ProviderRegistry, ProviderVisibility,
+    SourceLocation,
 };
 
 mod selected_scope {
@@ -269,6 +273,128 @@ mod diamond {
     }
 }
 
+mod duplicate_reachable {
+    use super::{
+        Arc, ConstructionContext, ErasedProvider, ProviderDescriptor, ProviderFuture, ProviderKind,
+        ProviderVisibility, SourceLocation, TypeId,
+    };
+
+    #[mads_core::module]
+    pub struct DuplicateRoot;
+
+    pub struct DuplicateProvider;
+
+    fn duplicate_type_id() -> TypeId {
+        TypeId::of::<DuplicateProvider>()
+    }
+
+    fn duplicate_constructor<'a>(_: &'a ConstructionContext<'a>) -> ProviderFuture<'a> {
+        Box::pin(async { Ok(Arc::new(DuplicateProvider) as ErasedProvider) })
+    }
+
+    mads_core::__private::inventory::submit! {
+        ProviderDescriptor::new(
+            ProviderKind::Provider,
+            "DuplicateProvider",
+            duplicate_type_id,
+            &[],
+            ProviderVisibility::Public,
+            SourceLocation::new("duplicate_reachable.rs", 1, 1),
+            duplicate_constructor,
+        )
+        .with_namespace(module_path!())
+    }
+
+    mads_core::__private::inventory::submit! {
+        ProviderDescriptor::new(
+            ProviderKind::Provider,
+            "DuplicateProvider",
+            duplicate_type_id,
+            &[],
+            ProviderVisibility::Public,
+            SourceLocation::new("duplicate_reachable.rs", 1, 1),
+            duplicate_constructor,
+        )
+        .with_namespace(module_path!())
+    }
+}
+
+mod ambiguous_dependency {
+    #[derive(Clone)]
+    pub struct SharedDependency;
+
+    pub mod app {
+        use super::SharedDependency;
+
+        #[mads_core::module]
+        pub struct AmbiguousDependencyRoot;
+
+        pub struct Consumer;
+
+        #[mads_core::provider]
+        pub fn consumer(_dependency: SharedDependency) -> Consumer {
+            Consumer
+        }
+    }
+
+    pub mod constructors {
+        use super::SharedDependency;
+
+        #[mads_core::provider]
+        pub fn first_shared_dependency() -> SharedDependency {
+            SharedDependency
+        }
+
+        #[mads_core::provider]
+        pub fn second_shared_dependency() -> SharedDependency {
+            SharedDependency
+        }
+    }
+}
+
+mod mixed_dependency_scope {
+    #[derive(Clone)]
+    pub struct SharedDependency;
+
+    pub mod allowed {
+        use super::SharedDependency;
+
+        #[mads_core::module]
+        pub struct AllowedModule;
+
+        #[mads_core::provider]
+        pub fn allowed_dependency() -> SharedDependency {
+            SharedDependency
+        }
+    }
+
+    pub mod foreign {
+        use super::SharedDependency;
+
+        #[mads_core::module]
+        pub struct ForeignModule;
+
+        #[mads_core::provider]
+        pub fn foreign_dependency() -> SharedDependency {
+            SharedDependency
+        }
+    }
+
+    pub mod app {
+        use super::{SharedDependency, allowed::AllowedModule};
+
+        #[mads_core::module(imports = [AllowedModule])]
+        pub struct MixedDependencyRoot;
+
+        pub struct Consumer;
+
+        #[mads_core::provider]
+        pub fn consumer(_dependency: SharedDependency) -> Consumer {
+            Consumer
+        }
+    }
+}
+
 fn rooted_analysis<M: Module>() -> GraphAnalysis {
     let mut builder = Mads::builder();
     builder
@@ -299,6 +425,54 @@ fn rooted_scope_includes_owned_roots_and_required_unowned_closure_only() {
         analysis
             .graph()
             .provider::<RequiredUnownedUseCase>()
+            .is_some()
+    );
+}
+
+#[test]
+fn rooted_scope_reports_duplicate_reachable_provider_declarations() {
+    let analysis = rooted_analysis::<duplicate_reachable::DuplicateRoot>();
+
+    assert_eq!(analysis.diagnostics()[0].code(), MADS001);
+    assert!(analysis.construction_plan().is_none());
+}
+
+#[test]
+fn rooted_scope_reports_ambiguous_unowned_dependency_constructors() {
+    let analysis = rooted_analysis::<ambiguous_dependency::app::AmbiguousDependencyRoot>();
+
+    assert_eq!(analysis.diagnostics()[0].code(), MADS002);
+    assert!(analysis.construction_plan().is_none());
+}
+
+#[test]
+fn externally_satisfied_dependency_skips_ambiguous_static_constructors() {
+    let mut builder = Mads::builder();
+    builder
+        .root::<ambiguous_dependency::app::AmbiguousDependencyRoot>()
+        .unwrap()
+        .provide(ambiguous_dependency::SharedDependency)
+        .unwrap();
+
+    let analysis = builder.analyze();
+    assert!(analysis.is_valid(), "{:?}", analysis.diagnostics());
+    assert!(
+        analysis
+            .graph()
+            .provider::<ambiguous_dependency::SharedDependency>()
+            .is_some()
+    );
+}
+
+#[test]
+fn accessible_dependency_ignores_a_constructor_outside_the_rooted_scope() {
+    let analysis = rooted_analysis::<mixed_dependency_scope::app::MixedDependencyRoot>();
+
+    assert!(analysis.is_valid(), "{:?}", analysis.diagnostics());
+    assert!(
+        analysis
+            .graph()
+            .provider::<mixed_dependency_scope::SharedDependency>()
             .is_some()
     );
 }

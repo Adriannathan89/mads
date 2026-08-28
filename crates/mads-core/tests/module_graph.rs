@@ -95,9 +95,9 @@ mod namespace_collision {
     }
 
     pub mod root {
-        use super::{module, shared_namespace::FirstModule, shared_namespace::SecondModule};
+        use super::{module, shared_namespace::FirstModule};
 
-        #[module(imports = [FirstModule, SecondModule])]
+        #[module(imports = [FirstModule])]
         pub struct CollisionRoot;
     }
 }
@@ -212,11 +212,11 @@ fn multi_module_cycle_reports_stable_chain_and_locations() {
 }
 
 #[test]
-fn reachable_namespace_collision_reports_both_declarations() {
+fn rooted_namespace_collision_reports_an_unimported_declaration() {
     use namespace_collision::{root::CollisionRoot, shared_namespace};
 
     let error = match mads_core::__private::build_module_graph::<CollisionRoot>() {
-        Ok(_) => panic!("reachable namespace collision must fail"),
+        Ok(_) => panic!("a collision with an unimported declaration must fail"),
         Err(error) => error,
     };
     assert_eq!(error.code(), MADS008);
@@ -229,6 +229,14 @@ fn reachable_namespace_collision_reports_both_declarations() {
             .iter()
             .all(|diagnostic| diagnostic.to_string().contains("module_graph.rs"))
     );
+}
+
+#[test]
+fn rootless_analysis_reports_complete_catalog_namespace_collisions() {
+    let analysis = mads_core::Mads::builder().analyze();
+
+    assert_eq!(analysis.diagnostics()[0].code(), MADS008);
+    assert_eq!(analysis.diagnostics().len(), 2);
 }
 
 fn module_path_for<T>() -> &'static str {

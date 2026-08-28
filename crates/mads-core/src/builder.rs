@@ -13,7 +13,7 @@ use crate::{
     ProviderRegistry, Result,
     graph::{
         SatisfiedProvider, analyze_catalog, analyze_descriptors, build_module_graph,
-        select_scoped_providers,
+        select_scoped_providers, validate_module_catalog,
     },
 };
 
@@ -231,6 +231,9 @@ impl MadsBuilder {
         &self,
         providers: &[&'static crate::ProviderDescriptor],
     ) -> BuilderAnalysis {
+        let module_diagnostics = validate_module_catalog(&Catalog::modules())
+            .err()
+            .map_or_else(Vec::new, |error| error.diagnostics().to_vec());
         let auto_configuration = auto_configuration::analyze_parts(
             &auto_configuration::descriptors(),
             providers,
@@ -243,6 +246,7 @@ impl MadsBuilder {
         satisfied.extend(auto_configuration.virtual_satisfied);
 
         let mut public = analyze_catalog(&satisfied, &auto_configuration.covered_missing);
+        public.prepend_diagnostics(module_diagnostics);
         public.auto_configurations = auto_configuration.reports;
         public.append_diagnostics(auto_configuration.diagnostics);
 

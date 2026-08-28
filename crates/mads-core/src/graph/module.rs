@@ -140,7 +140,6 @@ pub(crate) fn build_module_graph(
         stack: Vec::new(),
         modules: Vec::new(),
         imports: Vec::new(),
-        namespaces: Vec::new(),
     };
     visit(root_type_id, &mut state)?;
     let root = state
@@ -153,6 +152,28 @@ pub(crate) fn build_module_graph(
         imports: state.imports,
         provider_ownership: Vec::new(),
     })
+}
+
+pub(crate) fn validate_module_catalog(modules: &[&'static ModuleDescriptor]) -> Result<()> {
+    for (index, descriptor) in modules.iter().copied().enumerate() {
+        let Some(namespace) = descriptor.namespace() else {
+            continue;
+        };
+        let conflicts = modules
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(candidate_index, candidate)| {
+                *candidate_index != index && candidate.namespace() == Some(namespace)
+            })
+            .map(|(_, candidate)| candidate)
+            .collect::<Vec<_>>();
+        if !conflicts.is_empty() {
+            return Err(module_namespace_error(descriptor, &conflicts));
+        }
+    }
+
+    Ok(())
 }
 
 fn visit(module: TypeId, state: &mut BuildState<'_>) -> Result<()> {
@@ -184,7 +205,6 @@ struct BuildState<'a> {
     stack: Vec<TypeId>,
     modules: Vec<ModuleNode>,
     imports: Vec<ModuleImportEdge>,
-    namespaces: Vec<(&'static str, TypeId, SourceLocation)>,
 }
 
 impl BuildState<'_> {
@@ -233,7 +253,7 @@ impl BuildState<'_> {
         }
     }
 
-    fn validate_unique_namespace(&mut self, descriptor: &ModuleDescriptor) -> Result<()> {
+    fn validate_unique_namespace(&self, descriptor: &ModuleDescriptor) -> Result<()> {
         let Some(namespace) = descriptor.namespace() else {
             return Err(Error::new(
                 Diagnostic::new(
@@ -246,30 +266,19 @@ impl BuildState<'_> {
             ));
         };
 
-        if let Some((_, _, existing_location)) = self
-            .namespaces
+        let conflicts = self
+            .descriptors
             .iter()
-            .find(|(existing, _, _)| *existing == namespace)
-        {
-            let primary = Diagnostic::new(
-                MADS008,
-                "ambiguous module namespace",
-                "two reachable modules claim the same Rust namespace",
-            )
-            .with_subject(namespace)
-            .with_location(descriptor.location());
-            let related = Diagnostic::new(
-                MADS008,
-                "first module namespace declaration",
-                "this reachable module already owns the namespace",
-            )
-            .with_subject(namespace)
-            .with_location(*existing_location);
-            return Err(Error::from_diagnostics(primary, [related]));
+            .copied()
+            .filter(|candidate| {
+                candidate.type_id() != descriptor.type_id()
+                    && candidate.namespace() == Some(namespace)
+            })
+            .collect::<Vec<_>>();
+        if !conflicts.is_empty() {
+            return Err(module_namespace_error(descriptor, &conflicts));
         }
 
-        self.namespaces
-            .push((namespace, descriptor.type_id(), descriptor.location()));
         Ok(())
     }
 
@@ -380,6 +389,29 @@ impl BuildState<'_> {
             .copied()
             .find(|descriptor| descriptor.type_id() == type_id)
     }
+}
+
+fn module_namespace_error(descriptor: &ModuleDescriptor, conflicts: &[&ModuleDescriptor]) -> Error {
+    let namespace = descriptor
+        .namespace()
+        .expect("namespace collision candidates have namespace metadata");
+    let primary = Diagnostic::new(
+        MADS008,
+        "ambiguous module namespace",
+        "multiple module declarations claim the same Rust namespace",
+    )
+    .with_subject(namespace)
+    .with_location(descriptor.location());
+    let related = conflicts.iter().map(|conflict| {
+        Diagnostic::new(
+            MADS008,
+            "conflicting module namespace declaration",
+            "this module declaration claims the same namespace",
+        )
+        .with_subject(namespace)
+        .with_location(conflict.location())
+    });
+    Error::from_diagnostics(primary, related)
 }
 
 fn namespace_contains(parent: &str, child: &str) -> bool {
