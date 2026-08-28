@@ -407,28 +407,48 @@ mod unimported_nested_strategy {
 }
 
 mod roots {
-    #[mads_common::core::module(imports = [super::first::FirstModule])]
-    pub struct FirstRoot;
+    pub(super) mod first {
+        #[mads_common::core::module(imports = [super::super::first::FirstModule])]
+        pub struct FirstRoot;
+    }
 
-    #[mads_common::core::module(imports = [super::second::SecondModule])]
-    pub struct SecondRoot;
+    pub(super) mod second {
+        #[mads_common::core::module(imports = [super::super::second::SecondModule])]
+        pub struct SecondRoot;
+    }
 
-    #[mads_common::core::module(imports = [super::two_candidates::CandidateGuardModule])]
-    pub struct CandidateRoot;
+    pub(super) mod candidate {
+        #[mads_common::core::module(imports = [
+            super::super::two_candidates::CandidateGuardModule,
+        ])]
+        pub struct CandidateRoot;
+    }
 
-    #[mads_common::core::module(imports = [super::private_import::PrivateGuardModule])]
-    pub struct PrivateRoot;
+    pub(super) mod private {
+        #[mads_common::core::module(imports = [
+            super::super::private_import::PrivateGuardModule,
+        ])]
+        pub struct PrivateRoot;
+    }
 
-    #[mads_common::core::module(imports = [super::transitive_guard::TransitiveGuardModule])]
-    pub struct TransitiveRoot;
+    pub(super) mod transitive {
+        #[mads_common::core::module(imports = [
+            super::super::transitive_guard::TransitiveGuardModule,
+        ])]
+        pub struct TransitiveRoot;
+    }
 
-    #[mads_common::core::module(imports = [super::no_custom::NoCustomModule])]
-    pub struct NoCustomRoot;
+    pub(super) mod no_custom {
+        #[mads_common::core::module(imports = [super::super::no_custom::NoCustomModule])]
+        pub struct NoCustomRoot;
+    }
 
-    #[mads_common::core::module(imports = [
-        super::unimported_nested_strategy::ParentGuardModule,
-    ])]
-    pub struct NestedRoot;
+    pub(super) mod nested {
+        #[mads_common::core::module(imports = [
+            super::super::unimported_nested_strategy::ParentGuardModule,
+        ])]
+        pub struct NestedRoot;
+    }
 }
 
 fn config() -> Config {
@@ -464,16 +484,16 @@ fn preflight_for<M: Module>() -> Result<PassportStrategyPreflight<'static>> {
 }
 
 fn one_visible_custom_overrides_builtin() -> Result<PassportStrategyPreflight<'static>> {
-    preflight_for::<roots::FirstRoot>()
+    preflight_for::<roots::first::FirstRoot>()
 }
 
 fn two_visible_custom_candidates() -> Result<PassportStrategyPreflight<'static>> {
-    preflight_for::<roots::CandidateRoot>()
+    preflight_for::<roots::candidate::CandidateRoot>()
 }
 
 fn same_name_in_disjoint_contexts() -> Result<()> {
-    let first = preflight_for::<roots::FirstRoot>()?;
-    let second = preflight_for::<roots::SecondRoot>()?;
+    let first = preflight_for::<roots::first::FirstRoot>()?;
+    let second = preflight_for::<roots::second::SecondRoot>()?;
 
     assert_selected_adapter::<first::FirstJwtStrategy>(&first);
     assert_selected_adapter::<second::SecondJwtStrategy>(&second);
@@ -481,15 +501,15 @@ fn same_name_in_disjoint_contexts() -> Result<()> {
 }
 
 fn private_imported_strategy() -> Result<PassportStrategyPreflight<'static>> {
-    preflight_for::<roots::PrivateRoot>()
+    preflight_for::<roots::private::PrivateRoot>()
 }
 
 fn transitively_imported_strategy() -> Result<PassportStrategyPreflight<'static>> {
-    preflight_for::<roots::TransitiveRoot>()
+    preflight_for::<roots::transitive::TransitiveRoot>()
 }
 
 fn strategy_in_an_unimported_child_module() -> Result<PassportStrategyPreflight<'static>> {
-    preflight_for::<roots::NestedRoot>()
+    preflight_for::<roots::nested::NestedRoot>()
 }
 
 fn assert_selected_adapter<S>(preflight: &PassportStrategyPreflight<'_>)
@@ -546,7 +566,7 @@ fn strategy_in_an_unimported_child_module_is_not_visible() {
 
 #[test]
 fn no_visible_custom_strategy_retains_the_builtin_jwt_adapter() {
-    let preflight = preflight_for::<roots::NoCustomRoot>().unwrap();
+    let preflight = preflight_for::<roots::no_custom::NoCustomRoot>().unwrap();
 
     assert!(preflight.bindings()[0].is_builtin());
 }
@@ -563,7 +583,7 @@ fn rootless_scoped_preflight_retains_global_duplicate_validation() {
 
 #[tokio::test]
 async fn request_uses_context_binding() {
-    let first_application = application_for::<roots::FirstRoot>().await;
+    let first_application = application_for::<roots::first::FirstRoot>().await;
     let first_token = first_application
         .context()
         .resolve::<JwtService>()
@@ -586,7 +606,7 @@ async fn request_uses_context_binding() {
     assert_eq!(FIRST_STRATEGY_CALLS.load(Ordering::SeqCst), 1);
     assert_eq!(SECOND_STRATEGY_CALLS.load(Ordering::SeqCst), 0);
 
-    let second_application = application_for::<roots::SecondRoot>().await;
+    let second_application = application_for::<roots::second::SecondRoot>().await;
     let second_token = second_application
         .context()
         .resolve::<JwtService>()

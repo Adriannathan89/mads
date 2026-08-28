@@ -73,39 +73,53 @@ mod guarded_http {
 mod database_consumers {
     use super::*;
 
-    #[mads_common::core::repository]
-    pub struct ReachableRepository {
-        _database: Database,
+    pub(super) mod reachable {
+        use super::*;
+
+        #[mads_common::core::repository]
+        pub struct ReachableRepository {
+            _database: Database,
+        }
+
+        #[mads_common::core::module]
+        pub struct ReachableDatabaseModule;
     }
 
-    #[mads_common::core::module]
-    pub struct ReachableDatabaseModule;
+    pub(super) mod unreachable {
+        use super::*;
 
-    #[mads_common::core::repository]
-    pub struct UnreachableRepository {
-        _database: Database,
+        #[mads_common::core::repository]
+        pub struct UnreachableRepository {
+            _database: Database,
+        }
+
+        #[mads_common::core::module]
+        pub struct UnreachableDatabaseModule;
     }
-
-    #[mads_common::core::module]
-    pub struct UnreachableDatabaseModule;
 }
 
 mod roots {
-    #[mads_common::core::module(imports = [super::public_http::PublicHttpModule])]
-    pub struct PublicRoot;
+    pub(super) mod public {
+        #[mads_common::core::module(imports = [super::super::public_http::PublicHttpModule])]
+        pub struct PublicRoot;
+    }
 
-    #[mads_common::core::module(imports = [
-        super::public_http::PublicHttpModule,
-        super::guarded_http::GuardedHttpModule,
-    ])]
-    pub struct GuardedRoot;
+    pub(super) mod guarded {
+        #[mads_common::core::module(imports = [
+            super::super::public_http::PublicHttpModule,
+            super::super::guarded_http::GuardedHttpModule,
+        ])]
+        pub struct GuardedRoot;
+    }
 
     #[cfg(feature = "database")]
-    #[mads_common::core::module(imports = [
-        super::public_http::PublicHttpModule,
-        super::database_consumers::ReachableDatabaseModule,
-    ])]
-    pub struct DatabaseRoot;
+    pub(super) mod database {
+        #[mads_common::core::module(imports = [
+            super::super::public_http::PublicHttpModule,
+            super::super::database_consumers::reachable::ReachableDatabaseModule,
+        ])]
+        pub struct DatabaseRoot;
+    }
 }
 
 async fn build_root<M: Module>(config: Config) -> Result<Mads> {
@@ -124,7 +138,7 @@ fn report<'a>(application: &'a Mads, identifier: &str) -> &'a AutoConfigurationR
 
 #[tokio::test]
 async fn unreachable_guard_and_database_consumer_do_not_require_configuration() {
-    let application = build_root::<roots::PublicRoot>(Config::empty())
+    let application = build_root::<roots::public::PublicRoot>(Config::empty())
         .await
         .unwrap();
 
@@ -141,7 +155,7 @@ async fn unreachable_guard_and_database_consumer_do_not_require_configuration() 
 
 #[tokio::test]
 async fn reachable_guard_still_requires_jwt_configuration() {
-    let error = match build_root::<roots::GuardedRoot>(Config::empty()).await {
+    let error = match build_root::<roots::guarded::GuardedRoot>(Config::empty()).await {
         Ok(_) => panic!("a reachable JWT guard must require Passport configuration"),
         Err(error) => error,
     };
@@ -152,7 +166,7 @@ async fn reachable_guard_still_requires_jwt_configuration() {
 #[cfg(feature = "database")]
 #[tokio::test]
 async fn reachable_database_consumer_still_requires_database_configuration() {
-    let error = match build_root::<roots::DatabaseRoot>(Config::empty()).await {
+    let error = match build_root::<roots::database::DatabaseRoot>(Config::empty()).await {
         Ok(_) => panic!("a reachable database consumer must require database configuration"),
         Err(error) => error,
     };
@@ -174,7 +188,7 @@ fn database_requirements_use_the_core_selected_provider_slice() {
         .build()
         .unwrap();
     let mut builder = Mads::builder_with_config(config);
-    builder.root::<roots::DatabaseRoot>().unwrap();
+    builder.root::<roots::database::DatabaseRoot>().unwrap();
     let analysis = builder.analyze();
     let report = analysis
         .auto_configurations()

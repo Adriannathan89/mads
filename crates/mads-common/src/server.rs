@@ -388,26 +388,30 @@ mod tests {
     struct ServerTestApp;
 
     mod standard_run {
-        #[mads_common_macros::routes]
-        pub(super) trait RoutedRoutes {
-            #[mads_common_macros::get("/standard-run-health")]
-            async fn health(&self) -> &'static str;
-        }
-
-        #[mads_common_macros::controller(routes = [RoutedRoutes])]
-        pub(super) struct RoutedController;
-
-        impl RoutedRoutes for RoutedController {
-            async fn health(&self) -> &'static str {
-                "healthy"
+        pub(super) mod routed {
+            #[mads_common_macros::routes]
+            pub(super) trait RoutedRoutes {
+                #[mads_common_macros::get("/standard-run-health")]
+                async fn health(&self) -> &'static str;
             }
+
+            #[mads_common_macros::controller(routes = [RoutedRoutes])]
+            pub(super) struct RoutedController;
+
+            impl RoutedRoutes for RoutedController {
+                async fn health(&self) -> &'static str {
+                    "healthy"
+                }
+            }
+
+            #[mads_core::module]
+            pub struct RoutedApp;
         }
 
-        #[mads_core::module]
-        pub(super) struct RoutedApp;
-
-        #[mads_core::module]
-        pub(super) struct EmptyApp;
+        pub(super) mod empty {
+            #[mads_core::module]
+            pub struct EmptyApp;
+        }
     }
 
     #[cfg(feature = "database")]
@@ -639,7 +643,7 @@ mod tests {
     async fn standard_run_preparation_roots_and_configures_a_routed_application() {
         let directory = tempfile::tempdir().unwrap();
 
-        let prepared = prepare_standard_run::<standard_run::RoutedApp>(directory.path())
+        let prepared = prepare_standard_run::<standard_run::routed::RoutedApp>(directory.path())
             .await
             .unwrap();
 
@@ -650,7 +654,7 @@ mod tests {
                 .unwrap()
                 .root()
                 .type_name(),
-            std::any::type_name::<standard_run::RoutedApp>(),
+            std::any::type_name::<standard_run::routed::RoutedApp>(),
         );
         assert_eq!(prepared.binding.host(), "127.0.0.1");
         assert_eq!(prepared.binding.port(), 3000);
@@ -664,10 +668,11 @@ mod tests {
     async fn standard_run_preparation_rejects_roots_without_reachable_routes() {
         let directory = tempfile::tempdir().unwrap();
 
-        let error = match prepare_standard_run::<standard_run::EmptyApp>(directory.path()).await {
-            Ok(_) => panic!("a root without routes must not be runnable"),
-            Err(error) => error,
-        };
+        let error =
+            match prepare_standard_run::<standard_run::empty::EmptyApp>(directory.path()).await {
+                Ok(_) => panic!("a root without routes must not be runnable"),
+                Err(error) => error,
+            };
 
         match error {
             HttpRuntimeError::Bootstrap(error) => {
@@ -688,10 +693,11 @@ mod tests {
         )
         .unwrap();
 
-        let error = match prepare_standard_run::<standard_run::RoutedApp>(directory.path()).await {
-            Ok(_) => panic!("malformed conventional configuration must fail preparation"),
-            Err(error) => error,
-        };
+        let error =
+            match prepare_standard_run::<standard_run::routed::RoutedApp>(directory.path()).await {
+                Ok(_) => panic!("malformed conventional configuration must fail preparation"),
+                Err(error) => error,
+            };
 
         match error {
             HttpRuntimeError::Bootstrap(error) => {
@@ -707,7 +713,7 @@ mod tests {
     async fn standard_run_preparation_ignores_unreachable_database_requirements() {
         let directory = tempfile::tempdir().unwrap();
 
-        let prepared = prepare_standard_run::<standard_run::RoutedApp>(directory.path())
+        let prepared = prepare_standard_run::<standard_run::routed::RoutedApp>(directory.path())
             .await
             .unwrap();
 
@@ -722,7 +728,7 @@ mod tests {
     async fn standard_run_preparation_ignores_unreachable_jwt_requirements() {
         let directory = tempfile::tempdir().unwrap();
 
-        let prepared = prepare_standard_run::<standard_run::RoutedApp>(directory.path())
+        let prepared = prepare_standard_run::<standard_run::routed::RoutedApp>(directory.path())
             .await
             .unwrap();
 
@@ -737,7 +743,8 @@ mod tests {
         let _guard = TEST_LOCK.lock().await;
         STARTS.store(0, Ordering::SeqCst);
         let events = Arc::new(Mutex::new(Vec::new()));
-        let mut builder = automatic_standard_builder::<standard_run::RoutedApp>("api.internal");
+        let mut builder =
+            automatic_standard_builder::<standard_run::routed::RoutedApp>("api.internal");
         builder.lifecycle_hook(RecordingHook {
             events: Arc::clone(&events),
             fail_shutdown: false,
@@ -770,7 +777,8 @@ mod tests {
         let _guard = TEST_LOCK.lock().await;
         STARTS.store(0, Ordering::SeqCst);
         let events = Arc::new(Mutex::new(Vec::new()));
-        let mut builder = automatic_standard_builder::<standard_run::RoutedApp>("api.internal");
+        let mut builder =
+            automatic_standard_builder::<standard_run::routed::RoutedApp>("api.internal");
         builder.lifecycle_hook(RecordingHook {
             events: Arc::clone(&events),
             fail_shutdown: true,

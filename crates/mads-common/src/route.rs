@@ -1354,18 +1354,24 @@ mod tests {
     }
 
     mod roots {
-        #[mads_core::module(imports = [super::first::FirstModule])]
-        pub struct FirstRoot;
+        pub(super) mod first {
+            #[mads_core::module(imports = [super::super::first::FirstModule])]
+            pub struct FirstRoot;
+        }
 
-        #[mads_core::module(imports = [super::second::SecondModule])]
-        pub struct SecondRoot;
+        pub(super) mod second {
+            #[mads_core::module(imports = [super::super::second::SecondModule])]
+            pub struct SecondRoot;
+        }
 
-        #[mads_core::module(imports = [
-            super::first::FirstModule,
-            super::second::SecondModule,
-            super::foreign::ForeignModule,
-        ])]
-        pub struct CombinedRoot;
+        pub(super) mod combined {
+            #[mads_core::module(imports = [
+                super::super::first::FirstModule,
+                super::super::second::SecondModule,
+                super::super::foreign::ForeignModule,
+            ])]
+            pub struct CombinedRoot;
+        }
     }
 
     fn config() -> Config {
@@ -1416,7 +1422,7 @@ mod tests {
 
     #[tokio::test]
     async fn unowned_guarded_contracts_keep_each_controller_context_and_direct_import_boundary() {
-        let combined = application_for::<roots::CombinedRoot>().await;
+        let combined = application_for::<roots::combined::CombinedRoot>().await;
         let combined_scope = HttpApplicationScope::for_application(&combined).unwrap();
         let preflight = PassportStrategyCatalog::preflight_scoped(
             combined.module_graph(),
@@ -1428,8 +1434,8 @@ mod tests {
         assert!(!preflight.bindings()[0].is_builtin());
         assert!(!preflight.bindings()[1].is_builtin());
 
-        let first = application_for::<roots::FirstRoot>().await;
-        let second = application_for::<roots::SecondRoot>().await;
+        let first = application_for::<roots::first::FirstRoot>().await;
+        let second = application_for::<roots::second::SecondRoot>().await;
         let first_router = router_for(&combined, &preflight, one_controller(&first));
         let second_router = router_for(&combined, &preflight, one_controller(&second));
         let jwt = combined.context().resolve::<JwtService>().unwrap();

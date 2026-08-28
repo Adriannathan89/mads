@@ -214,20 +214,26 @@ mod nested_route_scope {
 }
 
 mod applications {
-    #[mads_common::core::module(imports = [super::users::UserHttpModule])]
-    pub struct UsersApplication;
+    pub(super) mod users {
+        #[mads_common::core::module(imports = [super::super::users::UserHttpModule])]
+        pub struct UsersApplication;
+    }
 
-    #[mads_common::core::module(imports = [
-        super::users::UserHttpModule,
-        super::admin::AdminHttpModule,
-    ])]
-    pub struct UsersAndAdminApplication;
+    pub(super) mod users_and_admin {
+        #[mads_common::core::module(imports = [
+            super::super::users::UserHttpModule,
+            super::super::admin::AdminHttpModule,
+        ])]
+        pub struct UsersAndAdminApplication;
+    }
 
-    #[mads_common::core::module(imports = [
-        super::duplicate_one::DuplicateOneHttpModule,
-        super::duplicate_two::DuplicateTwoHttpModule,
-    ])]
-    pub struct ConflictingApplication;
+    pub(super) mod conflicting {
+        #[mads_common::core::module(imports = [
+            super::super::duplicate_one::DuplicateOneHttpModule,
+            super::super::duplicate_two::DuplicateTwoHttpModule,
+        ])]
+        pub struct ConflictingApplication;
+    }
 }
 
 async fn request_status(router: mads_common::axum::Router, path: &str) -> StatusCode {
@@ -241,7 +247,9 @@ async fn request_status(router: mads_common::axum::Router, path: &str) -> Status
 #[tokio::test]
 async fn rooted_router_installs_only_controllers_owned_by_reachable_modules() {
     let mut builder = Mads::builder();
-    builder.root::<applications::UsersApplication>().unwrap();
+    builder
+        .root::<applications::users::UsersApplication>()
+        .unwrap();
     let application = builder.build().await.unwrap();
     let router = build_router(&application).unwrap();
 
@@ -259,7 +267,7 @@ async fn rooted_router_installs_only_controllers_owned_by_reachable_modules() {
 async fn rooted_router_installs_routes_from_every_reachable_http_module() {
     let mut builder = Mads::builder();
     builder
-        .root::<applications::UsersAndAdminApplication>()
+        .root::<applications::users_and_admin::UsersAndAdminApplication>()
         .unwrap();
     let application = builder.build().await.unwrap();
     let router = build_router(&application).unwrap();
@@ -274,7 +282,9 @@ async fn rooted_router_installs_routes_from_every_reachable_http_module() {
 #[tokio::test]
 async fn rooted_router_inherits_unowned_route_contracts_from_selected_controllers() {
     let mut builder = Mads::builder();
-    builder.root::<applications::UsersApplication>().unwrap();
+    builder
+        .root::<applications::users::UsersApplication>()
+        .unwrap();
     let application = builder.build().await.unwrap();
     let router = build_router(&application).unwrap();
 
@@ -323,7 +333,7 @@ async fn rooted_router_excludes_routes_owned_by_unimported_child_modules() {
 async fn rooted_router_rejects_conflicting_routes_within_selected_modules() {
     let mut builder = Mads::builder();
     builder
-        .root::<applications::ConflictingApplication>()
+        .root::<applications::conflicting::ConflictingApplication>()
         .unwrap();
     let application = builder.build().await.unwrap();
 
