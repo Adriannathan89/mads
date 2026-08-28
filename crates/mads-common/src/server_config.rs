@@ -164,9 +164,33 @@ fn parse_host(host: &str, source: Option<&str>) -> Result<String> {
         ));
     }
 
-    Ok(host
-        .parse::<IpAddr>()
-        .map_or_else(|_| host.to_owned(), |address| address.to_string()))
+    if let Ok(address) = host.parse::<IpAddr>() {
+        return Ok(address.to_string());
+    }
+    if !is_valid_hostname(host) {
+        return Err(invalid_server_configuration(
+            "server.host",
+            source,
+            "must be an IPv4 address, IPv6 address, or valid hostname",
+        ));
+    }
+
+    Ok(host.to_owned())
+}
+
+pub(crate) fn is_valid_hostname(host: &str) -> bool {
+    let hostname = host.strip_suffix('.').unwrap_or(host);
+    !hostname.is_empty()
+        && hostname.len() <= 253
+        && hostname.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|character| character.is_ascii_alphanumeric() || character == b'-')
+        })
 }
 
 fn parse_port(port: &str, source: Option<&str>) -> Result<u16> {
@@ -207,6 +231,13 @@ fn safe_source_label(source: Option<&str>) -> &'static str {
         Some("environment") => "environment",
         Some("mads.toml") => "mads.toml",
         Some("test") => "test",
+        Some(source)
+            if Path::new(source)
+                .file_name()
+                .is_some_and(|name| name == "mads.toml") =>
+        {
+            "mads.toml"
+        }
         Some(_) => "[REDACTED]",
     }
 }

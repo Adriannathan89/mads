@@ -71,7 +71,7 @@ fn cors_analysis(config: Config) -> GraphAnalysis {
     Mads::builder_with_config(config).analyze()
 }
 
-fn cors_report<'a>(reports: &'a [AutoConfigurationReport]) -> &'a AutoConfigurationReport {
+fn cors_report(reports: &[AutoConfigurationReport]) -> &AutoConfigurationReport {
     reports
         .iter()
         .find(|report| report.identifier() == CORS_ID)
@@ -120,7 +120,7 @@ fn automatic_cors_builder<M: Module>(config: Config) -> MadsBuilder {
     builder
 }
 
-fn report<'a>(reports: &'a [AutoConfigurationReport]) -> &'a AutoConfigurationReport {
+fn report(reports: &[AutoConfigurationReport]) -> &AutoConfigurationReport {
     reports
         .iter()
         .find(|report| report.identifier() == SERVER_ID)
@@ -204,6 +204,45 @@ fn conventional_sources_do_not_search_parent_directories() {
     let config = load_standard_config_from_for_test(&child, environment([])).unwrap();
 
     assert!(config.is_empty());
+}
+
+#[test]
+fn conventional_toml_source_is_labeled_in_http_diagnostics_and_evidence() {
+    let root = tempfile::tempdir().unwrap();
+    let toml = root.path().join("mads.toml");
+    std::fs::write(
+        &toml,
+        "[server]\nhost = \"*.private.example\"\n[server.cors]\norigins = [\"https://*.private.example\"]\nmethods = [\"GET\"]\n",
+    )
+    .unwrap();
+    let config = load_standard_config_from_for_test(root.path(), environment([])).unwrap();
+
+    let analysis = automatic_builder::<routed::RoutedApp>(config).analyze();
+    let server = report(analysis.auto_configurations());
+    let cors = cors_report(analysis.auto_configurations());
+    let diagnostics = analysis
+        .diagnostics()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<String>();
+
+    assert_eq!(
+        server
+            .configuration()
+            .iter()
+            .find(|evidence| evidence.key() == "server.host")
+            .and_then(|evidence| evidence.source()),
+        Some("mads.toml")
+    );
+    assert_eq!(
+        cors.configuration()
+            .iter()
+            .find(|evidence| evidence.key() == "server.cors.origins")
+            .and_then(|evidence| evidence.source()),
+        Some("mads.toml")
+    );
+    assert_eq!(diagnostics.matches("source: mads.toml").count(), 2);
+    assert!(!diagnostics.contains(toml.to_str().unwrap()));
 }
 
 #[tokio::test]
@@ -296,6 +335,36 @@ fn server_invalid_automatic_configuration_is_failed_and_redacted() {
             assert!(!format!("{server:?}").contains(redaction_marker));
             assert!(!diagnostics.contains(redaction_marker));
         }
+    }
+}
+
+#[test]
+fn server_automatic_mode_rejects_invalid_host_syntax_without_exposing_it() {
+    for invalid_host in [
+        "https://private.example",
+        "private.example:4100",
+        "private.example/path",
+        "-private.example",
+        "private-.example",
+        "private_underscore.example",
+        "*.private.example",
+    ] {
+        let analysis =
+            automatic_builder::<routed::RoutedApp>(config([("server.host", invalid_host)]))
+                .analyze();
+        let server = report(analysis.auto_configurations());
+        let diagnostics = analysis
+            .diagnostics()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<String>();
+
+        assert!(!analysis.is_valid());
+        assert_eq!(server.status(), AutoConfigurationStatus::Failed);
+        assert_eq!(server.reason_code().as_str(), "invalid_configuration");
+        assert!(diagnostics.contains("server.host"));
+        assert!(!format!("{server:?}").contains(invalid_host));
+        assert!(!diagnostics.contains(invalid_host));
     }
 }
 
@@ -534,6 +603,55 @@ fn cors_rejects_invalid_shapes_booleans_and_max_age() {
     ] {
         assert_invalid_cors(invalid, None);
     }
+}
+
+#[test]
+fn cors_rejects_glob_and_regex_like_origin_authorities_without_exposing_them() {
+    const GLOB_ORIGIN: &str = "https://*.private.example";
+    const REGEX_LIKE_ORIGIN: &str = "https://.+.private.example";
+    const EMPTY_PORT_ORIGIN: &str = "https://private.example:";
+    const OUT_OF_RANGE_PORT_ORIGIN: &str = "https://private.example:65536";
+
+    assert_invalid_cors(
+        cors_config([
+            CorsValue::StringArray("server.cors.origins", &[GLOB_ORIGIN]),
+            CorsValue::StringArray("server.cors.methods", &["GET"]),
+        ]),
+        Some(GLOB_ORIGIN),
+    );
+    assert_invalid_cors(
+        cors_config([
+            CorsValue::StringArray("server.cors.origins", &[REGEX_LIKE_ORIGIN]),
+            CorsValue::StringArray("server.cors.methods", &["GET"]),
+        ]),
+        Some(REGEX_LIKE_ORIGIN),
+    );
+    assert_invalid_cors(
+        cors_config([
+            CorsValue::StringArray("server.cors.origins", &[EMPTY_PORT_ORIGIN]),
+            CorsValue::StringArray("server.cors.methods", &["GET"]),
+        ]),
+        Some(EMPTY_PORT_ORIGIN),
+    );
+    assert_invalid_cors(
+        cors_config([
+            CorsValue::StringArray("server.cors.origins", &[OUT_OF_RANGE_PORT_ORIGIN]),
+            CorsValue::StringArray("server.cors.methods", &["GET"]),
+        ]),
+        Some(OUT_OF_RANGE_PORT_ORIGIN),
+    );
+}
+
+#[tokio::test]
+async fn cors_accepts_ip_origin_authorities_with_valid_ports() {
+    assert_valid_cors(cors_config([
+        CorsValue::StringArray(
+            "server.cors.origins",
+            &["http://192.0.2.10:8080", "https://[2001:db8::10]:8443"],
+        ),
+        CorsValue::StringArray("server.cors.methods", &["GET"]),
+    ]))
+    .await;
 }
 
 #[test]

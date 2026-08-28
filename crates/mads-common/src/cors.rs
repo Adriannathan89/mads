@@ -2,9 +2,11 @@
 
 use std::any::TypeId;
 use std::fmt;
+use std::net::IpAddr;
+use std::path::Path;
 use std::time::Duration;
 
-use axum::http::{HeaderName, HeaderValue, Method, Uri};
+use axum::http::{HeaderName, HeaderValue, Method, Uri, uri::Authority};
 use mads_core::__private::{
     AutoConfigurationApplyContext, AutoConfigurationContext, AutoConfigurationContribution,
     AutoConfigurationDescriptor, AutoConfigurationEvaluation,
@@ -16,7 +18,7 @@ use mads_core::{
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::http_scope::HttpApplicationScope;
-use crate::server_config::HttpRuntimeMode;
+use crate::server_config::{HttpRuntimeMode, is_valid_hostname};
 
 pub(crate) const CORS_AUTO_CONFIGURATION_ID: &str = "mads.common.http.cors";
 
@@ -225,7 +227,7 @@ fn parse_origin(
         .path_and_query()
         .is_some_and(|path_and_query| path_and_query.as_str() != "/" || raw.ends_with('/'));
     if !matches!(uri.scheme_str(), Some("http" | "https"))
-        || uri.authority().is_none()
+        || !uri.authority().is_some_and(is_valid_origin_authority)
         || has_explicit_path_or_query
         || raw.contains('#')
         || raw.contains('@')
@@ -241,6 +243,29 @@ fn parse_origin(
     HeaderValue::from_str(raw).map_err(|_| {
         invalid_cors_array_element(key, source, position, "must be a valid HTTP header value")
     })
+}
+
+fn is_valid_origin_authority(authority: &Authority) -> bool {
+    is_valid_origin_host(authority.host()) && has_valid_optional_port(authority)
+}
+
+fn is_valid_origin_host(host: &str) -> bool {
+    match host.strip_prefix('[') {
+        Some(bracketed) => bracketed
+            .strip_suffix(']')
+            .is_some_and(|address| address.parse::<IpAddr>().is_ok()),
+        None => host.parse::<IpAddr>().is_ok() || is_valid_hostname(host),
+    }
+}
+
+fn has_valid_optional_port(authority: &Authority) -> bool {
+    let port = &authority.as_str()[authority.host().len()..];
+    port.is_empty()
+        || port.strip_prefix(':').is_some_and(|port| {
+            !port.is_empty()
+                && port.bytes().all(|character| character.is_ascii_digit())
+                && port.parse::<u16>().is_ok()
+        })
 }
 
 fn parse_methods(config: &Config) -> Result<Vec<Method>> {
@@ -434,6 +459,13 @@ fn safe_source_label(source: Option<&str>) -> &'static str {
         Some("environment") => "environment",
         Some("mads.toml") => "mads.toml",
         Some("test") => "test",
+        Some(source)
+            if Path::new(source)
+                .file_name()
+                .is_some_and(|name| name == "mads.toml") =>
+        {
+            "mads.toml"
+        }
         _ => "[REDACTED]",
     }
 }
