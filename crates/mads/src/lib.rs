@@ -15,6 +15,14 @@
 //! ```no_run
 //! use mads::prelude::*;
 //!
+//! mod user {
+//!     use mads::prelude::*;
+//!
+//!     #[module]
+//!     pub struct UserHttpModule;
+//! }
+//! use user::UserHttpModule;
+//!
 //! #[module(imports = [UserHttpModule])]
 //! struct AppModule;
 //!
@@ -34,9 +42,14 @@
 //! ```no_run
 //! use mads::prelude::*;
 //!
-//! # async fn low_level(config: mads::Config, native_router: mads::axum::Router)
+//! # #[module]
+//! # struct AppModule;
+//! # async fn low_level(
+//! #     config: Config,
+//! #     native_router: mads::axum::Router,
+//! #     migrations: mads::diesel_migrations::EmbeddedMigrations,
+//! # )
 //! # -> Result<(), Box<dyn std::error::Error>> {
-//! # let migrations = mads::diesel_migrations::embed_migrations!("migrations");
 //! let mut builder = Mads::builder_with_config(config);
 //! builder.root::<AppModule>()?;
 //! builder.database_migrations(migrations)?;

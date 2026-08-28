@@ -8,8 +8,16 @@ a socket.
 
 ## Standard application
 
-```rust
+```rust,no_run
 use mads::prelude::*;
+
+mod user {
+    use mads::prelude::*;
+
+    #[module]
+    pub struct UserHttpModule;
+}
+use user::UserHttpModule;
 
 #[module(imports = [UserHttpModule])]
 struct AppModule;

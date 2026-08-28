@@ -160,7 +160,7 @@ fn prelude_exposes_the_database_runtime_surface() {
 fn prelude_exposes_core_types_and_bare_attributes() {
     use mads::prelude::*;
 
-    mod declarations {
+    mod core_declarations {
         use mads::prelude::*;
 
         #[module]

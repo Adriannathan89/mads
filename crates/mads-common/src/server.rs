@@ -387,6 +387,11 @@ mod tests {
     #[mads_core::module]
     struct ServerTestApp;
 
+    mod raw_router {
+        #[mads_core::module]
+        pub(super) struct App;
+    }
+
     mod standard_run {
         pub(super) mod routed {
             #[mads_common_macros::routes]
@@ -861,6 +866,7 @@ mod tests {
     async fn database_start_failure_prevents_listener_binding() {
         let _guard = TEST_LOCK.lock().await;
         let database_url = "postgres://127.0.0.1:1/mads";
+        let events = Arc::new(Mutex::new(Vec::new()));
         let config = ConfigBuilder::new()
             .source(MapSource::new("test", [("database.url", database_url)]))
             .build()
@@ -868,6 +874,9 @@ mod tests {
         let mut builder = Mads::builder_with_config(config);
         builder.root::<ServerTestApp>().unwrap();
         builder.provide(PreflightPermit).unwrap();
+        builder
+            .provide(RouterPreflightEvents(Arc::clone(&events)))
+            .unwrap();
         let application = builder.build().await.unwrap();
         assert_eq!(
             application.auto_configurations()[0].status(),
@@ -926,6 +935,9 @@ mod tests {
         let mut builder = Mads::builder_with_config(config);
         builder.root::<ServerTestApp>().unwrap();
         builder.provide(PreflightPermit).unwrap();
+        builder
+            .provide(RouterPreflightEvents(Arc::clone(&events)))
+            .unwrap();
         builder.lifecycle_hook(RecordingHook {
             events: Arc::clone(&events),
             fail_shutdown: false,
@@ -1169,7 +1181,7 @@ mod tests {
             .build()
             .unwrap();
         let mut builder = Mads::builder_with_config(config);
-        builder.root::<ServerTestApp>().unwrap();
+        builder.root::<raw_router::App>().unwrap();
         builder.lifecycle_hook(RecordingHook {
             events: Arc::clone(&events),
             fail_shutdown: false,

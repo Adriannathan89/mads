@@ -794,9 +794,7 @@ fn resolve_custom_strategy<'a>(
     })
 }
 
-fn resolve_builtin_or_missing<'a>(
-    guard: &'a GuardDescriptor,
-) -> Result<PassportStrategyBinding<'a>> {
+fn resolve_builtin_or_missing(guard: &GuardDescriptor) -> Result<PassportStrategyBinding<'_>> {
     if guard.strategy() == "jwt" {
         if let Some(adapter) = guard.builtin_adapter() {
             return Ok(PassportStrategyBinding {
