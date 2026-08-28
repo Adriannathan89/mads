@@ -362,7 +362,7 @@ impl PassportGuardState {
         let guards = [guard];
         let preflight = PassportStrategyCatalog::preflight(&guards)?;
         let binding = preflight
-            .binding_for(guard)
+            .binding_for(guard, None)
             .expect("the preflight result must retain its requested guard");
         Ok(Self {
             application: application.clone(),
@@ -676,7 +676,7 @@ where
         let guards = [&descriptor];
         let preflight = PassportStrategyCatalog::preflight(&guards)?;
         let binding = preflight
-            .binding_for(&descriptor)
+            .binding_for(&descriptor, None)
             .expect("native guard preflight must retain the requested descriptor");
         self.application.resolve::<JwtService>().map_err(|_| {
             native_guard_error("native Passport guards require an available JwtService")

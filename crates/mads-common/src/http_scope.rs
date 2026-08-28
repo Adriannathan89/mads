@@ -34,6 +34,8 @@ pub(crate) struct RouteIdentity {
     method: HttpMethod,
     full_path: &'static str,
     handler: &'static str,
+    #[cfg(feature = "jwt")]
+    passport_context_module: Option<TypeId>,
 }
 
 impl RouteIdentity {
@@ -43,7 +45,15 @@ impl RouteIdentity {
             method: route.method(),
             full_path: route.full_path(),
             handler: route.handler(),
+            #[cfg(feature = "jwt")]
+            passport_context_module: None,
         }
+    }
+
+    #[cfg(feature = "jwt")]
+    fn with_passport_context_module(mut self, context_module: Option<TypeId>) -> Self {
+        self.passport_context_module = context_module;
+        self
     }
 
     pub(crate) fn matches(
@@ -51,7 +61,15 @@ impl RouteIdentity {
         controller: &ControllerRouteDescriptor,
         route: &RouteDescriptor,
     ) -> bool {
-        *self == Self::new(controller, route)
+        self.controller == controller.type_id()
+            && self.method == route.method()
+            && self.full_path == route.full_path()
+            && self.handler == route.handler()
+    }
+
+    #[cfg(feature = "jwt")]
+    const fn passport_context_module(&self) -> Option<TypeId> {
+        self.passport_context_module
     }
 }
 
@@ -71,6 +89,14 @@ impl ScopedController {
         self.selected_routes
             .iter()
             .any(|identity| identity.matches(self.descriptor, route))
+    }
+
+    #[cfg(feature = "jwt")]
+    pub(crate) fn passport_context_module(&self, route: &RouteDescriptor) -> Option<TypeId> {
+        self.selected_routes
+            .iter()
+            .find(|identity| identity.matches(self.descriptor, route))
+            .and_then(RouteIdentity::passport_context_module)
     }
 
     fn has_routes(&self) -> bool {
@@ -157,7 +183,17 @@ impl HttpApplicationScope {
                 for route in contract.routes() {
                     let route_context = route_context(graph, context_module, route);
                     if route_context.is_some() {
-                        selected_routes.push(RouteIdentity::new(descriptor, route));
+                        #[cfg(feature = "jwt")]
+                        let passport_context_module = route.guard().and_then(|guard| {
+                            owner_for_namespace(guard.namespace())
+                                .filter(|owner| is_reachable(graph, owner.type_id()))
+                                .map(ModuleDescriptor::type_id)
+                                .or(route_context)
+                        });
+                        let route = RouteIdentity::new(descriptor, route);
+                        #[cfg(feature = "jwt")]
+                        let route = route.with_passport_context_module(passport_context_module);
+                        selected_routes.push(route);
                     }
                 }
             }
@@ -177,7 +213,7 @@ impl HttpApplicationScope {
         module_graph: Option<&ModuleGraph>,
         controllers: &[ScopedController],
     ) -> Vec<ScopedGuard> {
-        let Some(graph) = module_graph else {
+        if module_graph.is_none() {
             return GuardCatalog::guards()
                 .into_iter()
                 .map(|guard| ScopedGuard {
@@ -197,17 +233,9 @@ impl HttpApplicationScope {
                     .flat_map(|contract| contract.routes())
                     .filter(move |route| controller.selects(route))
                     .filter_map(move |route| {
-                        route.guard().map(|guard| {
-                            let route_context =
-                                route_context(graph, controller.context_module(), route);
-                            let context_module = owner_for_namespace(guard.namespace())
-                                .filter(|owner| is_reachable(graph, owner.type_id()))
-                                .map(ModuleDescriptor::type_id)
-                                .or(route_context);
-                            ScopedGuard {
-                                guard,
-                                context_module,
-                            }
+                        route.guard().map(|guard| ScopedGuard {
+                            guard,
+                            context_module: controller.passport_context_module(route),
                         })
                     })
             })

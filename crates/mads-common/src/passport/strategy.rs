@@ -416,12 +416,10 @@ impl PassportStrategyCatalog {
 
         let mut bindings = Vec::with_capacity(ordered_guards.len());
         for scoped_guard in ordered_guards {
-            bindings.push(resolve_scoped_guard(
-                scoped_guard,
-                module_graph,
-                &strategies,
-                &providers,
-            )?);
+            let mut binding =
+                resolve_scoped_guard(scoped_guard, module_graph, &strategies, &providers)?;
+            binding.context_module = scoped_guard.context_module();
+            bindings.push(binding);
         }
         Ok(PassportStrategyPreflight { bindings })
     }
@@ -433,6 +431,7 @@ impl PassportStrategyCatalog {
 /// managed strategy only after ordinary application construction has succeeded.
 pub struct PassportStrategyBinding<'a> {
     guard: &'a GuardDescriptor,
+    context_module: Option<TypeId>,
     strategy: &'static str,
     adapter: PassportStrategyAdapter,
     token_kind: JwtTokenKind,
@@ -445,6 +444,13 @@ impl<'a> PassportStrategyBinding<'a> {
     #[must_use]
     pub const fn guard(&self) -> &'a GuardDescriptor {
         self.guard
+    }
+
+    /// Returns the selected module context for this guard occurrence.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn context_module(&self) -> Option<TypeId> {
+        self.context_module
     }
 
     /// Returns the selected strategy name.
@@ -503,13 +509,17 @@ impl<'a> PassportStrategyPreflight<'a> {
         &self.bindings
     }
 
-    /// Finds the selected binding for one exact guard descriptor.
+    /// Finds the selected binding for one guard descriptor in one module context.
     #[doc(hidden)]
     #[must_use]
-    pub fn binding_for(&self, guard: &GuardDescriptor) -> Option<&PassportStrategyBinding<'a>> {
-        self.bindings
-            .iter()
-            .find(|binding| std::ptr::eq(binding.guard, guard))
+    pub fn binding_for(
+        &self,
+        guard: &GuardDescriptor,
+        context_module: Option<TypeId>,
+    ) -> Option<&PassportStrategyBinding<'a>> {
+        self.bindings.iter().find(|binding| {
+            std::ptr::eq(binding.guard, guard) && binding.context_module == context_module
+        })
     }
 }
 
@@ -776,6 +786,7 @@ fn resolve_custom_strategy<'a>(
     }
     Ok(PassportStrategyBinding {
         guard,
+        context_module: None,
         strategy: strategy.name(),
         adapter: strategy.adapter(),
         token_kind: strategy.token_kind(),
@@ -790,6 +801,7 @@ fn resolve_builtin_or_missing<'a>(
         if let Some(adapter) = guard.builtin_adapter() {
             return Ok(PassportStrategyBinding {
                 guard,
+                context_module: None,
                 strategy: "jwt",
                 adapter,
                 token_kind: JwtTokenKind::Access,

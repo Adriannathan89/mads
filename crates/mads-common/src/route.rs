@@ -402,10 +402,11 @@ impl<'a> RouterBuildContext<'a> {
     pub fn passport_guard_state(
         &self,
         guard: &'static GuardDescriptor,
+        context_module: Option<TypeId>,
     ) -> Result<PassportGuardState> {
         let binding = self
             .passport
-            .binding_for(guard)
+            .binding_for(guard, context_module)
             .ok_or_else(|| missing_scoped_binding_error(guard))?;
         Ok(PassportGuardState::from_binding(self.application, binding))
     }
@@ -458,6 +459,8 @@ impl ValidatedController {
     pub fn routes(&self) -> ValidatedRouteIter<'_> {
         ValidatedRouteIter {
             routes: self.routes.iter(),
+            #[cfg(feature = "jwt")]
+            passport_context_module: None,
         }
     }
 }
@@ -468,6 +471,8 @@ struct ValidatedRoute {
     handler: &'static str,
     selected: bool,
     axum_path: Option<String>,
+    #[cfg(feature = "jwt")]
+    passport_context_module: Option<TypeId>,
 }
 
 /// Iterates validated Axum paths for a generated controller registrar.
@@ -477,6 +482,8 @@ struct ValidatedRoute {
 #[doc(hidden)]
 pub struct ValidatedRouteIter<'a> {
     routes: std::slice::Iter<'a, ValidatedRoute>,
+    #[cfg(feature = "jwt")]
+    passport_context_module: Option<TypeId>,
 }
 
 impl<'a> ValidatedRouteIter<'a> {
@@ -506,12 +513,26 @@ impl<'a> ValidatedRouteIter<'a> {
                 None,
             ));
         }
+        #[cfg(feature = "jwt")]
+        {
+            self.passport_context_module = route
+                .selected
+                .then_some(route.passport_context_module)
+                .flatten();
+        }
         Ok(route.selected.then(|| {
             route
                 .axum_path
                 .as_deref()
                 .expect("selected routes retain a validated Axum path")
         }))
+    }
+
+    /// Returns the module context chosen for the last selected guarded route.
+    #[cfg(feature = "jwt")]
+    #[doc(hidden)]
+    pub const fn passport_context_module(&self) -> Option<TypeId> {
+        self.passport_context_module
     }
 
     /// Verifies that the generated registrar consumed every validated route.
@@ -681,7 +702,32 @@ impl RouteCatalog {
 pub fn validate_descriptors(
     descriptors: &[&ControllerRouteDescriptor],
 ) -> Result<Vec<ValidatedController>> {
-    validate_with_selection(descriptors, |_, _| true)
+    validate_with_selection(descriptors, |_, _| RouteSelection::all())
+}
+
+#[derive(Clone, Copy)]
+struct RouteSelection {
+    selected: bool,
+    #[cfg(feature = "jwt")]
+    passport_context_module: Option<TypeId>,
+}
+
+impl RouteSelection {
+    const fn all() -> Self {
+        Self {
+            selected: true,
+            #[cfg(feature = "jwt")]
+            passport_context_module: None,
+        }
+    }
+
+    const fn none() -> Self {
+        Self {
+            selected: false,
+            #[cfg(feature = "jwt")]
+            passport_context_module: None,
+        }
+    }
 }
 
 pub(crate) fn validate_scoped_descriptors(
@@ -692,16 +738,26 @@ pub(crate) fn validate_scoped_descriptors(
         .map(ScopedController::descriptor)
         .collect::<Vec<_>>();
     validate_with_selection(&controllers, |controller, route| {
-        descriptors
+        let Some(scoped) = descriptors
             .iter()
             .find(|scoped| std::ptr::eq(scoped.descriptor(), controller))
-            .is_some_and(|scoped| scoped.selects(route))
+        else {
+            return RouteSelection::none();
+        };
+        let selected = scoped.selects(route);
+        RouteSelection {
+            selected,
+            #[cfg(feature = "jwt")]
+            passport_context_module: selected
+                .then(|| scoped.passport_context_module(route))
+                .flatten(),
+        }
     })
 }
 
 fn validate_with_selection(
     descriptors: &[&ControllerRouteDescriptor],
-    is_selected: impl Fn(&ControllerRouteDescriptor, &RouteDescriptor) -> bool,
+    selection_for: impl Fn(&ControllerRouteDescriptor, &RouteDescriptor) -> RouteSelection,
 ) -> Result<Vec<ValidatedController>> {
     let mut controllers = descriptors.to_vec();
     controllers.sort_by(|left, right| controller_sort_key(left).cmp(&controller_sort_key(right)));
@@ -724,7 +780,8 @@ fn validate_with_selection(
         let mut routes = Vec::new();
         for contract in controller.contracts() {
             for route in contract.routes() {
-                let selected = is_selected(controller, route);
+                let selection = selection_for(controller, route);
+                let selected = selection.selected;
                 if selected {
                     validate_route(route)?;
                     let key = (route.method(), canonical_pattern(route.full_path()));
@@ -745,6 +802,8 @@ fn validate_with_selection(
                     handler: route.handler(),
                     selected,
                     axum_path: selected.then(|| to_axum_path(route.full_path())),
+                    #[cfg(feature = "jwt")]
+                    passport_context_module: selection.passport_context_module,
                 });
             }
         }
@@ -1136,5 +1195,274 @@ fn metadata_diagnostic(
         diagnostic.with_location(location)
     } else {
         diagnostic
+    }
+}
+
+#[cfg(all(test, feature = "jwt"))]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode, header::AUTHORIZATION},
+    };
+    use mads_core::{Config, ConfigBuilder, Mads, MapSource, Module};
+    use tower::ServiceExt;
+
+    use super::{RouterBuildContext, ValidatedController, validate_scoped_descriptors};
+    use crate::http_scope::HttpApplicationScope;
+    use crate::{
+        JwtClaims, JwtService, JwtSignOptions, JwtTokenKind, PassportContext, PassportError,
+        PassportPrincipal, PassportResult, PassportStrategy, PassportStrategyCatalog,
+        PassportStrategyPreflight,
+    };
+
+    static FIRST_STRATEGY_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static SECOND_STRATEGY_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static FOREIGN_STRATEGY_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    #[derive(serde::Deserialize, serde::Serialize)]
+    pub struct SharedClaims {
+        marker: u8,
+    }
+
+    pub struct SharedPrincipal;
+
+    impl PassportPrincipal for SharedPrincipal {
+        fn has_role(&self, _: &str) -> bool {
+            false
+        }
+
+        fn has_permission(&self, _: &str) -> bool {
+            false
+        }
+    }
+
+    #[crate::routes]
+    #[crate::guard(strategy = "jwt", principal = SharedPrincipal)]
+    trait UnownedRoutes {
+        #[crate::get("/unowned-context")]
+        async fn profile(&self) -> &'static str;
+    }
+
+    mod first {
+        use super::*;
+
+        #[mads_core::service]
+        pub struct FirstStrategy;
+
+        #[crate::passport_strategy(name = "jwt")]
+        impl PassportStrategy for FirstStrategy {
+            type Claims = SharedClaims;
+            type Principal = SharedPrincipal;
+
+            const TOKEN_KIND: JwtTokenKind = JwtTokenKind::Access;
+
+            async fn validate(
+                &self,
+                _: &PassportContext<'_>,
+                claims: &JwtClaims<Self::Claims>,
+            ) -> PassportResult<Self::Principal> {
+                FIRST_STRATEGY_CALLS.fetch_add(1, Ordering::SeqCst);
+                if claims.custom.marker == 1 {
+                    Ok(SharedPrincipal)
+                } else {
+                    Err(PassportError::reject())
+                }
+            }
+        }
+
+        #[crate::controller(routes = [super::UnownedRoutes])]
+        pub struct FirstController;
+
+        impl super::UnownedRoutes for FirstController {
+            async fn profile(&self) -> &'static str {
+                "first"
+            }
+        }
+
+        #[mads_core::module]
+        pub struct FirstModule;
+    }
+
+    mod second {
+        use super::*;
+
+        #[mads_core::service]
+        pub struct SecondStrategy;
+
+        #[crate::passport_strategy(name = "jwt")]
+        impl PassportStrategy for SecondStrategy {
+            type Claims = SharedClaims;
+            type Principal = SharedPrincipal;
+
+            const TOKEN_KIND: JwtTokenKind = JwtTokenKind::Access;
+
+            async fn validate(
+                &self,
+                _: &PassportContext<'_>,
+                claims: &JwtClaims<Self::Claims>,
+            ) -> PassportResult<Self::Principal> {
+                SECOND_STRATEGY_CALLS.fetch_add(1, Ordering::SeqCst);
+                if claims.custom.marker == 2 {
+                    Ok(SharedPrincipal)
+                } else {
+                    Err(PassportError::reject())
+                }
+            }
+        }
+
+        #[crate::controller(routes = [super::UnownedRoutes])]
+        pub struct SecondController;
+
+        impl super::UnownedRoutes for SecondController {
+            async fn profile(&self) -> &'static str {
+                "second"
+            }
+        }
+
+        #[mads_core::module]
+        pub struct SecondModule;
+    }
+
+    mod foreign {
+        use super::*;
+
+        #[mads_core::service]
+        pub struct ForeignStrategy;
+
+        #[crate::passport_strategy(name = "jwt")]
+        impl PassportStrategy for ForeignStrategy {
+            type Claims = SharedClaims;
+            type Principal = SharedPrincipal;
+
+            const TOKEN_KIND: JwtTokenKind = JwtTokenKind::Access;
+
+            async fn validate(
+                &self,
+                _: &PassportContext<'_>,
+                _: &JwtClaims<Self::Claims>,
+            ) -> PassportResult<Self::Principal> {
+                FOREIGN_STRATEGY_CALLS.fetch_add(1, Ordering::SeqCst);
+                Err(PassportError::reject())
+            }
+        }
+
+        #[mads_core::module]
+        pub struct ForeignModule;
+    }
+
+    mod roots {
+        #[mads_core::module(imports = [super::first::FirstModule])]
+        pub struct FirstRoot;
+
+        #[mads_core::module(imports = [super::second::SecondModule])]
+        pub struct SecondRoot;
+
+        #[mads_core::module(imports = [
+            super::first::FirstModule,
+            super::second::SecondModule,
+            super::foreign::ForeignModule,
+        ])]
+        pub struct CombinedRoot;
+    }
+
+    fn config() -> Config {
+        ConfigBuilder::new()
+            .source(MapSource::new(
+                "mads.toml",
+                [("passport.secret", "01234567890123456789012345678901")],
+            ))
+            .build()
+            .unwrap()
+    }
+
+    async fn application_for<M: Module>() -> Mads {
+        let config = config();
+        let jwt = JwtService::from_config(&config).unwrap();
+        let mut builder = Mads::builder_with_config(config);
+        builder.provide(jwt).unwrap();
+        builder.root::<M>().unwrap();
+        builder.build().await.unwrap()
+    }
+
+    fn one_controller(application: &Mads) -> ValidatedController {
+        let scope = HttpApplicationScope::for_application(application).unwrap();
+        let mut controllers = validate_scoped_descriptors(scope.controllers()).unwrap();
+        assert_eq!(controllers.len(), 1);
+        controllers.pop().unwrap()
+    }
+
+    fn router_for(
+        application: &Mads,
+        preflight: &PassportStrategyPreflight<'static>,
+        controller: ValidatedController,
+    ) -> axum::Router {
+        let runtime = RouterBuildContext::new(application.context(), preflight);
+        let mut routes = controller.routes();
+        let router = (controller.registrar())(axum::Router::new(), &runtime, &mut routes).unwrap();
+        routes.finish().unwrap();
+        router
+    }
+
+    fn authenticated_request(token: &str) -> Request<Body> {
+        Request::builder()
+            .uri("/unowned-context")
+            .header(AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn unowned_guarded_contracts_keep_each_controller_context_and_direct_import_boundary() {
+        let combined = application_for::<roots::CombinedRoot>().await;
+        let combined_scope = HttpApplicationScope::for_application(&combined).unwrap();
+        let preflight = PassportStrategyCatalog::preflight_scoped(
+            combined.module_graph(),
+            combined_scope.guards(),
+        )
+        .unwrap();
+
+        assert_eq!(preflight.bindings().len(), 2);
+        assert!(!preflight.bindings()[0].is_builtin());
+        assert!(!preflight.bindings()[1].is_builtin());
+
+        let first = application_for::<roots::FirstRoot>().await;
+        let second = application_for::<roots::SecondRoot>().await;
+        let first_router = router_for(&combined, &preflight, one_controller(&first));
+        let second_router = router_for(&combined, &preflight, one_controller(&second));
+        let jwt = combined.context().resolve::<JwtService>().unwrap();
+        let first_token = jwt
+            .sign(
+                SharedClaims { marker: 1 },
+                JwtSignOptions::access(Duration::from_secs(60)),
+            )
+            .unwrap();
+        let second_token = jwt
+            .sign(
+                SharedClaims { marker: 2 },
+                JwtSignOptions::access(Duration::from_secs(60)),
+            )
+            .unwrap();
+
+        FIRST_STRATEGY_CALLS.store(0, Ordering::SeqCst);
+        SECOND_STRATEGY_CALLS.store(0, Ordering::SeqCst);
+        FOREIGN_STRATEGY_CALLS.store(0, Ordering::SeqCst);
+
+        let first_response = first_router
+            .oneshot(authenticated_request(&first_token))
+            .await
+            .unwrap();
+        let second_response = second_router
+            .oneshot(authenticated_request(&second_token))
+            .await
+            .unwrap();
+
+        assert_eq!(first_response.status(), StatusCode::OK);
+        assert_eq!(second_response.status(), StatusCode::OK);
+        assert_eq!(FIRST_STRATEGY_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(SECOND_STRATEGY_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(FOREIGN_STRATEGY_CALLS.load(Ordering::SeqCst), 0);
     }
 }

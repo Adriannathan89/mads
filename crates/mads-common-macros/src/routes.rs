@@ -408,7 +408,10 @@ impl RouteMetadata {
         let guard_layer = self.guard_ident.as_ref().map(|guard| {
             quote! {
                 .route_layer(#common::__private::PassportGuardLayer::new(
-                    __mads_runtime.passport_guard_state(&#guard)?,
+                    __mads_runtime.passport_guard_state(
+                        &#guard,
+                        __mads_routes.passport_context_module(),
+                    )?,
                 ))
             }
         });
