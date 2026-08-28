@@ -5,6 +5,7 @@
 //! handle and use typed trait calls for each request.
 
 use crate::{
+    cors::CorsPlan,
     http_scope::HttpApplicationScope,
     route::{RouterBuildContext, validate_scoped_descriptors},
 };
@@ -59,4 +60,29 @@ pub fn build_router(application: &mads_core::Mads) -> mads_core::Result<axum::Ro
         routes.finish()?;
     }
     Ok(router)
+}
+
+/// Applies final application-wide router configuration to a complete raw router.
+///
+/// Merge generated and native routes before calling this function so that
+/// application-wide middleware, including configured CORS, wraps every route.
+/// When CORS is absent, the raw router is returned unchanged. Callers that use
+/// a router directly configure it here; callers that pass a router to
+/// `serve_router` pass the raw router instead. Applying both paths would
+/// register the application-wide layer twice.
+///
+/// # Errors
+///
+/// Returns [`mads_core::Error`] when the application context cannot resolve
+/// its configured CORS plan for a reason other than CORS being absent.
+#[allow(clippy::result_large_err)]
+pub fn configure_router(
+    application: &mads_core::Mads,
+    router: axum::Router,
+) -> mads_core::Result<axum::Router> {
+    match application.context().resolve::<CorsPlan>() {
+        Ok(cors) => Ok(router.layer(cors.layer())),
+        Err(error) if error.code() == mads_core::MADS003 => Ok(router),
+        Err(error) => Err(error),
+    }
 }

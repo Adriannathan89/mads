@@ -106,9 +106,9 @@ pub use extract::{Header, Json, Path, Query, Request, headers};
 #[cfg(feature = "http")]
 pub use response::{Created, HttpError, HttpResult, NoContent};
 
-/// Builds an Axum router from the application's validated controllers.
+/// Builds a raw Axum router from the application's validated controllers.
 #[cfg(feature = "http")]
-pub use router::build_router;
+pub use router::{build_router, configure_router};
 
 /// Runs a validated application on the Axum HTTP runtime.
 #[cfg(feature = "http")]
