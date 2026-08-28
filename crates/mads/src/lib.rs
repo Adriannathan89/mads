@@ -1,62 +1,34 @@
 //! Public MADS.rs facade and feature composition boundary.
 //!
-//! The facade enables the v0.5 common HTTP integration, conditional Diesel
-//! database provisioning, and Tokio runtime by default; consumers can opt out
-//! of those defaults for a narrower core-only dependency surface. Database
-//! configuration remains explicit: when a linked provider requires
-//! the managed database service and no application provider supplies one, MADS configures the
-//! default database provider from the builder's resolved [`core::Config`].
-//! Applications must construct that configuration explicitly: [`core::Mads::builder`]
-//! does not load configuration files, dotenv values, or environment variables.
-//! The public [`AutoConfigurationReport`] records retained by analysis and a
-//! built application expose redacted decision evidence only. The v0.5 engine
-//! uses the complete provider catalog; module-scoped reachability is a v0.6
-//! boundary.
+//! The default facade composes the HTTP and database integrations with the
+//! Tokio runtime. A root [`Module`] selects the Rust-namespace-owned providers,
+//! controllers, routes, guards, strategies, and official auto-configurations
+//! that belong to one application. Direct imports and unrestricted `pub`
+//! visibility govern access across module boundaries.
 //!
-//! `DatabaseBootstrap` remains the explicit database override. Otherwise an
-//! enabled database default may use one separately registered embedded migration
-//! source through `MadsBuilderDatabaseExt::database_migrations`; MADS neither
-//! generates migrations nor auto-loads them. HTTP listener addresses remain
-//! explicit, because HTTP auto-binding and CORS are deferred to v0.5.6.
-//! v0.5.5 adds opt-in cookies and Passport/JWT without login, refresh storage,
-//! password hashing, CSRF, remote JWKS, JWE, or module scoping.
-//!
-//! A controller implements a typed route contract. MADS validates the complete
-//! route catalog, resolves the application-scoped controller once, and builds
-//! an Axum router without requiring application state or a manual route list:
+//! The standard startup path loads optional `.env`, optional `mads.toml`, and
+//! final `MADS_*` overrides from the current working directory, builds the root
+//! module, configures the complete router, starts lifecycle hooks, and serves
+//! the configured listener:
 //!
 //! ```no_run
 //! use mads::prelude::*;
 //!
-//! #[derive(Clone, serde::Serialize)]
-//! struct User {
-//!     id: u64,
-//! }
-//!
-//! #[mads::routes(prefix = "/users")]
-//! trait UserRoutes {
-//!     #[mads::get("/:id")]
-//!     async fn get_user(&self, id: Path<u64>) -> HttpResult<Json<User>>;
-//! }
-//!
-//! #[mads::controller(routes = [UserRoutes])]
-//! struct UserController;
-//!
-//! impl UserRoutes for UserController {
-//!     async fn get_user(&self, Path(id): Path<u64>) -> HttpResult<Json<User>> {
-//!         Ok(Json(User { id }))
-//!     }
-//! }
+//! #[module]
+//! struct AppModule;
 //!
 //! #[mads::main]
-//! async fn main() {
-//!     let application = Mads::builder().build().await.unwrap();
-//!     let _router = build_router(&application).unwrap();
+//! async fn main() -> Result<(), HttpRuntimeError> {
+//!     Mads::run::<AppModule>().await
 //! }
 //! ```
 //!
-//! Run an application with `serve`. Validation and router construction occur
-//! before lifecycle startup or listener binding:
+//! Use the low-level builder for explicit configuration, embedded migrations,
+//! lifecycle hooks, native routers, or listener addresses. [`build_router`]
+//! returns an unconfigured generated router so native routes can be merged
+//! before [`configure_router`] or [`serve_router`] applies application-wide
+//! configuration. A builder without [`core::MadsBuilder::root`] retains
+//! complete-catalog compatibility.
 //!
 //! ```no_run
 //! use mads::prelude::*;
@@ -64,12 +36,19 @@
 //! #[mads::main]
 //! async fn main() {
 //!     let application = Mads::builder().build().await.unwrap();
-//!     serve(application, "127.0.0.1:3000").await.unwrap();
+//!     let raw_router = build_router(&application).unwrap();
+//!     serve_router(application, raw_router, "127.0.0.1:3000")
+//!         .await
+//!         .unwrap();
 //! }
 //! ```
 //!
-//! Configure the database explicitly while leaving provider provisioning to
-//! the conditional default:
+//! [`core::Mads::builder`] never loads conventional configuration sources.
+//! Database provisioning remains conditional on the selected application, and
+//! embedded migrations require explicit
+//! [`MadsBuilderDatabaseExt::database_migrations`] registration. The retained
+//! [`AutoConfigurationReport`] records expose redacted decision evidence only.
+//! `DatabaseBootstrap` remains the native Diesel override.
 //!
 //! ```no_run
 //! use mads::{
@@ -87,31 +66,6 @@
 //!         .build()
 //!         .unwrap();
 //!     let _application = Mads::builder_with_config(config).build().await.unwrap();
-//! }
-//! ```
-//!
-//! `DatabaseBootstrap` remains the explicit native Diesel escape hatch. It
-//! overrides the conditional default and retains direct control of the
-//! database lifecycle:
-//!
-//! ```no_run
-//! use mads::prelude::*;
-//!
-//! #[mads::main]
-//! async fn main() {
-//!     let config = ConfigBuilder::new()
-//!         .source(mads::core::MapSource::new(
-//!             "application",
-//!             [("database.url", "postgres://localhost/mads")],
-//!         ))
-//!         .build()
-//!         .unwrap();
-//!     let database_config = DatabaseConfig::from_config(&config).unwrap();
-//!     let mut builder = Mads::builder_with_config(config);
-//!     builder
-//!         .database(DatabaseBootstrap::new(database_config))
-//!         .unwrap();
-//!     let _application = builder.build().await.unwrap();
 //! }
 //! ```
 //!
@@ -230,6 +184,11 @@ pub use mads_core::{
     AutoConfigurationRequirement, AutoConfigurationStatus,
 };
 
+/// Re-exports root-module contracts and retained module-graph inspection records.
+pub use mads_core::{
+    Module, ModuleGraph, ModuleImportDescriptor, ModuleImportEdge, ModuleNode, ProviderOwnership,
+};
+
 /// Re-exports the repository declaration attribute.
 pub use mads_core::repository;
 
@@ -292,9 +251,11 @@ pub use mads_common::{Header, Json, Path, Query, Request, headers};
 #[cfg(feature = "http")]
 pub use mads_common::{Created, HttpError, HttpResult, NoContent};
 
-/// Re-exports HTTP router construction and runtime startup functions.
+/// Re-exports HTTP router construction, configuration, and runtime startup functions.
 #[cfg(feature = "http")]
-pub use mads_common::{HttpRuntimeError, MADS031, MadsRunExt, build_router, serve};
+pub use mads_common::{
+    HttpRuntimeError, MADS031, MadsRunExt, build_router, configure_router, serve, serve_router,
+};
 
 /// Re-exports guarded Passport authentication and policy contracts.
 #[cfg(all(feature = "http", feature = "jwt"))]
@@ -369,9 +330,11 @@ pub mod prelude {
     #[cfg(feature = "http")]
     pub use mads_common::{Created, HttpError, HttpResult, NoContent};
 
-    /// Re-exports HTTP router construction and runtime startup functions.
+    /// Re-exports HTTP router construction, configuration, and runtime startup functions.
     #[cfg(feature = "http")]
-    pub use mads_common::{HttpRuntimeError, MADS031, MadsRunExt, build_router, serve};
+    pub use mads_common::{
+        HttpRuntimeError, MADS031, MadsRunExt, build_router, configure_router, serve, serve_router,
+    };
 
     /// Re-exports application-facing Passport guards, strategies, and extractors.
     #[cfg(all(feature = "http", feature = "jwt"))]
@@ -411,7 +374,8 @@ pub mod prelude {
         AutoConfigurationReasonCode, AutoConfigurationReport, AutoConfigurationRequirement,
         AutoConfigurationStatus, Catalog, Config, ConfigBuilder, ConstructionPlan,
         ConstructionStep, DependencyEdge, Diagnostic, Error, GraphAnalysis, LifecycleHook,
-        LifecycleState, Mads, MadsBuilder, ProviderNode, ProviderOrigin, ProviderState,
+        LifecycleState, Mads, Module, ModuleGraph, ModuleImportDescriptor, ModuleImportEdge,
+        ModuleNode, ProviderNode, ProviderOrigin, ProviderOwnership, ProviderState,
         ProviderVisibility, SourceLocation,
     };
 }

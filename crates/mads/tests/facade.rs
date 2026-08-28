@@ -11,12 +11,22 @@ fn framework_result() -> mads::core::Result<()> {
     Ok(())
 }
 
+mod declarations {
+    use mads::prelude::*;
+
+    #[module]
+    pub(super) struct PreludeModule;
+}
+
 #[test]
 fn prelude_exposes_the_http_runtime_surface() {
     use mads::prelude::{
-        Created, Header, HttpError, HttpResult, Json, Mads, MadsRunExt, NoContent, Path, Query,
-        Request, build_router, serve,
+        Created, Header, HttpError, HttpResult, HttpRuntimeError, Json, Mads, MadsRunExt, Module,
+        ModuleGraph, ModuleImportDescriptor, ModuleImportEdge, ModuleNode, NoContent, Path,
+        ProviderOwnership, Query, Request, build_router, configure_router, serve, serve_router,
     };
+
+    fn assert_module<T: Module>() {}
 
     let _ = std::any::TypeId::of::<Created<NoContent>>();
     let _ = std::any::TypeId::of::<Header<mads::common::headers::ContentType>>();
@@ -26,12 +36,35 @@ fn prelude_exposes_the_http_runtime_surface() {
     let _ = std::any::TypeId::of::<Path<String>>();
     let _ = std::any::TypeId::of::<Query<String>>();
     let _ = std::any::TypeId::of::<Request>();
+    assert_module::<declarations::PreludeModule>();
+    let _ = std::any::TypeId::of::<ModuleGraph>();
+    let _ = std::any::TypeId::of::<ModuleImportDescriptor>();
+    let _ = std::any::TypeId::of::<ModuleImportEdge>();
+    let _ = std::any::TypeId::of::<ModuleNode>();
+    let _ = std::any::TypeId::of::<ProviderOwnership>();
+    let _ = std::any::TypeId::of::<HttpRuntimeError>();
     let _ = build_router;
+    let _ = configure_router;
     let _ = |application: mads::core::Mads| serve(application, "127.0.0.1:0");
-    fn needs_run_extension<T: MadsRunExt>() {}
-    needs_run_extension::<Mads>();
-    let runtime = Mads::run::<FacadeModule>();
-    drop(runtime);
+    let _ = |application: mads::core::Mads, router: mads::axum::Router| {
+        serve_router(application, router, "127.0.0.1:0")
+    };
+    let _ = <Mads as MadsRunExt>::run::<declarations::PreludeModule>;
+
+    fn assert_root_module<T: mads::Module>() {}
+    assert_root_module::<declarations::PreludeModule>();
+    let _ = std::any::TypeId::of::<mads::ModuleGraph>();
+    let _ = std::any::TypeId::of::<mads::ModuleImportDescriptor>();
+    let _ = std::any::TypeId::of::<mads::ModuleImportEdge>();
+    let _ = std::any::TypeId::of::<mads::ModuleNode>();
+    let _ = std::any::TypeId::of::<mads::ProviderOwnership>();
+    let _ = mads::build_router;
+    let _ = mads::configure_router;
+    let _ = |application: mads::core::Mads| mads::serve(application, "127.0.0.1:0");
+    let _ = |application: mads::core::Mads, router: mads::axum::Router| {
+        mads::serve_router(application, router, "127.0.0.1:0")
+    };
+    let _ = <mads::core::Mads as mads::MadsRunExt>::run::<declarations::PreludeModule>;
     let _ = framework_result;
     let _: mads::common::axum::Router = mads::common::axum::Router::new();
 }
@@ -168,6 +201,8 @@ fn prelude_exposes_core_types_and_bare_attributes() {
     let _ = std::any::TypeId::of::<Diagnostic>();
     let _ = std::any::TypeId::of::<Catalog>();
     let _ = std::any::TypeId::of::<LifecycleState>();
+    let _: mads::core::MadsBuilder = Mads::builder();
+    let _: mads::core::MadsBuilder = Mads::builder_with_config(Config::empty());
 }
 
 #[mads::module]
