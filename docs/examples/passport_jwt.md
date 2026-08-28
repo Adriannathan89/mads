@@ -208,3 +208,7 @@ rotation/revocation, password hashing, CSRF, CORS, auto-binding, remote JWKS,
 JWE, or module scoping. The first four remain application authentication logic;
 CORS/auto-binding are v0.5.6, and module reachability/export eligibility is
 v0.6.0.
+
+> **Roadmap supersession (v0.6.0):** The planned v0.5.6 CORS and HTTP
+> auto-binding milestone was merged into v0.6.0 so it could share the root
+> module scope with provider, route, guard, and strategy discovery.

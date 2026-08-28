@@ -157,6 +157,10 @@ endpoint, refresh-token persistence, rotation, reuse detection, revocation,
 password hashing, CSRF, CORS, HTTP auto-binding, remote JWKS, JWE, or module
 scoping. v0.5.6 owns CORS and HTTP auto-binding.
 
+> **Roadmap supersession (v0.6.0):** The planned v0.5.6 CORS and HTTP
+> auto-binding milestone was merged into v0.6.0 so it could share the root
+> module scope with provider, route, guard, and strategy discovery.
+
 In v0.6.0, root-module reachability and provider export eligibility will filter
 the stable strategy descriptors before name resolution. That is additive
 scoping over the v0.5.5 descriptor model; no reachability/export enforcement
