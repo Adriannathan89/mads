@@ -5,7 +5,7 @@
 //! boundary is always available through [`core`].
 #![cfg_attr(
     feature = "http",
-    doc = "\nThe `http` feature provides compile-time controller and route contracts and the Axum runtime. [`build_router`] validates every controller selected for the application before it resolves a controller or invokes a typed registrar; [`serve`] performs that same validation before lifecycle startup or socket binding. Use [`routes`] to declare a route contract and [`controller`] to bind it to a managed controller. The resulting descriptors can be inspected through [`RouteCatalog`] before the HTTP runtime installs handlers. [`axum`] is deliberately re-exported for native extractors, response types, routers, middleware, and Tower composition."
+    doc = "\nThe `http` feature provides compile-time controller and route contracts and the Axum runtime. [`build_router`] validates every controller selected for the application before it resolves a controller or invokes a typed registrar; [`serve`] performs that same validation before lifecycle startup or socket binding. Use [`serve_router`] to run a complete raw router after merging generated and native routes; it applies final application-wide router configuration before lifecycle startup. Use [`routes`] to declare a route contract and [`controller`] to bind it to a managed controller. The resulting descriptors can be inspected through [`RouteCatalog`] before the HTTP runtime installs handlers. [`axum`] is deliberately re-exported for native extractors, response types, routers, middleware, and Tower composition."
 )]
 #![cfg_attr(
     feature = "database",
@@ -110,9 +110,9 @@ pub use response::{Created, HttpError, HttpResult, NoContent};
 #[cfg(feature = "http")]
 pub use router::{build_router, configure_router};
 
-/// Runs a validated application on the Axum HTTP runtime.
+/// Runs validated applications and raw composed routers on the Axum HTTP runtime.
 #[cfg(feature = "http")]
-pub use server::{HttpRuntimeError, serve};
+pub use server::{HttpRuntimeError, serve, serve_router};
 
 /// Exposes the framework-neutral core boundary to future integrations.
 pub use mads_core as core;

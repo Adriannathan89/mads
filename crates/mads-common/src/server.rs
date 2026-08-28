@@ -1,7 +1,9 @@
 //! Validated HTTP server startup and lifecycle coordination.
 //!
-//! [`serve`] validates route metadata and builds the complete router before it
-//! starts application lifecycle hooks or asks Tokio to bind a listener.
+//! [`serve`] validates route metadata and builds a raw generated router, while
+//! [`serve_router`] accepts a complete raw router from a caller. Both finalize
+//! router configuration before they start application lifecycle hooks or ask
+//! Tokio to bind a listener.
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -10,13 +12,13 @@ use std::future::Future;
 use mads_core::Mads;
 use tokio::net::TcpListener;
 
-use crate::build_router;
+use crate::{build_router, configure_router};
 
 /// An error produced while preparing, running, or stopping the HTTP runtime.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum HttpRuntimeError {
-    /// Route validation or router construction failed before lifecycle startup.
+    /// Route validation or final router configuration failed before lifecycle startup.
     Bootstrap(mads_core::Error),
     /// Application lifecycle startup or shutdown failed.
     Lifecycle(mads_core::Error),
@@ -61,10 +63,11 @@ impl StdError for HttpRuntimeError {
     }
 }
 
-/// Validates, starts, serves, and shuts down an application on `address`.
+/// Builds, configures, starts, serves, and shuts down an application on `address`.
 ///
-/// Route validation completes before lifecycle hooks start or the listener is
-/// bound. Once lifecycle startup succeeds, every exit path attempts shutdown.
+/// Generated-route validation and final router configuration complete before
+/// lifecycle hooks start or the listener is bound. Once lifecycle startup
+/// succeeds, every exit path attempts shutdown.
 /// A bind or serving failure is retained if shutdown succeeds; if shutdown
 /// also fails, both failures are returned in [`HttpRuntimeError::OperationAndShutdown`].
 ///
@@ -95,11 +98,46 @@ pub async fn serve(
     application: Mads,
     address: impl tokio::net::ToSocketAddrs,
 ) -> Result<(), HttpRuntimeError> {
-    serve_with(application, address, TcpListener::bind, shutdown_signal()).await
+    let router = build_router(&application).map_err(HttpRuntimeError::Bootstrap)?;
+    serve_router(application, router, address).await
 }
 
+/// Configures, starts, serves, and shuts down an application with a complete raw router.
+///
+/// Pass the raw router after merging any generated and native routes. This
+/// function applies final application-wide configuration, including CORS, once
+/// before lifecycle startup. Call [`crate::configure_router`] only when using a
+/// router directly; passing an already configured router here would apply that
+/// configuration twice.
+///
+/// The explicit `address` is the complete listener override. It is resolved
+/// and bound after lifecycle startup, and it may use port zero regardless of
+/// any automatic `server.host` or `server.port` configuration.
+///
+/// # Errors
+///
+/// Returns [`HttpRuntimeError::Bootstrap`] when final router configuration
+/// fails before lifecycle startup. Lifecycle, bind, serving, and combined
+/// operational/shutdown errors follow the same contract as [`serve`].
+#[allow(clippy::result_large_err)]
+pub async fn serve_router(
+    application: Mads,
+    router: axum::Router,
+    address: impl tokio::net::ToSocketAddrs,
+) -> Result<(), HttpRuntimeError> {
+    serve_router_with(
+        application,
+        router,
+        address,
+        TcpListener::bind,
+        shutdown_signal(),
+    )
+    .await
+}
+
+#[cfg(test)]
 async fn serve_with<Address, B, BindFuture, Shutdown>(
-    mut application: Mads,
+    application: Mads,
     address: Address,
     binder: B,
     shutdown: Shutdown,
@@ -110,6 +148,22 @@ where
     Shutdown: Future<Output = ()> + Send + 'static,
 {
     let router = build_router(&application).map_err(HttpRuntimeError::Bootstrap)?;
+    serve_router_with(application, router, address, binder, shutdown).await
+}
+
+async fn serve_router_with<Address, B, BindFuture, Shutdown>(
+    mut application: Mads,
+    router: axum::Router,
+    address: Address,
+    binder: B,
+    shutdown: Shutdown,
+) -> Result<(), HttpRuntimeError>
+where
+    B: FnOnce(Address) -> BindFuture,
+    BindFuture: Future<Output = std::io::Result<TcpListener>>,
+    Shutdown: Future<Output = ()> + Send + 'static,
+{
+    let router = configure_router(&application, router).map_err(HttpRuntimeError::Bootstrap)?;
     application
         .start()
         .await
@@ -158,7 +212,7 @@ mod tests {
     use std::any::TypeId;
     #[cfg(feature = "database")]
     use std::error::Error as StdError;
-    use std::io;
+    use std::io::{self, Read, Write};
     use std::net::{Ipv4Addr, SocketAddr};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -169,10 +223,9 @@ mod tests {
         ApplicationContext, ConfigBuilder, Diagnostic, Error, LifecycleFuture, LifecycleHook,
         MADS011, MADS020, Mads, MapSource, SourceLocation,
     };
-    #[cfg(feature = "database")]
     use tokio::net::TcpListener;
 
-    use super::{HttpRuntimeError, serve_with};
+    use super::{HttpRuntimeError, serve_router_with, serve_with};
     use crate::server_config::ServerBinding;
     use crate::{ControllerRouteDescriptor, HttpMethod, RouteContractDescriptor, RouteDescriptor};
     #[cfg(feature = "database")]
@@ -188,6 +241,9 @@ mod tests {
 
     struct PreflightController;
     struct PreflightPermit;
+
+    #[derive(Clone)]
+    struct RouterPreflightEvents(Arc<Mutex<Vec<&'static str>>>);
 
     #[cfg(feature = "database")]
     mod auto_database_repository {
@@ -218,6 +274,13 @@ mod tests {
         routes: &mut crate::__private::ValidatedRouteIter<'_>,
     ) -> mads_core::Result<axum::Router> {
         let _ = context.application().resolve::<PreflightPermit>()?;
+        context
+            .application()
+            .resolve::<RouterPreflightEvents>()?
+            .0
+            .lock()
+            .unwrap()
+            .push("router_preflight");
         let Some(path) = routes.next(HttpMethod::Get, "health")? else {
             routes.finish()?;
             return Ok(router);
@@ -258,14 +321,14 @@ mod tests {
         fn start<'a>(&'a self, _: &'a ApplicationContext) -> LifecycleFuture<'a> {
             Box::pin(async move {
                 STARTS.fetch_add(1, Ordering::SeqCst);
-                self.events.lock().unwrap().push("start");
+                self.events.lock().unwrap().push("lifecycle_start");
                 Ok(())
             })
         }
 
         fn stop<'a>(&'a self, _: &'a ApplicationContext) -> LifecycleFuture<'a> {
             Box::pin(async move {
-                self.events.lock().unwrap().push("shutdown");
+                self.events.lock().unwrap().push("lifecycle_stop");
                 if self.fail_shutdown {
                     Err(test_core_error("shutdown failed"))
                 } else {
@@ -294,10 +357,14 @@ mod tests {
                 .unwrap(),
             )
             .unwrap();
+        let router_preflight_events = Arc::clone(&events);
         builder.lifecycle_hook(RecordingHook {
             events,
             fail_shutdown,
         });
+        builder
+            .provide(RouterPreflightEvents(router_preflight_events))
+            .unwrap();
         if preflight_permitted {
             builder.provide(PreflightPermit).unwrap();
         }
@@ -520,22 +587,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lifecycle_starts_before_bind_and_shuts_down_after_serving() {
+    async fn raw_router_preflight_precedes_lifecycle_binding_and_graceful_shutdown() {
         let _guard = TEST_LOCK.lock().await;
         STARTS.store(0, Ordering::SeqCst);
         let events = Arc::new(Mutex::new(Vec::new()));
         let application = application(Arc::clone(&events), true, false).await;
+        let router = crate::build_router(&application).unwrap();
         let binder_events = Arc::clone(&events);
         let binder = move |address| async move {
             binder_events.lock().unwrap().push("bind");
             tokio::net::TcpListener::bind(address).await
         };
+        let shutdown_events = Arc::clone(&events);
+        let shutdown = async move {
+            shutdown_events.lock().unwrap().push("serve");
+        };
 
-        serve_with(application, address(), binder, async {})
+        serve_router_with(application, router, address(), binder, shutdown)
             .await
             .unwrap();
 
-        assert_eq!(*events.lock().unwrap(), ["start", "bind", "shutdown"]);
+        assert_eq!(
+            *events.lock().unwrap(),
+            [
+                "router_preflight",
+                "lifecycle_start",
+                "bind",
+                "serve",
+                "lifecycle_stop",
+            ]
+        );
     }
 
     #[tokio::test]
@@ -554,7 +635,15 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, HttpRuntimeError::Bind(_)));
-        assert_eq!(*events.lock().unwrap(), ["start", "bind", "shutdown"]);
+        assert_eq!(
+            *events.lock().unwrap(),
+            [
+                "router_preflight",
+                "lifecycle_start",
+                "bind",
+                "lifecycle_stop"
+            ]
+        );
     }
 
     #[tokio::test]
@@ -588,6 +677,98 @@ mod tests {
             }
             other => panic!("expected combined failure, got {other:?}"),
         }
-        assert_eq!(*events.lock().unwrap(), ["start", "shutdown"]);
+        assert_eq!(
+            *events.lock().unwrap(),
+            ["router_preflight", "lifecycle_start", "lifecycle_stop"]
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_cors_configuration_prevents_lifecycle_start() {
+        let _guard = TEST_LOCK.lock().await;
+        STARTS.store(0, Ordering::SeqCst);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let config = ConfigBuilder::new()
+            .source(
+                MapSource::new("test", std::iter::empty::<(&str, &str)>())
+                    .with_string_array("server.cors.origins", ["https://app.example.com"]),
+            )
+            .build()
+            .unwrap();
+        let mut builder = Mads::builder_with_config(config);
+        builder.lifecycle_hook(RecordingHook {
+            events: Arc::clone(&events),
+            fail_shutdown: false,
+        });
+
+        assert!(builder.build().await.is_err());
+        assert_eq!(STARTS.load(Ordering::SeqCst), 0);
+        assert!(events.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn explicit_raw_router_ignores_automatic_binding_keys_and_applies_cors() {
+        let _guard = TEST_LOCK.lock().await;
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let config = ConfigBuilder::new()
+            .source(
+                MapSource::new(
+                    "test",
+                    [
+                        ("server.host", "private\ninvalid-host"),
+                        ("server.port", "0"),
+                    ],
+                )
+                .with_string_array("server.cors.origins", ["https://app.example.com"])
+                .with_string_array("server.cors.methods", ["GET"]),
+            )
+            .build()
+            .unwrap();
+        let mut builder = Mads::builder_with_config(config);
+        builder.lifecycle_hook(RecordingHook {
+            events: Arc::clone(&events),
+            fail_shutdown: false,
+        });
+        let application = builder.build().await.unwrap();
+        let router = axum::Router::new().route("/native", axum::routing::get(|| async { "ok" }));
+        let (bound_address_sender, bound_address_receiver) = tokio::sync::oneshot::channel();
+        let binder_events = Arc::clone(&events);
+        let binder = move |address: SocketAddr| async move {
+            assert_eq!(address.port(), 0);
+            binder_events.lock().unwrap().push("bind");
+            let listener = TcpListener::bind(address).await?;
+            bound_address_sender
+                .send(listener.local_addr().unwrap())
+                .unwrap();
+            Ok(listener)
+        };
+        let shutdown_events = Arc::clone(&events);
+        let shutdown = async move {
+            let bound_address = bound_address_receiver.await.unwrap();
+            let response = tokio::task::spawn_blocking(move || {
+                let mut stream = std::net::TcpStream::connect(bound_address)?;
+                stream.write_all(
+                    b"GET /native HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: https://app.example.com\r\nConnection: close\r\n\r\n",
+                )?;
+                let mut response = String::new();
+                stream.read_to_string(&mut response)?;
+                Ok::<_, io::Error>(response)
+            })
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(response.starts_with("HTTP/1.1 200"));
+            assert!(response.contains("access-control-allow-origin: https://app.example.com"));
+            shutdown_events.lock().unwrap().push("serve");
+        };
+
+        serve_router_with(application, router, address(), binder, shutdown)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *events.lock().unwrap(),
+            ["lifecycle_start", "bind", "serve", "lifecycle_stop"]
+        );
     }
 }
