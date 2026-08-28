@@ -14,8 +14,8 @@ fn framework_result() -> mads::core::Result<()> {
 #[test]
 fn prelude_exposes_the_http_runtime_surface() {
     use mads::prelude::{
-        Created, Header, HttpError, HttpResult, Json, NoContent, Path, Query, Request,
-        build_router, serve,
+        Created, Header, HttpError, HttpResult, Json, Mads, MadsRunExt, NoContent, Path, Query,
+        Request, build_router, serve,
     };
 
     let _ = std::any::TypeId::of::<Created<NoContent>>();
@@ -28,6 +28,10 @@ fn prelude_exposes_the_http_runtime_surface() {
     let _ = std::any::TypeId::of::<Request>();
     let _ = build_router;
     let _ = |application: mads::core::Mads| serve(application, "127.0.0.1:0");
+    fn needs_run_extension<T: MadsRunExt>() {}
+    needs_run_extension::<Mads>();
+    let runtime = Mads::run::<FacadeModule>();
+    drop(runtime);
     let _ = framework_result;
     let _: mads::common::axum::Router = mads::common::axum::Router::new();
 }

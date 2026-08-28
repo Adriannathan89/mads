@@ -112,7 +112,7 @@ pub use router::{build_router, configure_router};
 
 /// Runs validated applications and raw composed routers on the Axum HTTP runtime.
 #[cfg(feature = "http")]
-pub use server::{HttpRuntimeError, serve, serve_router};
+pub use server::{HttpRuntimeError, MADS031, MadsRunExt, serve, serve_router};
 
 /// Exposes the framework-neutral core boundary to future integrations.
 pub use mads_core as core;

@@ -294,7 +294,7 @@ pub use mads_common::{Created, HttpError, HttpResult, NoContent};
 
 /// Re-exports HTTP router construction and runtime startup functions.
 #[cfg(feature = "http")]
-pub use mads_common::{HttpRuntimeError, build_router, serve};
+pub use mads_common::{HttpRuntimeError, MADS031, MadsRunExt, build_router, serve};
 
 /// Re-exports guarded Passport authentication and policy contracts.
 #[cfg(all(feature = "http", feature = "jwt"))]
@@ -371,7 +371,7 @@ pub mod prelude {
 
     /// Re-exports HTTP router construction and runtime startup functions.
     #[cfg(feature = "http")]
-    pub use mads_common::{HttpRuntimeError, build_router, serve};
+    pub use mads_common::{HttpRuntimeError, MADS031, MadsRunExt, build_router, serve};
 
     /// Re-exports application-facing Passport guards, strategies, and extractors.
     #[cfg(all(feature = "http", feature = "jwt"))]
