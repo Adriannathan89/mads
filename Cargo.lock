@@ -922,7 +922,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "mads"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -938,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "mads-cli"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "assert_cmd",
  "mads",
@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "mads-common"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "axum",
  "axum-extra",
@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "mads-common-macros"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -980,7 +980,7 @@ dependencies = [
 
 [[package]]
 name = "mads-core"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "cargo_metadata",
  "dotenvy",
@@ -994,7 +994,7 @@ dependencies = [
 
 [[package]]
 name = "mads-core-macros"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1004,7 +1004,7 @@ dependencies = [
 
 [[package]]
 name = "mads-extra"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "mads-core",
 ]
