@@ -78,7 +78,7 @@ fn cors_report<'a>(reports: &'a [AutoConfigurationReport]) -> &'a AutoConfigurat
         .expect("the CORS auto-configuration must be registered")
 }
 
-fn assert_invalid_cors(config: Config, redacted_value: Option<&str>) {
+fn invalid_cors_output(config: Config) -> (String, String) {
     let analysis = cors_analysis(config);
     let cors = cors_report(analysis.auto_configurations());
     let diagnostics = analysis
@@ -89,8 +89,13 @@ fn assert_invalid_cors(config: Config, redacted_value: Option<&str>) {
 
     assert_eq!(cors.status(), AutoConfigurationStatus::Failed);
     assert_eq!(cors.reason_code().as_str(), "invalid_configuration");
+    (format!("{cors:?}"), diagnostics)
+}
+
+fn assert_invalid_cors(config: Config, redacted_value: Option<&str>) {
+    let (debug, diagnostics) = invalid_cors_output(config);
     if let Some(redacted_value) = redacted_value {
-        assert!(!format!("{cors:?}").contains(redacted_value));
+        assert!(!debug.contains(redacted_value));
         assert!(!diagnostics.contains(redacted_value));
     }
 }
@@ -557,6 +562,16 @@ fn cors_rejects_invalid_origins_and_headers_without_exposing_values() {
         ),
         (
             cors_config([
+                CorsValue::StringArray(
+                    "server.cors.origins",
+                    &["https://app.example.com#fragment"],
+                ),
+                CorsValue::StringArray("server.cors.methods", &["GET"]),
+            ]),
+            "https://app.example.com#fragment",
+        ),
+        (
+            cors_config([
                 CorsValue::StringArray("server.cors.origins", &["https://app.example.com"]),
                 CorsValue::StringArray("server.cors.methods", &["GET"]),
                 CorsValue::StringArray("server.cors.allowed_headers", &["bad header"]),
@@ -565,6 +580,63 @@ fn cors_rejects_invalid_origins_and_headers_without_exposing_values() {
         ),
     ] {
         assert_invalid_cors(config, Some(invalid_value));
+    }
+}
+
+#[test]
+fn cors_reports_positions_for_invalid_array_values_without_exposing_them() {
+    for (config, key, invalid_value) in [
+        (
+            cors_config([
+                CorsValue::StringArray(
+                    "server.cors.origins",
+                    &[
+                        "https://app.example.com",
+                        "https://app.example.com#private-fragment",
+                    ],
+                ),
+                CorsValue::StringArray("server.cors.methods", &["GET"]),
+            ]),
+            "server.cors.origins",
+            "https://app.example.com#private-fragment",
+        ),
+        (
+            cors_config([
+                CorsValue::StringArray("server.cors.origins", &["https://app.example.com"]),
+                CorsValue::StringArray("server.cors.methods", &["GET", "not a method"]),
+            ]),
+            "server.cors.methods",
+            "not a method",
+        ),
+        (
+            cors_config([
+                CorsValue::StringArray("server.cors.origins", &["https://app.example.com"]),
+                CorsValue::StringArray("server.cors.methods", &["GET"]),
+                CorsValue::StringArray(
+                    "server.cors.allowed_headers",
+                    &["authorization", "bad allowed header"],
+                ),
+            ]),
+            "server.cors.allowed_headers",
+            "bad allowed header",
+        ),
+        (
+            cors_config([
+                CorsValue::StringArray("server.cors.origins", &["https://app.example.com"]),
+                CorsValue::StringArray("server.cors.methods", &["GET"]),
+                CorsValue::StringArray(
+                    "server.cors.exposed_headers",
+                    &["x-request-id", "bad exposed header"],
+                ),
+            ]),
+            "server.cors.exposed_headers",
+            "bad exposed header",
+        ),
+    ] {
+        let (_, diagnostics) = invalid_cors_output(config);
+
+        assert!(diagnostics.contains(&format!("{key} element at position 2")));
+        assert!(!diagnostics.contains(invalid_value));
     }
 }
 

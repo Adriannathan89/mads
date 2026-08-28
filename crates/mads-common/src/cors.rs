@@ -212,27 +212,35 @@ fn parse_origins(config: &Config) -> Result<CorsValues<HeaderValue>> {
     parse_wildcard_or_list(config, "server.cors.origins", true, parse_origin)
 }
 
-fn parse_origin(raw: &str, key: &'static str, source: Option<&str>) -> Result<HeaderValue> {
-    let uri = raw
-        .parse::<Uri>()
-        .map_err(|_| invalid_cors_configuration(key, source, "must be a canonical HTTP origin"))?;
+fn parse_origin(
+    raw: &str,
+    key: &'static str,
+    source: Option<&str>,
+    position: usize,
+) -> Result<HeaderValue> {
+    let uri = raw.parse::<Uri>().map_err(|_| {
+        invalid_cors_array_element(key, source, position, "must be a canonical HTTP origin")
+    })?;
     let has_explicit_path_or_query = uri
         .path_and_query()
         .is_some_and(|path_and_query| path_and_query.as_str() != "/" || raw.ends_with('/'));
     if !matches!(uri.scheme_str(), Some("http" | "https"))
         || uri.authority().is_none()
         || has_explicit_path_or_query
+        || raw.contains('#')
         || raw.contains('@')
         || raw.eq_ignore_ascii_case("null")
     {
-        return Err(invalid_cors_configuration(
+        return Err(invalid_cors_array_element(
             key,
             source,
+            position,
             "must be a canonical HTTP or HTTPS origin without paths, queries, fragments, or user information",
         ));
     }
-    HeaderValue::from_str(raw)
-        .map_err(|_| invalid_cors_configuration(key, source, "must be a valid HTTP header value"))
+    HeaderValue::from_str(raw).map_err(|_| {
+        invalid_cors_array_element(key, source, position, "must be a valid HTTP header value")
+    })
 }
 
 fn parse_methods(config: &Config) -> Result<Vec<Method>> {
@@ -254,17 +262,19 @@ fn parse_methods(config: &Config) -> Result<Vec<Method>> {
 
     let source = source_for_key(config, key);
     let mut methods = Vec::new();
-    for raw in raw_methods {
+    for (index, raw) in raw_methods.iter().enumerate() {
+        let position = index + 1;
         if raw == "*" {
-            return Err(invalid_cors_configuration(
+            return Err(invalid_cors_array_element(
                 key,
                 source,
+                position,
                 "must not contain a wildcard method",
             ));
         }
         let normalized = raw.to_ascii_uppercase();
         let method = Method::from_bytes(normalized.as_bytes()).map_err(|_| {
-            invalid_cors_configuration(key, source, "must contain valid HTTP methods")
+            invalid_cors_array_element(key, source, position, "must contain valid HTTP methods")
         })?;
         if !methods.contains(&method) {
             methods.push(method);
@@ -274,9 +284,14 @@ fn parse_methods(config: &Config) -> Result<Vec<Method>> {
 }
 
 fn parse_headers(config: &Config, key: &'static str) -> Result<CorsValues<HeaderName>> {
-    parse_wildcard_or_list(config, key, false, |raw, key, source| {
+    parse_wildcard_or_list(config, key, false, |raw, key, source, position| {
         HeaderName::from_bytes(raw.as_bytes()).map_err(|_| {
-            invalid_cors_configuration(key, source, "must contain valid HTTP header names")
+            invalid_cors_array_element(
+                key,
+                source,
+                position,
+                "must contain valid HTTP header names",
+            )
         })
     })
 }
@@ -285,7 +300,7 @@ fn parse_wildcard_or_list<T>(
     config: &Config,
     key: &'static str,
     required: bool,
-    parse: impl Fn(&str, &'static str, Option<&str>) -> Result<T>,
+    parse: impl Fn(&str, &'static str, Option<&str>, usize) -> Result<T>,
 ) -> Result<CorsValues<T>>
 where
     T: PartialEq,
@@ -321,15 +336,17 @@ where
 
     let source = source_for_key(config, key);
     let mut values = Vec::new();
-    for raw in raw_values {
+    for (index, raw) in raw_values.iter().enumerate() {
+        let position = index + 1;
         if raw == "*" {
-            return Err(invalid_cors_configuration(
+            return Err(invalid_cors_array_element(
                 key,
                 source,
+                position,
                 "must not contain a wildcard inside a string array",
             ));
         }
-        let value = parse(raw, key, source)?;
+        let value = parse(raw, key, source, position)?;
         if !values.contains(&value) {
             values.push(value);
         }
@@ -395,6 +412,19 @@ fn invalid_cors_configuration(key: &'static str, source: Option<&str>, rule: &st
         )
         .with_subject(key)
         .with_suggestion("configure valid application-wide CORS settings"),
+    )
+}
+
+fn invalid_cors_array_element(
+    key: &'static str,
+    source: Option<&str>,
+    position: usize,
+    rule: &str,
+) -> Error {
+    invalid_cors_configuration(
+        key,
+        source,
+        &format!("element at position {position} {rule}"),
     )
 }
 
