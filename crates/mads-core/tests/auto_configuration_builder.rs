@@ -31,6 +31,39 @@ static APPLICATIONS: AtomicUsize = AtomicUsize::new(0);
 static CONSTRUCTIONS: AtomicUsize = AtomicUsize::new(0);
 static APPLY_FAILURE: AtomicBool = AtomicBool::new(false);
 static TEST_LOCK: Mutex<()> = Mutex::const_new(());
+static ROOTED_SCOPE_EVALUATED: AtomicBool = AtomicBool::new(false);
+static ROOTLESS_SCOPE_EVALUATED: AtomicBool = AtomicBool::new(false);
+static ROOTED_SCOPE_APPLIED: AtomicBool = AtomicBool::new(false);
+static ROOTLESS_SCOPE_APPLIED: AtomicBool = AtomicBool::new(false);
+
+mod scope_fixture {
+    #[derive(Clone)]
+    pub struct ScopedOutput;
+
+    pub mod app {
+        use super::ScopedOutput;
+
+        #[mads_core::module]
+        pub struct AppModule;
+
+        #[mads_core::service]
+        pub struct ReachableConsumer {
+            _output: ScopedOutput,
+        }
+    }
+
+    pub mod unreachable {
+        use super::ScopedOutput;
+
+        #[mads_core::module]
+        pub struct UnreachableModule;
+
+        #[mads_core::service]
+        pub struct UnreachableConsumer {
+            _output: ScopedOutput,
+        }
+    }
+}
 
 static CONSUMER_DEPENDENCIES: [DependencyDescriptor; 1] = [DependencyDescriptor::new(
     "DefaultResource",
@@ -113,6 +146,65 @@ fn apply(
     ))
 }
 
+fn scoped_output_type_id() -> TypeId {
+    TypeId::of::<scope_fixture::ScopedOutput>()
+}
+
+fn evaluate_scope(
+    context: &mads_core::__private::AutoConfigurationContext<'_>,
+) -> mads_core::__private::AutoConfigurationEvaluation {
+    let requirements = context.requirements::<scope_fixture::ScopedOutput>();
+    let requirement_names = requirements
+        .iter()
+        .map(mads_core::AutoConfigurationRequirement::provider_type_name)
+        .collect::<Vec<_>>();
+
+    if let Some(graph) = context.module_graph() {
+        ROOTED_SCOPE_EVALUATED.store(true, Ordering::SeqCst);
+        assert_eq!(
+            graph.root().type_name(),
+            std::any::type_name::<scope_fixture::app::AppModule>()
+        );
+        assert_eq!(
+            requirement_names,
+            [std::any::type_name::<scope_fixture::app::ReachableConsumer>()]
+        );
+    } else {
+        ROOTLESS_SCOPE_EVALUATED.store(true, Ordering::SeqCst);
+        assert_eq!(
+            requirement_names,
+            [
+                std::any::type_name::<scope_fixture::app::ReachableConsumer>(),
+                std::any::type_name::<scope_fixture::unreachable::UnreachableConsumer>(),
+            ]
+        );
+    }
+
+    mads_core::__private::AutoConfigurationEvaluation::active(
+        AutoConfigurationReasonCode::new("scope_observed"),
+        "the selected module scope was observed",
+        requirements,
+        Vec::new(),
+    )
+}
+
+fn apply_scope(
+    context: &mads_core::__private::AutoConfigurationApplyContext<'_>,
+) -> mads_core::Result<mads_core::__private::AutoConfigurationContribution> {
+    if let Some(graph) = context.module_graph() {
+        ROOTED_SCOPE_APPLIED.store(true, Ordering::SeqCst);
+        assert_eq!(
+            graph.root().type_name(),
+            std::any::type_name::<scope_fixture::app::AppModule>()
+        );
+    } else {
+        ROOTLESS_SCOPE_APPLIED.store(true, Ordering::SeqCst);
+    }
+    Ok(mads_core::__private::AutoConfigurationContribution::new(
+        scope_fixture::ScopedOutput,
+    ))
+}
+
 mads_core::__private::inventory::submit! {
     ProviderDescriptor::new(
         ProviderKind::Provider,
@@ -122,6 +214,17 @@ mads_core::__private::inventory::submit! {
         ProviderVisibility::Private,
         SourceLocation::new(file!(), line!(), column!()),
         resource_consumer_constructor,
+    )
+}
+
+mads_core::__private::inventory::submit! {
+    mads_core::__private::AutoConfigurationDescriptor::new(
+        "scope.observer",
+        "auto_configuration_builder::scope_fixture::ScopedOutput",
+        scoped_output_type_id,
+        SourceLocation::new(file!(), line!(), column!()),
+        evaluate_scope,
+        apply_scope,
     )
 }
 
@@ -141,10 +244,51 @@ fn reset_counts() {
     APPLICATIONS.store(0, Ordering::SeqCst);
     CONSTRUCTIONS.store(0, Ordering::SeqCst);
     APPLY_FAILURE.store(false, Ordering::SeqCst);
+    ROOTED_SCOPE_EVALUATED.store(false, Ordering::SeqCst);
+    ROOTLESS_SCOPE_EVALUATED.store(false, Ordering::SeqCst);
+    ROOTED_SCOPE_APPLIED.store(false, Ordering::SeqCst);
+    ROOTLESS_SCOPE_APPLIED.store(false, Ordering::SeqCst);
 }
 
 fn test_guard() -> MutexGuard<'static, ()> {
     TEST_LOCK.blocking_lock()
+}
+
+#[tokio::test]
+async fn rooted_scope_reaches_evaluation_and_application_contexts() {
+    let _guard = TEST_LOCK.lock().await;
+    reset_counts();
+    let mut builder = Mads::builder();
+    builder.root::<scope_fixture::app::AppModule>().unwrap();
+
+    let analysis = builder.analyze();
+    assert!(analysis.is_valid());
+    assert!(ROOTED_SCOPE_EVALUATED.load(Ordering::SeqCst));
+    assert!(!ROOTLESS_SCOPE_EVALUATED.load(Ordering::SeqCst));
+
+    let application = builder.build().await.unwrap();
+    assert!(ROOTED_SCOPE_APPLIED.load(Ordering::SeqCst));
+    assert!(!ROOTLESS_SCOPE_APPLIED.load(Ordering::SeqCst));
+    assert!(
+        application
+            .context()
+            .resolve::<scope_fixture::ScopedOutput>()
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn rootless_scope_remains_absent_from_official_contexts() {
+    let _guard = TEST_LOCK.lock().await;
+    reset_counts();
+
+    let application = Mads::builder().build().await.unwrap();
+
+    assert!(ROOTLESS_SCOPE_EVALUATED.load(Ordering::SeqCst));
+    assert!(ROOTLESS_SCOPE_APPLIED.load(Ordering::SeqCst));
+    assert!(!ROOTED_SCOPE_EVALUATED.load(Ordering::SeqCst));
+    assert!(!ROOTED_SCOPE_APPLIED.load(Ordering::SeqCst));
+    assert!(application.module_graph().is_none());
 }
 
 #[test]

@@ -193,7 +193,7 @@ fn expand_controller_with_common(
             __mads_router = <#ident as #route>::__mads_register(
                 __mads_router,
                 __mads_controller.clone(),
-                __mads_context,
+                __mads_runtime,
                 __mads_routes,
             )?;
         }
@@ -246,10 +246,10 @@ fn expand_controller_with_common(
         #[allow(non_snake_case)]
         fn #registrar_ident(
             mut __mads_router: #common::__private::Router,
-            __mads_context: &#core::ApplicationContext,
+            __mads_runtime: &#common::__private::RouterBuildContext<'_>,
             __mads_routes: &mut #common::__private::ValidatedRouteIter<'_>,
         ) -> #core::Result<#common::__private::Router> {
-            let __mads_controller = __mads_context
+            let __mads_controller = __mads_runtime.application()
                 .resolve::<#ident>()?
                 .as_ref()
                 .clone();
@@ -269,6 +269,8 @@ fn expand_controller_with_common(
                 #core::SourceLocation::new(file!(), line!(), column!()),
                 #constructor_ident,
             )
+            .with_runtime_type_name(|| ::core::any::type_name::<#ident>())
+            .with_namespace(module_path!())
         }
 
         #(#cfg_attrs)*
@@ -279,6 +281,7 @@ fn expand_controller_with_common(
                 &[#(#route_contracts,)*],
                 #registrar_ident,
             )
+            .with_namespace(module_path!())
         }
     })
 }

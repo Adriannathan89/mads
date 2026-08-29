@@ -23,7 +23,8 @@ use tower::{Layer, Service};
 
 use super::{
     ErasedAuthentication, MADS131, PassportContext, PassportError, PassportResult,
-    PassportStrategyAdapter, PassportStrategyCatalog, PassportStrategyFuture,
+    PassportStrategyAdapter, PassportStrategyBinding, PassportStrategyCatalog,
+    PassportStrategyFuture,
 };
 use crate::{ClaimsPrincipal, JwtService, JwtValidation, PassportPrincipal};
 
@@ -136,6 +137,7 @@ pub struct GuardDescriptor {
     route_trait: &'static str,
     handler: &'static str,
     requirement_subject: &'static str,
+    namespace: Option<&'static str>,
     strategy: &'static str,
     principal_type_id: Option<fn() -> TypeId>,
     principal_type_name: Option<fn() -> &'static str>,
@@ -172,6 +174,7 @@ impl GuardDescriptor {
             route_trait,
             handler,
             requirement_subject: "manual Passport guard",
+            namespace: None,
             strategy,
             principal_type_id,
             principal_type_name,
@@ -193,6 +196,20 @@ impl GuardDescriptor {
     pub const fn with_requirement_subject(mut self, subject: &'static str) -> Self {
         self.requirement_subject = subject;
         self
+    }
+
+    /// Attaches the Rust namespace containing this guard declaration.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_namespace(mut self, namespace: &'static str) -> Self {
+        self.namespace = Some(namespace);
+        self
+    }
+
+    /// Returns the Rust namespace containing this guard declaration, when available.
+    #[doc(hidden)]
+    pub const fn namespace(&self) -> Option<&'static str> {
+        self.namespace
     }
 
     /// Returns the route-contract trait name.
@@ -322,6 +339,19 @@ pub struct PassportGuardState {
 }
 
 impl PassportGuardState {
+    /// Constructs middleware state from an already selected static binding.
+    #[doc(hidden)]
+    pub fn from_binding(
+        application: &mads_core::ApplicationContext,
+        binding: &PassportStrategyBinding<'static>,
+    ) -> Self {
+        Self {
+            application: application.clone(),
+            guard: binding.guard(),
+            adapter: binding.adapter(),
+        }
+    }
+
     /// Selects the one strategy adapter for a static guard descriptor.
     #[doc(hidden)]
     #[allow(clippy::result_large_err)]
@@ -332,7 +362,7 @@ impl PassportGuardState {
         let guards = [guard];
         let preflight = PassportStrategyCatalog::preflight(&guards)?;
         let binding = preflight
-            .binding_for(guard)
+            .binding_for(guard, None)
             .expect("the preflight result must retain its requested guard");
         Ok(Self {
             application: application.clone(),
@@ -646,7 +676,7 @@ where
         let guards = [&descriptor];
         let preflight = PassportStrategyCatalog::preflight(&guards)?;
         let binding = preflight
-            .binding_for(&descriptor)
+            .binding_for(&descriptor, None)
             .expect("native guard preflight must retain the requested descriptor");
         self.application.resolve::<JwtService>().map_err(|_| {
             native_guard_error("native Passport guards require an available JwtService")
@@ -1006,6 +1036,7 @@ fn guard_order(left: &&'static GuardDescriptor, right: &&'static GuardDescriptor
     left.route_trait()
         .cmp(right.route_trait())
         .then_with(|| left.handler().cmp(right.handler()))
+        .then_with(|| left.namespace().cmp(&right.namespace()))
         .then_with(|| location_order(left.location(), right.location()))
 }
 

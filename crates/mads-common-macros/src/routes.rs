@@ -165,6 +165,7 @@ fn expand_with_common(
                 #common::core::SourceLocation::new(file!(), line!(), column!()),
             )
             #guard
+            .with_namespace(module_path!())
         }
     });
     let metadata: TraitItem = parse_quote! {
@@ -183,7 +184,7 @@ fn expand_with_common(
         fn __mads_register(
             mut __mads_router: #common::__private::Router,
             __mads_controller: Self,
-            __mads_application_context: &#common::core::ApplicationContext,
+            __mads_runtime: &#common::__private::RouterBuildContext<'_>,
             __mads_routes: &mut #common::__private::ValidatedRouteIter<'_>,
         ) -> #common::core::Result<#common::__private::Router>
         where
@@ -407,9 +408,9 @@ impl RouteMetadata {
         let guard_layer = self.guard_ident.as_ref().map(|guard| {
             quote! {
                 .route_layer(#common::__private::PassportGuardLayer::new(
-                    #common::__private::PassportGuardState::new(
-                        __mads_application_context,
+                    __mads_runtime.passport_guard_state(
                         &#guard,
+                        __mads_routes.passport_context_module(),
                     )?,
                 ))
             }
@@ -423,21 +424,22 @@ impl RouteMetadata {
         quote! {
             #(#conditional_attributes)*
             {
-                let __mads_path = __mads_routes.next(#method, #handler)?;
-                let __mads_handler_controller = __mads_controller.clone();
-                __mads_router = __mads_router.route(
-                    __mads_path,
-                    #routing(move |#(#arguments: #argument_types),*| {
-                        let __mads_controller = __mads_handler_controller.clone();
-                        async move {
-                            <Self as #trait_ident>::#handler_ident(
-                                &__mads_controller,
-                                #(#arguments,)*
-                            ).await
-                        }
-                    })
-                    #guard_layer,
-                );
+                if let Some(__mads_path) = __mads_routes.next(#method, #handler)? {
+                    let __mads_handler_controller = __mads_controller.clone();
+                    __mads_router = __mads_router.route(
+                        __mads_path,
+                        #routing(move |#(#arguments: #argument_types),*| {
+                            let __mads_controller = __mads_handler_controller.clone();
+                            async move {
+                                <Self as #trait_ident>::#handler_ident(
+                                    &__mads_controller,
+                                    #(#arguments,)*
+                                ).await
+                            }
+                        })
+                        #guard_layer,
+                    );
+                }
             }
         }
     }

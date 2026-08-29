@@ -11,6 +11,7 @@ scope dan boundary tepat untuk menyelesaikannya.
 | v0.3 | [HTTP route runtime](version_0.3/http-route-runtime.md) | Axum adapter, dispatch handler, dan validasi route application-wide. |
 | v0.4 | [Diesel persistence](version_0.4/diesel-persistence.md) | Explicit PostgreSQL/Diesel pool, migrations, and release gates. |
 | v0.5 | [Auto-configuration engine](version_0.5/auto-configuration.md) | Official conditional defaults, redacted inspection, database lifecycle, and release gates. |
+| v0.6.0 | [Modules, CORS, and HTTP runtime](version_0.6.0/modules-cors-http.md) | Root-module scope, conventional startup, automatic HTTP binding, and CORS. |
 
 Status dalam dokumen:
 

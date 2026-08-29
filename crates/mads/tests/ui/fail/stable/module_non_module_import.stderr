@@ -1,0 +1,22 @@
+error[E0277]: the trait bound `NotAModule: Module` is not satisfied
+ --> tests/ui/fail/stable/module_non_module_import.rs:5:21
+  |
+5 | #[module(imports = [NotAModule])]
+  |                     ^^^^^^^^^^ unsatisfied trait bound
+  |
+help: the trait `Module` is not implemented for `NotAModule`
+ --> tests/ui/fail/stable/module_non_module_import.rs:3:1
+  |
+3 | struct NotAModule;
+  | ^^^^^^^^^^^^^^^^^
+help: the trait `Module` is implemented for `AppModule`
+ --> tests/ui/fail/stable/module_non_module_import.rs:5:1
+  |
+5 | #[module(imports = [NotAModule])]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `__mads_assert_module`
+ --> tests/ui/fail/stable/module_non_module_import.rs:5:1
+  |
+5 | #[module(imports = [NotAModule])]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `__mads_assert_module`
+  = note: this error originates in the attribute macro `module` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -16,6 +16,11 @@ use std::sync::OnceLock;
 
 use mads_core::{Diagnostic, Error, MADS030, Result, SourceLocation};
 
+use crate::http_scope::ScopedController;
+
+#[cfg(feature = "jwt")]
+use crate::passport::{GuardDescriptor, PassportGuardState, PassportStrategyPreflight};
+
 #[cfg(feature = "jwt")]
 #[derive(Clone, Copy)]
 struct GuardReference(&'static crate::passport::GuardDescriptor);
@@ -101,6 +106,7 @@ pub struct RouteDescriptor {
     path: &'static str,
     full_path: &'static str,
     handler: &'static str,
+    namespace: Option<&'static str>,
     location: SourceLocation,
     #[cfg(feature = "jwt")]
     guard: Option<GuardReference>,
@@ -146,10 +152,25 @@ impl RouteDescriptor {
             path,
             full_path,
             handler,
+            namespace: None,
             location,
             #[cfg(feature = "jwt")]
             guard: None,
         }
+    }
+
+    /// Attaches the Rust namespace containing this route declaration.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_namespace(mut self, namespace: &'static str) -> Self {
+        self.namespace = Some(namespace);
+        self
+    }
+
+    /// Returns the Rust namespace containing this route declaration, when available.
+    #[doc(hidden)]
+    pub const fn namespace(&self) -> Option<&'static str> {
+        self.namespace
     }
 
     /// Returns the HTTP method.
@@ -267,6 +288,7 @@ impl RouteContractDescriptor {
 pub struct ControllerRouteDescriptor {
     type_name: &'static str,
     type_id: fn() -> TypeId,
+    namespace: Option<&'static str>,
     contracts: &'static [RouteContractDescriptor],
     registrar: Option<ControllerRegistrar>,
 }
@@ -287,6 +309,7 @@ impl ControllerRouteDescriptor {
         Self {
             type_name,
             type_id,
+            namespace: None,
             contracts,
             registrar: None,
         }
@@ -306,9 +329,24 @@ impl ControllerRouteDescriptor {
         Self {
             type_name,
             type_id,
+            namespace: None,
             contracts,
             registrar: Some(registrar),
         }
+    }
+
+    /// Attaches the Rust namespace containing this controller declaration.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_namespace(mut self, namespace: &'static str) -> Self {
+        self.namespace = Some(namespace);
+        self
+    }
+
+    /// Returns the Rust namespace containing this controller declaration, when available.
+    #[doc(hidden)]
+    pub const fn namespace(&self) -> Option<&'static str> {
+        self.namespace
     }
 
     /// Returns the controller type name.
@@ -331,6 +369,63 @@ impl ControllerRouteDescriptor {
     }
 }
 
+/// Runtime state shared by generated controller and route registrars.
+#[doc(hidden)]
+pub struct RouterBuildContext<'a> {
+    application: &'a mads_core::ApplicationContext,
+    #[cfg(feature = "jwt")]
+    passport: &'a PassportStrategyPreflight<'static>,
+}
+
+impl<'a> RouterBuildContext<'a> {
+    pub(crate) const fn new(
+        application: &'a mads_core::ApplicationContext,
+        #[cfg(feature = "jwt")] passport: &'a PassportStrategyPreflight<'static>,
+    ) -> Self {
+        Self {
+            application,
+            #[cfg(feature = "jwt")]
+            passport,
+        }
+    }
+
+    /// Returns the completed application context for controller resolution.
+    #[doc(hidden)]
+    pub const fn application(&self) -> &'a mads_core::ApplicationContext {
+        self.application
+    }
+
+    /// Builds middleware state from the binding selected for one guarded route.
+    #[cfg(feature = "jwt")]
+    #[doc(hidden)]
+    #[allow(clippy::result_large_err)]
+    pub fn passport_guard_state(
+        &self,
+        guard: &'static GuardDescriptor,
+        context_module: Option<TypeId>,
+    ) -> Result<PassportGuardState> {
+        let binding = self
+            .passport
+            .binding_for(guard, context_module)
+            .ok_or_else(|| missing_scoped_binding_error(guard))?;
+        Ok(PassportGuardState::from_binding(self.application, binding))
+    }
+}
+
+#[cfg(feature = "jwt")]
+fn missing_scoped_binding_error(guard: &GuardDescriptor) -> Error {
+    Error::new(
+        Diagnostic::new(
+            crate::passport::MADS130,
+            "missing scoped Passport binding",
+            "the selected HTTP application has no preflight Passport strategy binding for this guard",
+        )
+        .with_subject(guard.requirement_subject())
+        .with_location(guard.location())
+        .with_suggestion("build the router from complete selected Passport guard metadata"),
+    )
+}
+
 /// Registers the validated routes for one controller on an Axum router.
 ///
 /// This function-pointer type is used by generated controller adapters. Normal
@@ -338,7 +433,7 @@ impl ControllerRouteDescriptor {
 /// registrar directly.
 pub type ControllerRegistrar = fn(
     axum::Router,
-    &mads_core::ApplicationContext,
+    &RouterBuildContext<'_>,
     &mut ValidatedRouteIter<'_>,
 ) -> mads_core::Result<axum::Router>;
 
@@ -364,6 +459,8 @@ impl ValidatedController {
     pub fn routes(&self) -> ValidatedRouteIter<'_> {
         ValidatedRouteIter {
             routes: self.routes.iter(),
+            #[cfg(feature = "jwt")]
+            passport_context_module: None,
         }
     }
 }
@@ -372,7 +469,10 @@ impl ValidatedController {
 struct ValidatedRoute {
     method: HttpMethod,
     handler: &'static str,
-    axum_path: String,
+    selected: bool,
+    axum_path: Option<String>,
+    #[cfg(feature = "jwt")]
+    passport_context_module: Option<TypeId>,
 }
 
 /// Iterates validated Axum paths for a generated controller registrar.
@@ -382,13 +482,15 @@ struct ValidatedRoute {
 #[doc(hidden)]
 pub struct ValidatedRouteIter<'a> {
     routes: std::slice::Iter<'a, ValidatedRoute>,
+    #[cfg(feature = "jwt")]
+    passport_context_module: Option<TypeId>,
 }
 
 impl<'a> ValidatedRouteIter<'a> {
-    /// Returns the next validated Axum path when its metadata matches.
+    /// Returns the next selected Axum path when its metadata matches.
     #[allow(clippy::result_large_err)]
     #[doc(hidden)]
-    pub fn next(&mut self, method: HttpMethod, handler: &str) -> Result<&'a str> {
+    pub fn next(&mut self, method: HttpMethod, handler: &str) -> Result<Option<&'a str>> {
         let Some(route) = self.routes.next() else {
             return Err(metadata_error(
                 "route registration",
@@ -411,7 +513,26 @@ impl<'a> ValidatedRouteIter<'a> {
                 None,
             ));
         }
-        Ok(route.axum_path.as_str())
+        #[cfg(feature = "jwt")]
+        {
+            self.passport_context_module = route
+                .selected
+                .then_some(route.passport_context_module)
+                .flatten();
+        }
+        Ok(route.selected.then(|| {
+            route
+                .axum_path
+                .as_deref()
+                .expect("selected routes retain a validated Axum path")
+        }))
+    }
+
+    /// Returns the module context chosen for the last selected guarded route.
+    #[cfg(feature = "jwt")]
+    #[doc(hidden)]
+    pub const fn passport_context_module(&self) -> Option<TypeId> {
+        self.passport_context_module
     }
 
     /// Verifies that the generated registrar consumed every validated route.
@@ -562,6 +683,14 @@ impl RouteCatalog {
         let controllers = Self::controllers();
         validate_descriptors(&controllers)
     }
+
+    /// Returns controllers selected for `application` after scoped route validation.
+    #[allow(clippy::result_large_err)]
+    #[doc(hidden)]
+    pub fn validated_for(application: &mads_core::Mads) -> Result<Vec<ValidatedController>> {
+        let scope = crate::http_scope::HttpApplicationScope::for_application(application)?;
+        validate_scoped_descriptors(scope.controllers())
+    }
 }
 
 /// Validates an explicit controller descriptor slice for generated adapters.
@@ -572,6 +701,63 @@ impl RouteCatalog {
 #[doc(hidden)]
 pub fn validate_descriptors(
     descriptors: &[&ControllerRouteDescriptor],
+) -> Result<Vec<ValidatedController>> {
+    validate_with_selection(descriptors, |_, _| RouteSelection::all())
+}
+
+#[derive(Clone, Copy)]
+struct RouteSelection {
+    selected: bool,
+    #[cfg(feature = "jwt")]
+    passport_context_module: Option<TypeId>,
+}
+
+impl RouteSelection {
+    const fn all() -> Self {
+        Self {
+            selected: true,
+            #[cfg(feature = "jwt")]
+            passport_context_module: None,
+        }
+    }
+
+    const fn none() -> Self {
+        Self {
+            selected: false,
+            #[cfg(feature = "jwt")]
+            passport_context_module: None,
+        }
+    }
+}
+
+pub(crate) fn validate_scoped_descriptors(
+    descriptors: &[ScopedController],
+) -> Result<Vec<ValidatedController>> {
+    let controllers = descriptors
+        .iter()
+        .map(ScopedController::descriptor)
+        .collect::<Vec<_>>();
+    validate_with_selection(&controllers, |controller, route| {
+        let Some(scoped) = descriptors
+            .iter()
+            .find(|scoped| std::ptr::eq(scoped.descriptor(), controller))
+        else {
+            return RouteSelection::none();
+        };
+        let selected = scoped.selects(route);
+        RouteSelection {
+            selected,
+            #[cfg(feature = "jwt")]
+            passport_context_module: selected
+                .then(|| scoped.passport_context_module(route))
+                .flatten(),
+        }
+    })
+}
+
+fn validate_with_selection(
+    descriptors: &[&ControllerRouteDescriptor],
+    selection_for: impl Fn(&ControllerRouteDescriptor, &RouteDescriptor) -> RouteSelection,
 ) -> Result<Vec<ValidatedController>> {
     let mut controllers = descriptors.to_vec();
     controllers.sort_by(|left, right| controller_sort_key(left).cmp(&controller_sort_key(right)));
@@ -594,23 +780,30 @@ pub fn validate_descriptors(
         let mut routes = Vec::new();
         for contract in controller.contracts() {
             for route in contract.routes() {
-                validate_route(route)?;
-                let key = (route.method(), canonical_pattern(route.full_path()));
-                if let Some((previous_controller, previous_route)) =
-                    seen_routes.insert(key, (controller.type_name(), *route))
-                {
-                    return Err(conflicting_routes(
-                        controller.type_name(),
-                        *route,
-                        previous_controller,
-                        previous_route,
-                        "application",
-                    ));
+                let selection = selection_for(controller, route);
+                let selected = selection.selected;
+                if selected {
+                    validate_route(route)?;
+                    let key = (route.method(), canonical_pattern(route.full_path()));
+                    if let Some((previous_controller, previous_route)) =
+                        seen_routes.insert(key, (controller.type_name(), *route))
+                    {
+                        return Err(conflicting_routes(
+                            controller.type_name(),
+                            *route,
+                            previous_controller,
+                            previous_route,
+                            "application",
+                        ));
+                    }
                 }
                 routes.push(ValidatedRoute {
                     method: route.method(),
                     handler: route.handler(),
-                    axum_path: to_axum_path(route.full_path()),
+                    selected,
+                    axum_path: selected.then(|| to_axum_path(route.full_path())),
+                    #[cfg(feature = "jwt")]
+                    passport_context_module: selection.passport_context_module,
                 });
             }
         }
@@ -629,7 +822,11 @@ fn controller_cache() -> &'static Vec<&'static ControllerRouteDescriptor> {
             mads_core::__private::inventory::iter::<ControllerRouteDescriptor>
                 .into_iter()
                 .collect();
-        controllers.sort_by_key(|controller| controller.type_name());
+        controllers.sort_by(|left, right| {
+            left.type_name()
+                .cmp(right.type_name())
+                .then_with(|| left.namespace().cmp(&right.namespace()))
+        });
         controllers
     })
 }
@@ -909,10 +1106,11 @@ fn to_axum_path(path: &str) -> String {
 
 fn controller_sort_key(
     controller: &ControllerRouteDescriptor,
-) -> (&'static str, &'static str, u32, u32) {
+) -> (&'static str, Option<&'static str>, &'static str, u32, u32) {
     let location = controller_location(controller).unwrap_or(SourceLocation::new("", 0, 0));
     (
         controller.type_name(),
+        controller.namespace(),
         location.file,
         location.line,
         location.column,
@@ -997,5 +1195,280 @@ fn metadata_diagnostic(
         diagnostic.with_location(location)
     } else {
         diagnostic
+    }
+}
+
+#[cfg(all(test, feature = "jwt"))]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode, header::AUTHORIZATION},
+    };
+    use mads_core::{Config, ConfigBuilder, Mads, MapSource, Module};
+    use tower::ServiceExt;
+
+    use super::{RouterBuildContext, ValidatedController, validate_scoped_descriptors};
+    use crate::http_scope::HttpApplicationScope;
+    use crate::{
+        JwtClaims, JwtService, JwtSignOptions, JwtTokenKind, PassportContext, PassportError,
+        PassportPrincipal, PassportResult, PassportStrategy, PassportStrategyCatalog,
+        PassportStrategyPreflight,
+    };
+
+    static FIRST_STRATEGY_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static SECOND_STRATEGY_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static FOREIGN_STRATEGY_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    #[derive(serde::Deserialize, serde::Serialize)]
+    pub struct SharedClaims {
+        marker: u8,
+    }
+
+    pub struct SharedPrincipal;
+
+    impl PassportPrincipal for SharedPrincipal {
+        fn has_role(&self, _: &str) -> bool {
+            false
+        }
+
+        fn has_permission(&self, _: &str) -> bool {
+            false
+        }
+    }
+
+    #[crate::routes]
+    #[crate::guard(strategy = "jwt", principal = SharedPrincipal)]
+    trait UnownedRoutes {
+        #[crate::get("/unowned-context")]
+        async fn profile(&self) -> &'static str;
+    }
+
+    mod first {
+        use super::*;
+
+        #[mads_core::service]
+        pub struct FirstStrategy;
+
+        #[crate::passport_strategy(name = "jwt")]
+        impl PassportStrategy for FirstStrategy {
+            type Claims = SharedClaims;
+            type Principal = SharedPrincipal;
+
+            const TOKEN_KIND: JwtTokenKind = JwtTokenKind::Access;
+
+            async fn validate(
+                &self,
+                _: &PassportContext<'_>,
+                claims: &JwtClaims<Self::Claims>,
+            ) -> PassportResult<Self::Principal> {
+                FIRST_STRATEGY_CALLS.fetch_add(1, Ordering::SeqCst);
+                if claims.custom.marker == 1 {
+                    Ok(SharedPrincipal)
+                } else {
+                    Err(PassportError::reject())
+                }
+            }
+        }
+
+        #[crate::controller(routes = [super::UnownedRoutes])]
+        pub struct FirstController;
+
+        impl super::UnownedRoutes for FirstController {
+            async fn profile(&self) -> &'static str {
+                "first"
+            }
+        }
+
+        #[mads_core::module]
+        pub struct FirstModule;
+    }
+
+    mod second {
+        use super::*;
+
+        #[mads_core::service]
+        pub struct SecondStrategy;
+
+        #[crate::passport_strategy(name = "jwt")]
+        impl PassportStrategy for SecondStrategy {
+            type Claims = SharedClaims;
+            type Principal = SharedPrincipal;
+
+            const TOKEN_KIND: JwtTokenKind = JwtTokenKind::Access;
+
+            async fn validate(
+                &self,
+                _: &PassportContext<'_>,
+                claims: &JwtClaims<Self::Claims>,
+            ) -> PassportResult<Self::Principal> {
+                SECOND_STRATEGY_CALLS.fetch_add(1, Ordering::SeqCst);
+                if claims.custom.marker == 2 {
+                    Ok(SharedPrincipal)
+                } else {
+                    Err(PassportError::reject())
+                }
+            }
+        }
+
+        #[crate::controller(routes = [super::UnownedRoutes])]
+        pub struct SecondController;
+
+        impl super::UnownedRoutes for SecondController {
+            async fn profile(&self) -> &'static str {
+                "second"
+            }
+        }
+
+        #[mads_core::module]
+        pub struct SecondModule;
+    }
+
+    mod foreign {
+        use super::*;
+
+        #[mads_core::service]
+        pub struct ForeignStrategy;
+
+        #[crate::passport_strategy(name = "jwt")]
+        impl PassportStrategy for ForeignStrategy {
+            type Claims = SharedClaims;
+            type Principal = SharedPrincipal;
+
+            const TOKEN_KIND: JwtTokenKind = JwtTokenKind::Access;
+
+            async fn validate(
+                &self,
+                _: &PassportContext<'_>,
+                _: &JwtClaims<Self::Claims>,
+            ) -> PassportResult<Self::Principal> {
+                FOREIGN_STRATEGY_CALLS.fetch_add(1, Ordering::SeqCst);
+                Err(PassportError::reject())
+            }
+        }
+
+        #[mads_core::module]
+        pub struct ForeignModule;
+    }
+
+    mod roots {
+        pub(super) mod first {
+            #[mads_core::module(imports = [super::super::first::FirstModule])]
+            pub struct FirstRoot;
+        }
+
+        pub(super) mod second {
+            #[mads_core::module(imports = [super::super::second::SecondModule])]
+            pub struct SecondRoot;
+        }
+
+        pub(super) mod combined {
+            #[mads_core::module(imports = [
+                super::super::first::FirstModule,
+                super::super::second::SecondModule,
+                super::super::foreign::ForeignModule,
+            ])]
+            pub struct CombinedRoot;
+        }
+    }
+
+    fn config() -> Config {
+        ConfigBuilder::new()
+            .source(MapSource::new(
+                "mads.toml",
+                [("passport.secret", "01234567890123456789012345678901")],
+            ))
+            .build()
+            .unwrap()
+    }
+
+    async fn application_for<M: Module>() -> Mads {
+        let config = config();
+        let jwt = JwtService::from_config(&config).unwrap();
+        let mut builder = Mads::builder_with_config(config);
+        builder.provide(jwt).unwrap();
+        builder.root::<M>().unwrap();
+        builder.build().await.unwrap()
+    }
+
+    fn one_controller(application: &Mads) -> ValidatedController {
+        let scope = HttpApplicationScope::for_application(application).unwrap();
+        let mut controllers = validate_scoped_descriptors(scope.controllers()).unwrap();
+        assert_eq!(controllers.len(), 1);
+        controllers.pop().unwrap()
+    }
+
+    fn router_for(
+        application: &Mads,
+        preflight: &PassportStrategyPreflight<'static>,
+        controller: ValidatedController,
+    ) -> axum::Router {
+        let runtime = RouterBuildContext::new(application.context(), preflight);
+        let mut routes = controller.routes();
+        let router = (controller.registrar())(axum::Router::new(), &runtime, &mut routes).unwrap();
+        routes.finish().unwrap();
+        router
+    }
+
+    fn authenticated_request(token: &str) -> Request<Body> {
+        Request::builder()
+            .uri("/unowned-context")
+            .header(AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn unowned_guarded_contracts_keep_each_controller_context_and_direct_import_boundary() {
+        let combined = application_for::<roots::combined::CombinedRoot>().await;
+        let combined_scope = HttpApplicationScope::for_application(&combined).unwrap();
+        let preflight = PassportStrategyCatalog::preflight_scoped(
+            combined.module_graph(),
+            combined_scope.guards(),
+        )
+        .unwrap();
+
+        assert_eq!(preflight.bindings().len(), 2);
+        assert!(!preflight.bindings()[0].is_builtin());
+        assert!(!preflight.bindings()[1].is_builtin());
+
+        let first = application_for::<roots::first::FirstRoot>().await;
+        let second = application_for::<roots::second::SecondRoot>().await;
+        let first_router = router_for(&combined, &preflight, one_controller(&first));
+        let second_router = router_for(&combined, &preflight, one_controller(&second));
+        let jwt = combined.context().resolve::<JwtService>().unwrap();
+        let first_token = jwt
+            .sign(
+                SharedClaims { marker: 1 },
+                JwtSignOptions::access(Duration::from_secs(60)),
+            )
+            .unwrap();
+        let second_token = jwt
+            .sign(
+                SharedClaims { marker: 2 },
+                JwtSignOptions::access(Duration::from_secs(60)),
+            )
+            .unwrap();
+
+        FIRST_STRATEGY_CALLS.store(0, Ordering::SeqCst);
+        SECOND_STRATEGY_CALLS.store(0, Ordering::SeqCst);
+        FOREIGN_STRATEGY_CALLS.store(0, Ordering::SeqCst);
+
+        let first_response = first_router
+            .oneshot(authenticated_request(&first_token))
+            .await
+            .unwrap();
+        let second_response = second_router
+            .oneshot(authenticated_request(&second_token))
+            .await
+            .unwrap();
+
+        assert_eq!(first_response.status(), StatusCode::OK);
+        assert_eq!(second_response.status(), StatusCode::OK);
+        assert_eq!(FIRST_STRATEGY_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(SECOND_STRATEGY_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(FOREIGN_STRATEGY_CALLS.load(Ordering::SeqCst), 0);
     }
 }

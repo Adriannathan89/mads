@@ -44,16 +44,17 @@ pub use config::{
 };
 pub use context::{ApplicationContext, ConstructionContext};
 pub use descriptor::{
-    DependencyDescriptor, ModuleDescriptor, ProviderConstructor, ProviderDescriptor,
-    ProviderFuture, ProviderKind, ProviderVisibility,
+    DependencyDescriptor, Module, ModuleDescriptor, ModuleImportDescriptor, ProviderConstructor,
+    ProviderDescriptor, ProviderFuture, ProviderKind, ProviderVisibility,
 };
 pub use diagnostic::{
     Diagnostic, DiagnosticCode, Error, MADS001, MADS002, MADS003, MADS004, MADS005, MADS006,
-    MADS007, MADS010, MADS011, MADS020, MADS030, Result, SourceLocation,
+    MADS007, MADS008, MADS009, MADS010, MADS011, MADS020, MADS030, Result, SourceLocation,
 };
 pub use graph::{
     ApplicationGraph, ConstructionPlan, ConstructionStep, DependencyEdge, GraphAnalysis,
-    ProviderNode, ProviderOrigin, ProviderState,
+    ModuleGraph, ModuleImportEdge, ModuleNode, ProviderNode, ProviderOrigin, ProviderOwnership,
+    ProviderState,
 };
 pub use lifecycle::{LifecycleFuture, LifecycleHook, LifecycleManager, LifecycleState};
 pub use registry::{ErasedProvider, ProviderRegistry};
@@ -63,9 +64,17 @@ pub use mads_core_macros::{main, module, provider, repository, service};
 /// Implementation details used by MADS.rs procedural macro expansions.
 #[doc(hidden)]
 pub mod __private {
+    use std::any::TypeId;
+
     pub use crate::auto_configuration::{
         AutoConfigurationApplyContext, AutoConfigurationContext, AutoConfigurationContribution,
         AutoConfigurationDescriptor, AutoConfigurationEvaluation,
     };
     pub use inventory;
+
+    /// Builds a rooted module graph for integration coverage and downstream framework crates.
+    pub fn build_module_graph<M: crate::Module>() -> crate::Result<crate::ModuleGraph> {
+        let modules = crate::Catalog::modules();
+        crate::graph::build_module_graph(TypeId::of::<M>(), &modules)
+    }
 }

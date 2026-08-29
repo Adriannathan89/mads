@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::SourceLocation;
 
 const REDACTED: &str = "<redacted>";
@@ -8,6 +10,13 @@ fn safe_source_label(value: &str) -> &'static str {
         "environment" => "environment",
         "mads.toml" => "mads.toml",
         "test" => "test",
+        source
+            if Path::new(source)
+                .file_name()
+                .is_some_and(|name| name == "mads.toml") =>
+        {
+            "mads.toml"
+        }
         _ => REDACTED,
     }
 }

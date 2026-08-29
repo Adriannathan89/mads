@@ -4,9 +4,11 @@
 
 use std::any::TypeId;
 
+use mads_common::core::{ApplicationContext, SourceLocation};
 use mads_common::{
-    JwtClaims, JwtTokenKind, PassportContext, PassportPrincipal, PassportResult, PassportStrategy,
-    PassportStrategyCatalog,
+    GuardDescriptor, JwtClaims, JwtTokenKind, PassportContext, PassportPrincipal, PassportResult,
+    PassportStrategy, PassportStrategyCatalog, PassportStrategyDescriptor, PassportStrategyFuture,
+    TokenSource,
 };
 
 #[derive(serde::Deserialize)]
@@ -30,6 +32,40 @@ impl PassportPrincipal for UserPrincipal {
     fn has_permission(&self, _permission: &str) -> bool {
         false
     }
+}
+
+struct ManualStrategy;
+
+fn manual_strategy_type_id() -> TypeId {
+    TypeId::of::<ManualStrategy>()
+}
+
+fn manual_strategy_type_name() -> &'static str {
+    std::any::type_name::<ManualStrategy>()
+}
+
+fn user_claims_type_id() -> TypeId {
+    TypeId::of::<UserClaims>()
+}
+
+fn user_claims_type_name() -> &'static str {
+    std::any::type_name::<UserClaims>()
+}
+
+fn user_principal_type_id() -> TypeId {
+    TypeId::of::<UserPrincipal>()
+}
+
+fn user_principal_type_name() -> &'static str {
+    std::any::type_name::<UserPrincipal>()
+}
+
+fn unreachable_adapter<'a>(
+    _: &'a ApplicationContext,
+    _: &'a PassportContext<'a>,
+    _: &'a str,
+) -> PassportStrategyFuture<'a> {
+    Box::pin(async { panic!("the metadata-only adapter must not be invoked") })
 }
 
 #[mads_core::service]
@@ -103,4 +139,44 @@ fn catalog_orders_strategies_by_name() {
         .collect::<Vec<_>>();
 
     assert_eq!(names, ["alpha", "jwt"]);
+}
+
+#[test]
+fn guard_and_strategy_descriptors_retain_optional_declaration_namespaces() {
+    let guard = GuardDescriptor::new(
+        "HealthRoutes",
+        "health",
+        "jwt",
+        Some(user_principal_type_id),
+        Some(user_principal_type_name),
+        TokenSource::Bearer,
+        None,
+        None,
+        &[],
+        SourceLocation::new("guard.rs", 1, 1),
+        None,
+    );
+    assert_eq!(guard.namespace(), None);
+    assert_eq!(
+        guard.with_namespace("delivery::health").namespace(),
+        Some("delivery::health")
+    );
+
+    let strategy = PassportStrategyDescriptor::new(
+        "manual",
+        manual_strategy_type_id,
+        manual_strategy_type_name,
+        user_claims_type_id,
+        user_claims_type_name,
+        user_principal_type_id,
+        user_principal_type_name,
+        JwtTokenKind::Access,
+        SourceLocation::new("strategy.rs", 1, 1),
+        unreachable_adapter,
+    );
+    assert_eq!(strategy.namespace(), None);
+    assert_eq!(
+        strategy.with_namespace("delivery::health").namespace(),
+        Some("delivery::health")
+    );
 }

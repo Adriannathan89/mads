@@ -5,7 +5,7 @@
 //! boundary is always available through [`core`].
 #![cfg_attr(
     feature = "http",
-    doc = "\nThe `http` feature provides compile-time controller and route contracts and the Axum runtime. [`build_router`] validates every registered controller before it resolves a controller or invokes a typed registrar; [`serve`] performs that same validation before lifecycle startup or socket binding. Use [`routes`] to declare a route contract and [`controller`] to bind it to a managed controller. The resulting descriptors can be inspected through [`RouteCatalog`] before the HTTP runtime installs handlers. [`axum`] is deliberately re-exported for native extractors, response types, routers, middleware, and Tower composition."
+    doc = "\nThe `http` feature provides compile-time controller and route contracts and the Axum runtime. [`build_router`] validates every controller selected for the application before it resolves a controller or invokes a typed registrar; [`serve`] performs that same validation before lifecycle startup or socket binding. Use [`serve_router`] to run a complete raw router after merging generated and native routes; it applies final application-wide router configuration before lifecycle startup. Use [`routes`] to declare a route contract and [`controller`] to bind it to a managed controller. The resulting descriptors can be inspected through [`RouteCatalog`] before the HTTP runtime installs handlers. [`axum`] is deliberately re-exported for native extractors, response types, routers, middleware, and Tower composition."
 )]
 #![cfg_attr(
     feature = "database",
@@ -15,7 +15,11 @@
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "http")]
+mod cors;
+#[cfg(feature = "http")]
 mod extract;
+#[cfg(feature = "http")]
+mod http_scope;
 #[cfg(feature = "http")]
 mod response;
 #[cfg(feature = "http")]
@@ -24,6 +28,8 @@ mod route;
 mod router;
 #[cfg(feature = "http")]
 mod server;
+#[cfg(feature = "http")]
+mod server_config;
 
 /// Strict cookie extraction, response composition, and established cookie types.
 #[cfg(feature = "cookies")]
@@ -100,13 +106,13 @@ pub use extract::{Header, Json, Path, Query, Request, headers};
 #[cfg(feature = "http")]
 pub use response::{Created, HttpError, HttpResult, NoContent};
 
-/// Builds an Axum router from the application's validated controllers.
+/// Builds a raw Axum router from the application's validated controllers.
 #[cfg(feature = "http")]
-pub use router::build_router;
+pub use router::{build_router, configure_router};
 
-/// Runs a validated application on the Axum HTTP runtime.
+/// Runs validated applications and raw composed routers on the Axum HTTP runtime.
 #[cfg(feature = "http")]
-pub use server::{HttpRuntimeError, serve};
+pub use server::{HttpRuntimeError, MADS031, MadsRunExt, serve, serve_router};
 
 /// Exposes the framework-neutral core boundary to future integrations.
 pub use mads_core as core;
@@ -165,7 +171,47 @@ pub mod __private {
     pub use axum::Router;
     pub use axum::routing::{delete, get, patch, post, put};
 
+    /// Loads conventional sources with an injected environment source for tests.
+    #[cfg(feature = "http")]
+    #[allow(clippy::result_large_err)]
+    pub fn load_standard_config_from_for_test(
+        root: &std::path::Path,
+        environment: mads_core::EnvSource,
+    ) -> mads_core::Result<mads_core::Config> {
+        crate::server_config::load_standard_config_from_with_environment(root, environment)
+    }
+
+    /// Enables the private automatic HTTP server mode for integration tests.
+    pub fn enable_automatic_server_for_test(builder: &mut mads_core::MadsBuilder) -> bool {
+        crate::server_config::enable_automatic_server(builder)
+    }
+
+    /// Enables the private automatic CORS mode for integration tests.
+    pub fn enable_automatic_cors_for_test(builder: &mut mads_core::MadsBuilder) -> bool {
+        crate::cors::enable_automatic_cors(builder)
+    }
+
+    /// Returns the automatic server binding as an owned address tuple for integration tests.
+    #[allow(clippy::result_large_err)]
+    pub fn server_binding_address_for_test(
+        application: &mads_core::Mads,
+    ) -> mads_core::Result<(String, u16)> {
+        let binding = application
+            .context()
+            .resolve::<crate::server_config::ServerBinding>()?;
+        let (host, port) = binding.address();
+        Ok((host.to_owned(), port))
+    }
+
     #[cfg(feature = "jwt")]
     pub use crate::passport::{PassportGuardLayer, PassportGuardState};
-    pub use crate::route::{ValidatedRouteIter, validate_descriptors};
+    #[cfg(feature = "jwt")]
+    #[allow(clippy::result_large_err)]
+    pub fn preflight_scoped(
+        module_graph: Option<&mads_core::ModuleGraph>,
+    ) -> mads_core::Result<crate::passport::PassportStrategyPreflight<'static>> {
+        let scope = crate::http_scope::HttpApplicationScope::for_module_graph(module_graph)?;
+        crate::passport::PassportStrategyCatalog::preflight_scoped(module_graph, scope.guards())
+    }
+    pub use crate::route::{RouterBuildContext, ValidatedRouteIter, validate_descriptors};
 }

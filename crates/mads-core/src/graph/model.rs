@@ -7,6 +7,8 @@ use crate::{
     ProviderVisibility, SourceLocation,
 };
 
+use super::module::ModuleGraph;
+
 /// Describes how a provider enters an application graph.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ProviderOrigin {
@@ -200,6 +202,12 @@ impl ConstructionStep {
         self.descriptor
     }
 
+    /// Returns the underlying descriptor for framework integration and testing.
+    #[doc(hidden)]
+    pub const fn __descriptor(&self) -> &'static ProviderDescriptor {
+        self.descriptor
+    }
+
     /// Returns the stable output type name of the provider to construct.
     pub const fn type_name(&self) -> &str {
         self.type_name
@@ -234,6 +242,7 @@ pub struct GraphAnalysis {
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) construction_plan: Option<ConstructionPlan>,
     pub(crate) auto_configurations: Vec<AutoConfigurationReport>,
+    pub(crate) module_graph: Option<ModuleGraph>,
 }
 
 impl GraphAnalysis {
@@ -252,6 +261,11 @@ impl GraphAnalysis {
         &self.auto_configurations
     }
 
+    /// Returns the rooted module graph, or `None` for complete-catalog analysis.
+    pub const fn module_graph(&self) -> Option<&ModuleGraph> {
+        self.module_graph.as_ref()
+    }
+
     /// Returns the deterministic construction plan when the graph is valid.
     pub const fn construction_plan(&self) -> Option<&ConstructionPlan> {
         self.construction_plan.as_ref()
@@ -262,15 +276,55 @@ impl GraphAnalysis {
         self.diagnostics.is_empty() && self.construction_plan.is_some()
     }
 
+    pub(crate) fn prepend_diagnostics(&mut self, mut diagnostics: Vec<Diagnostic>) {
+        if diagnostics.is_empty() {
+            return;
+        }
+        self.construction_plan = None;
+        diagnostics.append(&mut self.diagnostics);
+        self.diagnostics = diagnostics;
+    }
+
+    pub(crate) fn append_diagnostics(&mut self, diagnostics: Vec<Diagnostic>) {
+        if diagnostics.is_empty() {
+            return;
+        }
+        self.construction_plan = None;
+        self.diagnostics.extend(diagnostics);
+    }
+
+    pub(crate) fn set_module_graph(&mut self, module_graph: ModuleGraph) {
+        self.module_graph = Some(module_graph);
+    }
+
+    pub(crate) fn invalid(diagnostics: Vec<Diagnostic>) -> Self {
+        Self {
+            graph: ApplicationGraph {
+                providers: Vec::new(),
+                dependencies: Vec::new(),
+            },
+            diagnostics,
+            construction_plan: None,
+            auto_configurations: Vec::new(),
+            module_graph: None,
+        }
+    }
+
     pub(crate) fn into_valid_parts(
         self,
     ) -> crate::Result<(
         ApplicationGraph,
         ConstructionPlan,
         Vec<AutoConfigurationReport>,
+        Option<ModuleGraph>,
     )> {
         match (self.diagnostics.is_empty(), self.construction_plan) {
-            (true, Some(plan)) => Ok((self.graph, plan, self.auto_configurations)),
+            (true, Some(plan)) => Ok((
+                self.graph,
+                plan,
+                self.auto_configurations,
+                self.module_graph,
+            )),
             (false, _) => {
                 let mut diagnostics = self.diagnostics.into_iter();
                 let primary = diagnostics
@@ -318,6 +372,7 @@ mod tests {
             diagnostics: Vec::new(),
             construction_plan: Some(ConstructionPlan { steps: Vec::new() }),
             auto_configurations: Vec::new(),
+            module_graph: None,
         };
 
         assert!(analysis.is_valid());

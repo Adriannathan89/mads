@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use mads_core::{
     Config, ConstructionContext, DependencyDescriptor, ErasedProvider, ModuleDescriptor,
-    ProviderDescriptor, ProviderFuture, ProviderKind, ProviderRegistry, ProviderVisibility,
-    SourceLocation,
+    ModuleImportDescriptor, ProviderDescriptor, ProviderFuture, ProviderKind, ProviderRegistry,
+    ProviderVisibility, SourceLocation,
 };
 
 struct Dependency;
@@ -26,6 +26,11 @@ fn output_constructor<'a>(_: &'a ConstructionContext<'a>) -> ProviderFuture<'a> 
 
 static DEPENDENCIES: [DependencyDescriptor; 1] = [DependencyDescriptor::new(
     "descriptor::Dependency",
+    dependency_type_id,
+)];
+
+static MODULE_IMPORTS: [ModuleImportDescriptor; 1] = [ModuleImportDescriptor::new(
+    "descriptor::DependencyModule",
     dependency_type_id,
 )];
 
@@ -67,6 +72,23 @@ async fn provider_descriptor_preserves_complete_construction_metadata() {
 }
 
 #[test]
+fn provider_namespace_is_additive_and_optional() {
+    let plain = ProviderDescriptor::new(
+        ProviderKind::Provider,
+        "descriptor::Output",
+        output_type_id,
+        &[],
+        ProviderVisibility::Public,
+        SourceLocation::new("provider.rs", 1, 1),
+        output_constructor,
+    );
+    assert_eq!(plain.namespace(), None);
+
+    let owned = plain.with_namespace("descriptor");
+    assert_eq!(owned.namespace(), Some("descriptor"));
+}
+
+#[test]
 fn module_descriptor_preserves_identity_and_location() {
     let location = SourceLocation::new("module.rs", 56, 78);
     let descriptor = ModuleDescriptor::new("descriptor::Module", output_type_id, location);
@@ -74,4 +96,25 @@ fn module_descriptor_preserves_identity_and_location() {
     assert_eq!(descriptor.type_name(), "descriptor::Module");
     assert_eq!(descriptor.type_id(), TypeId::of::<Output>());
     assert_eq!(descriptor.location(), location);
+    assert_eq!(descriptor.namespace(), None);
+    assert!(descriptor.imports().is_empty());
+}
+
+#[test]
+fn module_descriptor_preserves_namespace_and_imports() {
+    let location = SourceLocation::new("module.rs", 56, 78);
+    let descriptor = ModuleDescriptor::new("descriptor::Root", output_type_id, location)
+        .with_namespace("descriptor")
+        .with_imports(&MODULE_IMPORTS);
+
+    assert_eq!(descriptor.namespace(), Some("descriptor"));
+    assert_eq!(descriptor.imports().len(), 1);
+    assert_eq!(
+        descriptor.imports()[0].type_name(),
+        "descriptor::DependencyModule"
+    );
+    assert_eq!(
+        descriptor.imports()[0].type_id(),
+        TypeId::of::<Dependency>()
+    );
 }

@@ -1,5 +1,6 @@
 //! Explicit application construction and lifecycle ownership.
 
+use std::any::TypeId;
 use std::collections::VecDeque;
 
 use crate::auto_configuration::{
@@ -8,8 +9,12 @@ use crate::auto_configuration::{
 use crate::{
     ApplicationContext, ApplicationGraph, AutoConfigurationReport, Catalog, Config,
     ConstructionContext, ConstructionPlan, ConstructionStep, Diagnostic, Error, GraphAnalysis,
-    LifecycleHook, LifecycleManager, LifecycleState, MADS006, ProviderRegistry, Result,
-    graph::{SatisfiedProvider, analyze_catalog},
+    LifecycleHook, LifecycleManager, LifecycleState, MADS006, MADS008, Module, ModuleGraph,
+    ProviderRegistry, Result,
+    graph::{
+        SatisfiedProvider, analyze_catalog, analyze_descriptors, build_module_graph,
+        select_scoped_providers, validate_module_catalog,
+    },
 };
 
 /// Builds an application by explicitly providing and constructing providers.
@@ -19,6 +24,7 @@ pub struct MadsBuilder {
     satisfied: Vec<SatisfiedProvider>,
     auto_configuration_inputs: AutoConfigurationInputs,
     lifecycle: LifecycleManager,
+    root: Option<ModuleRoot>,
 }
 
 impl MadsBuilder {
@@ -35,7 +41,21 @@ impl MadsBuilder {
             satisfied: vec![SatisfiedProvider::provided::<Config>()],
             auto_configuration_inputs: AutoConfigurationInputs::default(),
             lifecycle: LifecycleManager::new(),
+            root: None,
         }
+    }
+
+    /// Selects the root module for scoped analysis and construction.
+    #[allow(clippy::result_large_err)]
+    pub fn root<M: Module>(&mut self) -> Result<&mut Self> {
+        if let Some(root) = &self.root {
+            return Err(root_already_selected_error(
+                root.type_name,
+                std::any::type_name::<M>(),
+            ));
+        }
+        self.root = Some(ModuleRoot::of::<M>());
+        Ok(self)
     }
 
     /// Provides a concrete application-scoped value.
@@ -113,13 +133,15 @@ impl MadsBuilder {
         if !public.is_valid() {
             return Err(build_analysis_error(public, failure));
         }
-        let (graph, construction_plan, auto_configurations) = public.into_valid_parts()?;
+        let (graph, construction_plan, auto_configurations, module_graph) =
+            public.into_valid_parts()?;
 
         for descriptor in selected {
             let context = AutoConfigurationApplyContext::new(
                 descriptor.identifier(),
                 &self.config,
                 &self.auto_configuration_inputs,
+                module_graph.as_ref(),
             );
             let contribution = (descriptor.applier())(&context)?;
             let (provider, hooks) = contribution.into_parts();
@@ -151,29 +173,101 @@ impl MadsBuilder {
             graph,
             construction_plan,
             auto_configurations,
+            module_graph,
         })
     }
 
     fn analyze_builder(&self) -> BuilderAnalysis {
         let providers = Catalog::providers();
+        let Some(root) = &self.root else {
+            return self.analyze_complete_catalog(&providers);
+        };
+
+        let modules = Catalog::modules();
+        let mut module_graph = match build_module_graph(root.type_id, &modules) {
+            Ok(module_graph) => module_graph,
+            Err(error) => {
+                return BuilderAnalysis {
+                    public: GraphAnalysis::invalid(error.diagnostics().to_vec()),
+                    selected: Vec::new(),
+                    failure: None,
+                };
+            }
+        };
+        let initial_scope = select_scoped_providers(&module_graph, &providers, &self.satisfied);
         let auto_configuration = auto_configuration::analyze_parts(
             &auto_configuration::descriptors(),
-            &providers,
+            &initial_scope.descriptors,
             &self.satisfied,
             &self.config,
             &self.auto_configuration_inputs,
+            Some(&module_graph),
         );
         let mut satisfied = self.satisfied.clone();
         satisfied.extend(auto_configuration.virtual_satisfied);
 
-        let mut public = analyze_catalog(&satisfied, &auto_configuration.covered_missing);
+        let scoped = select_scoped_providers(&module_graph, &providers, &satisfied);
+        let mut covered_missing = auto_configuration.covered_missing;
+        for type_id in &scoped.covered_missing {
+            if !covered_missing.contains(type_id) {
+                covered_missing.push(*type_id);
+            }
+        }
+        let mut public = analyze_descriptors(&scoped.descriptors, &satisfied, &covered_missing);
+        public.prepend_diagnostics(scoped.diagnostics);
+        public.append_diagnostics(auto_configuration.diagnostics);
         public.auto_configurations = auto_configuration.reports;
-        public.diagnostics.extend(auto_configuration.diagnostics);
+        module_graph.set_provider_ownership(scoped.ownership);
+        public.set_module_graph(module_graph);
 
         BuilderAnalysis {
             public,
             selected: auto_configuration.selected,
             failure: auto_configuration.failure,
+        }
+    }
+
+    fn analyze_complete_catalog(
+        &self,
+        providers: &[&'static crate::ProviderDescriptor],
+    ) -> BuilderAnalysis {
+        let module_diagnostics = validate_module_catalog(&Catalog::modules())
+            .err()
+            .map_or_else(Vec::new, |error| error.diagnostics().to_vec());
+        let auto_configuration = auto_configuration::analyze_parts(
+            &auto_configuration::descriptors(),
+            providers,
+            &self.satisfied,
+            &self.config,
+            &self.auto_configuration_inputs,
+            None,
+        );
+        let mut satisfied = self.satisfied.clone();
+        satisfied.extend(auto_configuration.virtual_satisfied);
+
+        let mut public = analyze_catalog(&satisfied, &auto_configuration.covered_missing);
+        public.prepend_diagnostics(module_diagnostics);
+        public.auto_configurations = auto_configuration.reports;
+        public.append_diagnostics(auto_configuration.diagnostics);
+
+        BuilderAnalysis {
+            public,
+            selected: auto_configuration.selected,
+            failure: auto_configuration.failure,
+        }
+    }
+}
+
+struct ModuleRoot {
+    type_id: TypeId,
+    type_name: &'static str,
+}
+
+impl ModuleRoot {
+    fn of<M: Module>() -> Self {
+        Self {
+            type_id: TypeId::of::<M>(),
+            type_name: std::any::type_name::<M>(),
         }
     }
 }
@@ -191,6 +285,7 @@ pub struct Mads {
     graph: ApplicationGraph,
     construction_plan: ConstructionPlan,
     auto_configurations: Vec<AutoConfigurationReport>,
+    module_graph: Option<ModuleGraph>,
 }
 
 impl Mads {
@@ -229,6 +324,11 @@ impl Mads {
         &self.auto_configurations
     }
 
+    /// Returns the rooted module graph, or `None` for a complete-catalog build.
+    pub const fn module_graph(&self) -> Option<&ModuleGraph> {
+        self.module_graph.as_ref()
+    }
+
     /// Starts registered lifecycle hooks.
     #[allow(clippy::result_large_err)]
     pub async fn start(&mut self) -> Result<()> {
@@ -240,6 +340,17 @@ impl Mads {
     pub async fn shutdown(&mut self) -> Result<()> {
         self.lifecycle.shutdown(&self.context).await
     }
+}
+
+fn root_already_selected_error(existing: &'static str, attempted: &'static str) -> Error {
+    Error::new(
+        Diagnostic::new(
+            MADS008,
+            "application root already selected",
+            format!("a builder already selected `{existing}` and cannot select another root"),
+        )
+        .with_subject(attempted),
+    )
 }
 
 fn build_analysis_error(public: GraphAnalysis, failure: Option<Error>) -> Error {

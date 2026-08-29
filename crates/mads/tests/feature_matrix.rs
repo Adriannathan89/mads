@@ -33,6 +33,7 @@ fn jwt_only_excludes_http_and_database_dependencies() {
     for forbidden in [
         "axum v",
         "axum-extra v",
+        "tower-http v",
         "diesel v",
         "deadpool-diesel v",
         "diesel_migrations v",
@@ -45,12 +46,25 @@ fn jwt_only_excludes_http_and_database_dependencies() {
 }
 
 #[test]
+fn http_includes_tower_http() {
+    let tree = dependency_tree("http");
+    assert!(tree.contains("tower-http v"));
+}
+
+#[test]
 fn common_remains_http_and_database_without_authentication() {
     let tree = dependency_tree("common");
     assert!(tree.contains("axum v"));
+    assert!(tree.contains("tower-http v"));
     assert!(tree.contains("diesel v"));
     assert!(!tree.contains("jsonwebtoken v"));
     assert!(!tree.contains("cookie v"));
+}
+
+#[test]
+fn database_excludes_tower_http() {
+    let tree = dependency_tree("database");
+    assert!(!tree.contains("tower-http v"));
 }
 
 #[test]

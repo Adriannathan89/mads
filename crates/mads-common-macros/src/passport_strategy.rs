@@ -248,6 +248,7 @@ fn expand_strategy(
                 #common::core::SourceLocation::new(file!(), line!(), column!()),
                 #adapter,
             )
+            .with_namespace(module_path!())
         }
     })
 }
@@ -259,4 +260,45 @@ fn generated_suffix(implementation: &ItemImpl) -> String {
         .to_string()
         .hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+#[cfg(test)]
+mod tests {
+    use quote::ToTokens;
+
+    use super::*;
+
+    #[test]
+    fn generated_strategy_descriptor_retains_the_declaration_namespace() {
+        let implementation: ItemImpl = syn::parse_quote! {
+            impl PassportStrategy for Strategy {
+                type Claims = Claims;
+                type Principal = Principal;
+                const TOKEN_KIND: JwtTokenKind = JwtTokenKind::Access;
+
+                async fn validate(
+                    &self,
+                    _: &PassportContext<'_>,
+                    _: &JwtClaims<Self::Claims>,
+                ) -> PassportResult<Self::Principal> {
+                    unreachable!()
+                }
+            }
+        };
+        let expanded = expand_strategy(
+            StrategyArguments {
+                name: syn::parse_quote!("jwt"),
+            },
+            implementation,
+            &syn::parse_quote!(mads_common),
+        )
+        .expect("strategy should expand")
+        .into_token_stream()
+        .to_string()
+        .split_whitespace()
+        .collect::<String>();
+
+        assert!(expanded.contains("PassportStrategyDescriptor::new(\"jwt\","));
+        assert!(expanded.contains(".with_namespace(module_path!())"));
+    }
 }

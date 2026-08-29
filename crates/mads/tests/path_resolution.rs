@@ -39,6 +39,26 @@ fn attributes_expand_for_supported_dependency_paths() {
 }
 
 #[test]
+fn automatic_run_consumer_compiles_through_the_facade() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let target_dir = manifest_dir.join("../../target/macro-consumers");
+    let manifest = manifest_dir.join("tests/consumers/automatic_run/Cargo.toml");
+    let output = Command::new(env!("CARGO"))
+        .args(["check", "--offline", "--manifest-path"])
+        .arg(&manifest)
+        .env("CARGO_TARGET_DIR", target_dir)
+        .output()
+        .expect("the automatic-run consumer check should start");
+
+    assert!(
+        output.status.success(),
+        "automatic-run consumer failed to compile\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+#[test]
 fn conditional_routes_compile_and_register_in_both_feature_states() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let target_dir = manifest_dir.join("../../target/macro-consumers");

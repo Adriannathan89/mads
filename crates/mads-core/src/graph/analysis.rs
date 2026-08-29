@@ -176,6 +176,7 @@ pub(crate) fn analyze_parts(
         diagnostics,
         construction_plan,
         auto_configurations: Vec::new(),
+        module_graph: None,
     }
 }
 
@@ -190,6 +191,7 @@ fn exact_identity(left: &ProviderDescriptor, right: &ProviderDescriptor) -> bool
     left.type_id() == right.type_id()
         && left.kind() == right.kind()
         && left.type_name() == right.type_name()
+        && left.namespace() == right.namespace()
         && left.visibility() == right.visibility()
         && left.location() == right.location()
         && left.dependencies().len() == right.dependencies().len()

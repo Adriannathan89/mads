@@ -8,8 +8,12 @@ use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
 use axum::http::Extensions;
-use mads_core::{ApplicationContext, Catalog, Diagnostic, Error, Result, SourceLocation};
+use mads_core::{
+    ApplicationContext, Catalog, Diagnostic, Error, ModuleGraph, ProviderDescriptor,
+    ProviderVisibility, Result, SourceLocation,
+};
 
+use crate::http_scope::{ScopedGuard, owner_for_namespace};
 use crate::{JwtClaims, JwtTokenKind, VerifiedJwt};
 
 use super::{
@@ -210,6 +214,7 @@ pub struct PassportStrategyDescriptor {
     name: &'static str,
     provider_type_id: fn() -> TypeId,
     provider_type_name: fn() -> &'static str,
+    namespace: Option<&'static str>,
     claims_type_id: fn() -> TypeId,
     claims_type_name: fn() -> &'static str,
     principal_type_id: fn() -> TypeId,
@@ -239,6 +244,7 @@ impl PassportStrategyDescriptor {
             name,
             provider_type_id,
             provider_type_name,
+            namespace: None,
             claims_type_id,
             claims_type_name,
             principal_type_id,
@@ -253,6 +259,20 @@ impl PassportStrategyDescriptor {
     #[must_use]
     pub const fn name(&self) -> &'static str {
         self.name
+    }
+
+    /// Attaches the Rust namespace containing this strategy declaration.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_namespace(mut self, namespace: &'static str) -> Self {
+        self.namespace = Some(namespace);
+        self
+    }
+
+    /// Returns the Rust namespace containing this strategy declaration, when available.
+    #[doc(hidden)]
+    pub const fn namespace(&self) -> Option<&'static str> {
+        self.namespace
     }
 
     /// Returns the concrete managed provider type identifier.
@@ -317,6 +337,7 @@ impl fmt::Debug for PassportStrategyDescriptor {
             .debug_struct("PassportStrategyDescriptor")
             .field("name", &self.name)
             .field("provider_type", &self.provider_type_name())
+            .field("namespace", &self.namespace)
             .field("claims_type", &self.claims_type_name())
             .field("principal_type", &self.principal_type_name())
             .field("token_kind", &self.token_kind)
@@ -368,6 +389,40 @@ impl PassportStrategyCatalog {
         }
         Ok(PassportStrategyPreflight { bindings })
     }
+
+    /// Resolves strategies for guards selected from one optional module graph.
+    ///
+    /// Rootless guards retain the complete-catalog duplicate and selection
+    /// behavior. Rooted guards see custom strategies only from their own
+    /// module or a directly imported public provider module.
+    #[allow(clippy::result_large_err)]
+    pub(crate) fn preflight_scoped(
+        module_graph: Option<&ModuleGraph>,
+        guards: &[ScopedGuard],
+    ) -> Result<PassportStrategyPreflight<'static>> {
+        let guard_descriptors = guards.iter().map(ScopedGuard::guard).collect::<Vec<_>>();
+        GuardCatalog::validate_descriptors(&guard_descriptors)?;
+
+        let strategies = Self::strategies();
+        if module_graph.is_none() {
+            validate_strategy_catalog(&strategies)?;
+        } else {
+            validate_strategy_metadata(&strategies)?;
+        }
+        let providers = Catalog::providers();
+
+        let mut ordered_guards = guards.iter().collect::<Vec<_>>();
+        ordered_guards.sort_by(|left, right| guard_order(&left.guard(), &right.guard()));
+
+        let mut bindings = Vec::with_capacity(ordered_guards.len());
+        for scoped_guard in ordered_guards {
+            let mut binding =
+                resolve_scoped_guard(scoped_guard, module_graph, &strategies, &providers)?;
+            binding.context_module = scoped_guard.context_module();
+            bindings.push(binding);
+        }
+        Ok(PassportStrategyPreflight { bindings })
+    }
 }
 
 /// The deterministic static strategy selection for one guarded route.
@@ -376,18 +431,26 @@ impl PassportStrategyCatalog {
 /// managed strategy only after ordinary application construction has succeeded.
 pub struct PassportStrategyBinding<'a> {
     guard: &'a GuardDescriptor,
+    context_module: Option<TypeId>,
     strategy: &'static str,
     adapter: PassportStrategyAdapter,
     token_kind: JwtTokenKind,
     builtin: bool,
 }
 
-impl PassportStrategyBinding<'_> {
+impl<'a> PassportStrategyBinding<'a> {
     /// Returns the effective static guard.
     #[doc(hidden)]
     #[must_use]
-    pub const fn guard(&self) -> &GuardDescriptor {
+    pub const fn guard(&self) -> &'a GuardDescriptor {
         self.guard
+    }
+
+    /// Returns the selected module context for this guard occurrence.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn context_module(&self) -> Option<TypeId> {
+        self.context_module
     }
 
     /// Returns the selected strategy name.
@@ -446,13 +509,17 @@ impl<'a> PassportStrategyPreflight<'a> {
         &self.bindings
     }
 
-    /// Finds the selected binding for one exact guard descriptor.
+    /// Finds the selected binding for one guard descriptor in one module context.
     #[doc(hidden)]
     #[must_use]
-    pub fn binding_for(&self, guard: &GuardDescriptor) -> Option<&PassportStrategyBinding<'a>> {
-        self.bindings
-            .iter()
-            .find(|binding| std::ptr::eq(binding.guard, guard))
+    pub fn binding_for(
+        &self,
+        guard: &GuardDescriptor,
+        context_module: Option<TypeId>,
+    ) -> Option<&PassportStrategyBinding<'a>> {
+        self.bindings.iter().find(|binding| {
+            std::ptr::eq(binding.guard, guard) && binding.context_module == context_module
+        })
     }
 }
 
@@ -484,6 +551,7 @@ fn strategy_order(
     left.name()
         .cmp(right.name())
         .then_with(|| left.provider_type_name().cmp(right.provider_type_name()))
+        .then_with(|| left.namespace().cmp(&right.namespace()))
         .then_with(|| location_order(left.location(), right.location()))
 }
 
@@ -491,10 +559,18 @@ fn guard_order(left: &&GuardDescriptor, right: &&GuardDescriptor) -> Ordering {
     left.route_trait()
         .cmp(right.route_trait())
         .then_with(|| left.handler().cmp(right.handler()))
+        .then_with(|| left.namespace().cmp(&right.namespace()))
         .then_with(|| location_order(left.location(), right.location()))
 }
 
 fn validate_strategy_catalog(strategies: &[&'static PassportStrategyDescriptor]) -> Result<()> {
+    validate_unique_strategy_names(strategies)?;
+    validate_strategy_metadata(strategies)
+}
+
+fn validate_unique_strategy_names(
+    strategies: &[&'static PassportStrategyDescriptor],
+) -> Result<()> {
     let duplicate_groups = strategies
         .chunk_by(|left, right| left.name() == right.name())
         .filter(|group| group.len() > 1)
@@ -504,18 +580,17 @@ fn validate_strategy_catalog(strategies: &[&'static PassportStrategyDescriptor])
         let related = rest.iter().map(|group| duplicate_strategy_error(group));
         return Err(Error::from_diagnostics(primary, related));
     }
+    Ok(())
+}
 
+fn validate_strategy_metadata(strategies: &[&'static PassportStrategyDescriptor]) -> Result<()> {
     let providers = Catalog::providers();
     for strategy in strategies {
         validate_reserved_strategy_token_kind(strategy)?;
         let candidates = providers
             .iter()
             .copied()
-            .filter(|provider| {
-                let provider = *provider;
-                provider.type_id() == strategy.provider_type_id()
-                    && provider.runtime_type_name() == Some(strategy.provider_type_name())
-            })
+            .filter(|provider| provider_matches_strategy(provider, strategy))
             .collect::<Vec<_>>();
         match candidates.as_slice() {
             [_provider] => {}
@@ -599,39 +674,132 @@ fn resolve_guard<'a>(
         .copied()
         .find(|strategy| strategy.name() == guard.strategy())
     {
-        let principal_type_id = guard
-            .principal_type_id()
-            .expect("guard metadata was validated before strategy resolution");
-        if principal_type_id != strategy.principal_type_id() {
-            return Err(strategy_error(
-                "principal_mismatch",
-                "Passport strategy principal mismatch",
-                guard.requirement_subject(),
-                format!(
-                    "the guard requires `{}` but strategy `{}` returns `{}`",
-                    guard
-                        .principal_type_name()
-                        .expect("guard metadata was validated before strategy resolution"),
-                    strategy.name(),
-                    strategy.principal_type_name(),
-                ),
-                guard.location(),
-                "declare the strategy principal type requested by the guard",
-            ));
-        }
-        return Ok(PassportStrategyBinding {
-            guard,
-            strategy: strategy.name(),
-            adapter: strategy.adapter(),
-            token_kind: strategy.token_kind(),
-            builtin: false,
-        });
+        return resolve_custom_strategy(guard, strategy);
     }
 
+    resolve_builtin_or_missing(guard)
+}
+
+fn resolve_scoped_guard(
+    scoped_guard: &ScopedGuard,
+    module_graph: Option<&ModuleGraph>,
+    strategies: &[&'static PassportStrategyDescriptor],
+    providers: &[&'static ProviderDescriptor],
+) -> Result<PassportStrategyBinding<'static>> {
+    let guard = scoped_guard.guard();
+    let candidates = strategies
+        .iter()
+        .copied()
+        .filter(|strategy| strategy.name() == guard.strategy())
+        .filter(|strategy| {
+            scoped_strategy_visible(
+                module_graph,
+                scoped_guard.context_module(),
+                strategy,
+                providers,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    match candidates.as_slice() {
+        [] => resolve_builtin_or_missing(guard),
+        [strategy] => resolve_custom_strategy(guard, strategy),
+        _ => Err(ambiguous_scoped_strategy_error(
+            guard,
+            scoped_guard.context_module(),
+            &candidates,
+        )),
+    }
+}
+
+fn scoped_strategy_visible(
+    module_graph: Option<&ModuleGraph>,
+    guard_context: Option<TypeId>,
+    strategy: &PassportStrategyDescriptor,
+    providers: &[&'static ProviderDescriptor],
+) -> bool {
+    let (Some(graph), Some(guard_context)) = (module_graph, guard_context) else {
+        return true;
+    };
+    let Some(namespace) = strategy.namespace() else {
+        return false;
+    };
+    let Some(strategy_owner) = owner_for_namespace(Some(namespace)) else {
+        return false;
+    };
+    let provider = providers
+        .iter()
+        .copied()
+        .find(|provider| provider_matches_strategy(provider, strategy))
+        .expect("strategy metadata was validated before scoped resolution");
+
+    strategy_visible(
+        graph,
+        guard_context,
+        strategy_owner.type_id(),
+        provider.visibility(),
+    )
+}
+
+fn provider_matches_strategy(
+    provider: &ProviderDescriptor,
+    strategy: &PassportStrategyDescriptor,
+) -> bool {
+    provider.type_id() == strategy.provider_type_id()
+        && provider.runtime_type_name() == Some(strategy.provider_type_name())
+}
+
+fn strategy_visible(
+    graph: &ModuleGraph,
+    guard_context: TypeId,
+    strategy_owner: TypeId,
+    provider_visibility: ProviderVisibility,
+) -> bool {
+    guard_context == strategy_owner
+        || (provider_visibility == ProviderVisibility::Public
+            && graph.directly_imports(guard_context, strategy_owner))
+}
+
+fn resolve_custom_strategy<'a>(
+    guard: &'a GuardDescriptor,
+    strategy: &'static PassportStrategyDescriptor,
+) -> Result<PassportStrategyBinding<'a>> {
+    let principal_type_id = guard
+        .principal_type_id()
+        .expect("guard metadata was validated before strategy resolution");
+    if principal_type_id != strategy.principal_type_id() {
+        return Err(strategy_error(
+            "principal_mismatch",
+            "Passport strategy principal mismatch",
+            guard.requirement_subject(),
+            format!(
+                "the guard requires `{}` but strategy `{}` returns `{}`",
+                guard
+                    .principal_type_name()
+                    .expect("guard metadata was validated before strategy resolution"),
+                strategy.name(),
+                strategy.principal_type_name(),
+            ),
+            guard.location(),
+            "declare the strategy principal type requested by the guard",
+        ));
+    }
+    Ok(PassportStrategyBinding {
+        guard,
+        context_module: None,
+        strategy: strategy.name(),
+        adapter: strategy.adapter(),
+        token_kind: strategy.token_kind(),
+        builtin: false,
+    })
+}
+
+fn resolve_builtin_or_missing(guard: &GuardDescriptor) -> Result<PassportStrategyBinding<'_>> {
     if guard.strategy() == "jwt" {
         if let Some(adapter) = guard.builtin_adapter() {
             return Ok(PassportStrategyBinding {
                 guard,
+                context_module: None,
                 strategy: "jwt",
                 adapter,
                 token_kind: JwtTokenKind::Access,
@@ -651,6 +819,41 @@ fn resolve_guard<'a>(
         guard.location(),
         "register a matching managed Passport strategy or use ClaimsPrincipal<C> with `jwt`",
     ))
+}
+
+fn ambiguous_scoped_strategy_error(
+    guard: &'static GuardDescriptor,
+    guard_context: Option<TypeId>,
+    candidates: &[&'static PassportStrategyDescriptor],
+) -> Error {
+    let context_name = guard_context.map_or_else(
+        || "complete Passport catalog".to_owned(),
+        |context| format!("{context:?}"),
+    );
+    let primary = Diagnostic::new(
+        MADS130,
+        "ambiguous Passport strategy",
+        format!(
+            "ambiguous_strategy: guard context `{context_name}` can see more than one managed strategy named `{}`",
+            guard.strategy(),
+        ),
+    )
+    .with_subject(guard.requirement_subject())
+    .with_location(guard.location())
+    .with_suggestion("retain one context-visible Passport strategy for this guard");
+    let related = candidates.iter().map(|strategy| {
+        Diagnostic::new(
+            MADS130,
+            "visible Passport strategy candidate",
+            format!(
+                "candidate_strategy: `{}` is visible to guard context `{context_name}`",
+                strategy.provider_type_name(),
+            ),
+        )
+        .with_subject(strategy.name())
+        .with_location(strategy.location())
+    });
+    Error::from_diagnostics(primary, related)
 }
 
 fn strategy_error(

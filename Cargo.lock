@@ -922,7 +922,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "mads"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -938,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "mads-cli"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "assert_cmd",
  "mads",
@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "mads-common"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "axum",
  "axum-extra",
@@ -965,11 +965,12 @@ dependencies = [
  "tempfile",
  "tokio",
  "tower",
+ "tower-http",
 ]
 
 [[package]]
 name = "mads-common-macros"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -979,7 +980,7 @@ dependencies = [
 
 [[package]]
 name = "mads-core"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "cargo_metadata",
  "dotenvy",
@@ -993,7 +994,7 @@ dependencies = [
 
 [[package]]
 name = "mads-core-macros"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1003,7 +1004,7 @@ dependencies = [
 
 [[package]]
 name = "mads-extra"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "mads-core",
 ]
@@ -1925,6 +1926,20 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "tower-http"
+version = "0.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
+dependencies = [
+ "bitflags",
+ "bytes",
+ "http",
+ "pin-project-lite",
+ "tower-layer",
+ "tower-service",
 ]
 
 [[package]]

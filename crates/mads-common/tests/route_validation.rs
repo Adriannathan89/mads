@@ -4,7 +4,7 @@
 
 use std::any::TypeId;
 
-use mads_common::core::{ApplicationContext, MADS030, Result, SourceLocation};
+use mads_common::core::{MADS030, Result, SourceLocation};
 use mads_common::{
     ControllerRouteDescriptor, HttpMethod, RouteContractDescriptor, RouteDescriptor,
 };
@@ -22,7 +22,7 @@ fn second_type_id() -> TypeId {
 
 fn no_op_registrar(
     router: mads_common::axum::Router,
-    _: &ApplicationContext,
+    _: &mads_common::__private::RouterBuildContext<'_>,
     _: &mut mads_common::__private::ValidatedRouteIter<'_>,
 ) -> Result<mads_common::axum::Router> {
     Ok(router)
@@ -333,6 +333,34 @@ fn rejects_duplicate_controller_identities_and_missing_registrars() {
 }
 
 #[test]
+fn descriptors_retain_optional_declaration_namespaces() {
+    let route = RouteDescriptor::new(
+        HttpMethod::Get,
+        "",
+        "/health",
+        "/health",
+        "health",
+        SourceLocation::new("routes.rs", 1, 1),
+    );
+    assert_eq!(route.namespace(), None);
+    assert_eq!(
+        route.with_namespace("delivery::health").namespace(),
+        Some("delivery::health")
+    );
+
+    let controller = ControllerRouteDescriptor::new(
+        "delivery::HealthController",
+        first_type_id,
+        FIRST_CONTRACTS,
+    );
+    assert_eq!(controller.namespace(), None);
+    assert_eq!(
+        controller.with_namespace("delivery::health").namespace(),
+        Some("delivery::health")
+    );
+}
+
+#[test]
 fn validated_routes_translate_parameters_for_axum() {
     let descriptor = controller("test::Controller", first_type_id, FIRST_CONTRACTS);
     let controllers = mads_common::__private::validate_descriptors(&[&descriptor])
@@ -343,7 +371,7 @@ fn validated_routes_translate_parameters_for_axum() {
         routes
             .next(HttpMethod::Get, "get_user")
             .expect("validated route must preserve method and handler"),
-        "/users/{id}"
+        Some("/users/{id}")
     );
     routes
         .finish()
@@ -358,7 +386,7 @@ fn validates_root_routes_and_reports_registrar_metadata_mismatches() {
     let mut routes = controllers[0].routes();
     assert_eq!(
         routes.next(HttpMethod::Get, "root").expect("root path"),
-        "/"
+        Some("/")
     );
     routes.finish().expect("root route consumed");
 

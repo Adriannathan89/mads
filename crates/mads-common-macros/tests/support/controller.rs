@@ -23,7 +23,9 @@ fn expands_a_concrete_controller_registrar_and_stores_its_pointer() {
 
     assert_eq!(
         expanded
-            .match_indices(&normalized(quote!(__mads_context.resolve::<Controller>()?)))
+            .match_indices(&normalized(quote!(
+                __mads_runtime.application().resolve::<Controller>()?
+            )))
             .count(),
         1,
         "the registrar must resolve Controller exactly once",
@@ -32,7 +34,7 @@ fn expands_a_concrete_controller_registrar_and_stores_its_pointer() {
         <Controller as UserRoutes>::__mads_register(
             __mads_router,
             __mads_controller.clone(),
-            __mads_context,
+            __mads_runtime,
             __mads_routes,
         )?
     })));
@@ -40,12 +42,20 @@ fn expands_a_concrete_controller_registrar_and_stores_its_pointer() {
         <Controller as AdminRoutes>::__mads_register(
             __mads_router,
             __mads_controller.clone(),
-            __mads_context,
+            __mads_runtime,
             __mads_routes,
         )?
     })));
     assert!(expanded.contains(&normalized(quote!(__mads_routes.finish()?))));
     assert!(expanded.contains("ControllerRouteDescriptor::with_registrar"));
+    assert!(expanded.contains(&normalized(quote! {
+        .with_runtime_type_name(|| ::core::any::type_name::<Controller>())
+    })));
+    assert_eq!(
+        expanded.matches("with_namespace(module_path!())").count(),
+        2,
+        "the provider and controller descriptors must retain their declaration namespace",
+    );
     assert!(expanded.contains("__mads_register_controller_"));
 }
 

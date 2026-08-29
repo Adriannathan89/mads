@@ -6,6 +6,32 @@ use std::pin::Pin;
 
 use crate::{ConstructionContext, ErasedProvider, Result, SourceLocation};
 
+/// Marker implemented by `#[module]` declarations.
+pub trait Module: Send + Sync + 'static {}
+
+/// One direct module import emitted by `#[module(imports = [ImportedModule])]`.
+pub struct ModuleImportDescriptor {
+    type_name: &'static str,
+    type_id: fn() -> TypeId,
+}
+
+impl ModuleImportDescriptor {
+    /// Creates an import descriptor from a stable type name and identifier factory.
+    pub const fn new(type_name: &'static str, type_id: fn() -> TypeId) -> Self {
+        Self { type_name, type_id }
+    }
+
+    /// Returns the imported module's authored type name.
+    pub const fn type_name(&self) -> &'static str {
+        self.type_name
+    }
+
+    /// Returns the imported module's runtime type identifier.
+    pub fn type_id(&self) -> TypeId {
+        (self.type_id)()
+    }
+}
+
 /// Categorizes the role a provider plays in an application.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ProviderKind {
@@ -61,6 +87,7 @@ pub struct ProviderDescriptor {
     type_name: &'static str,
     type_id: fn() -> TypeId,
     runtime_type_name: Option<fn() -> &'static str>,
+    namespace: Option<&'static str>,
     dependencies: &'static [DependencyDescriptor],
     visibility: ProviderVisibility,
     location: SourceLocation,
@@ -83,6 +110,7 @@ impl ProviderDescriptor {
             type_name,
             type_id,
             runtime_type_name: None,
+            namespace: None,
             dependencies,
             visibility,
             location,
@@ -98,6 +126,13 @@ impl ProviderDescriptor {
     #[doc(hidden)]
     pub const fn with_runtime_type_name(mut self, runtime_type_name: fn() -> &'static str) -> Self {
         self.runtime_type_name = Some(runtime_type_name);
+        self
+    }
+
+    /// Attaches the Rust namespace containing this provider declaration.
+    #[must_use]
+    pub const fn with_namespace(mut self, namespace: &'static str) -> Self {
+        self.namespace = Some(namespace);
         self
     }
 
@@ -121,6 +156,11 @@ impl ProviderDescriptor {
     pub fn runtime_type_name(&self) -> Option<&'static str> {
         self.runtime_type_name
             .map(|runtime_type_name| runtime_type_name())
+    }
+
+    /// Returns the Rust namespace containing this provider declaration, when available.
+    pub const fn namespace(&self) -> Option<&'static str> {
+        self.namespace
     }
 
     /// Returns the static dependency descriptors required by this provider.
@@ -148,6 +188,8 @@ impl ProviderDescriptor {
 pub struct ModuleDescriptor {
     type_name: &'static str,
     type_id: fn() -> TypeId,
+    namespace: Option<&'static str>,
+    imports: &'static [ModuleImportDescriptor],
     location: SourceLocation,
 }
 
@@ -161,8 +203,24 @@ impl ModuleDescriptor {
         Self {
             type_name,
             type_id,
+            namespace: None,
+            imports: &[],
             location,
         }
+    }
+
+    /// Attaches the Rust namespace containing this module declaration.
+    #[must_use]
+    pub const fn with_namespace(mut self, namespace: &'static str) -> Self {
+        self.namespace = Some(namespace);
+        self
+    }
+
+    /// Attaches the module's direct imports in authored declaration order.
+    #[must_use]
+    pub const fn with_imports(mut self, imports: &'static [ModuleImportDescriptor]) -> Self {
+        self.imports = imports;
+        self
     }
 
     /// Returns the module's stable type name.
@@ -173,6 +231,16 @@ impl ModuleDescriptor {
     /// Returns the module's runtime type identifier.
     pub fn type_id(&self) -> TypeId {
         (self.type_id)()
+    }
+
+    /// Returns the Rust namespace containing this module declaration, when available.
+    pub const fn namespace(&self) -> Option<&'static str> {
+        self.namespace
+    }
+
+    /// Returns the module's direct imports in authored declaration order.
+    pub const fn imports(&self) -> &'static [ModuleImportDescriptor] {
+        self.imports
     }
 
     /// Returns the module declaration's source location.

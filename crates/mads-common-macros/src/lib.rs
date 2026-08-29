@@ -91,9 +91,9 @@ pub fn controller(arguments: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// A route trait may optionally declare a `prefix = "/..."`. It must contain
 /// at least one method, and each method must be an async `&self` method with
-/// exactly one of the HTTP verb attributes [`get`], [`post`], [`put`],
-/// [`patch`], or [`delete`]. Methods remain abstract so that the controller's
-/// implementation is the only handler body.
+/// exactly one of the HTTP verb attributes [`macro@get`], [`macro@post`],
+/// [`macro@put`], [`macro@patch`], or [`macro@delete`]. Methods remain abstract
+/// so that the controller's implementation is the only handler body.
 ///
 /// The macro rejects malformed or ambiguous paths, duplicate method/path
 /// pairs, generic traits, and default method implementations. It also emits
@@ -115,7 +115,7 @@ pub fn controller(arguments: TokenStream, item: TokenStream) -> TokenStream {
 /// ```
 ///
 /// The example is marked `ignore` for the same downstream-consumer reason as
-/// [`controller`].
+/// [`macro@controller`].
 #[proc_macro_attribute]
 pub fn routes(arguments: TokenStream, item: TokenStream) -> TokenStream {
     routes::expand(arguments.into(), item.into())
@@ -133,12 +133,12 @@ pub fn guard(arguments: TokenStream, item: TokenStream) -> TokenStream {
     guard::outside_contract(arguments.into(), item.into()).into()
 }
 
-/// Marks a GET method inside a trait annotated with [`routes`].
+/// Marks a GET method inside a trait annotated with [`macro@routes`].
 ///
 /// The attribute takes exactly one string path, such as `#[get("/:id")]`.
 /// It is only valid on an abstract async route-contract method; using it on a
-/// free function, an inherent method, or a trait without [`routes`] produces a
-/// compile-time diagnostic.
+/// free function, an inherent method, or a trait without [`macro@routes`]
+/// produces a compile-time diagnostic.
 ///
 /// # Examples
 ///
@@ -154,7 +154,7 @@ pub fn get(arguments: TokenStream, item: TokenStream) -> TokenStream {
     verb::outside_contract("get", arguments.into(), item.into()).into()
 }
 
-/// Marks a POST method inside a trait annotated with [`routes`].
+/// Marks a POST method inside a trait annotated with [`macro@routes`].
 ///
 /// The attribute takes exactly one string path and is validated together with
 /// the route trait's optional prefix.
@@ -163,7 +163,7 @@ pub fn post(arguments: TokenStream, item: TokenStream) -> TokenStream {
     verb::outside_contract("post", arguments.into(), item.into()).into()
 }
 
-/// Marks a PUT method inside a trait annotated with [`routes`].
+/// Marks a PUT method inside a trait annotated with [`macro@routes`].
 ///
 /// The attribute takes exactly one string path and is validated together with
 /// the route trait's optional prefix.
@@ -172,7 +172,7 @@ pub fn put(arguments: TokenStream, item: TokenStream) -> TokenStream {
     verb::outside_contract("put", arguments.into(), item.into()).into()
 }
 
-/// Marks a PATCH method inside a trait annotated with [`routes`].
+/// Marks a PATCH method inside a trait annotated with [`macro@routes`].
 ///
 /// The attribute takes exactly one string path and is validated together with
 /// the route trait's optional prefix.
@@ -181,7 +181,7 @@ pub fn patch(arguments: TokenStream, item: TokenStream) -> TokenStream {
     verb::outside_contract("patch", arguments.into(), item.into()).into()
 }
 
-/// Marks a DELETE method inside a trait annotated with [`routes`].
+/// Marks a DELETE method inside a trait annotated with [`macro@routes`].
 ///
 /// The attribute takes exactly one string path and is validated together with
 /// the route trait's optional prefix.

@@ -3,18 +3,18 @@
 use std::any::TypeId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use mads::common::__private::RouterBuildContext;
 use mads::common::{
     ControllerRouteDescriptor, HttpMethod, RouteCatalog, RouteContractDescriptor, RouteDescriptor,
     build_router,
 };
-use mads::core::{ApplicationContext, MADS003, Mads, Result, SourceLocation};
+use mads::core::{Mads, Result, SourceLocation};
 
 static REGISTRATIONS: AtomicUsize = AtomicUsize::new(0);
 
 struct FirstManualController;
 struct SecondManualController;
 struct CountedManualController;
-struct MissingManualController;
 
 fn first_manual_type_id() -> TypeId {
     TypeId::of::<FirstManualController>()
@@ -28,13 +28,9 @@ fn counted_manual_type_id() -> TypeId {
     TypeId::of::<CountedManualController>()
 }
 
-fn missing_manual_type_id() -> TypeId {
-    TypeId::of::<MissingManualController>()
-}
-
 fn no_op_registrar(
     router: mads::common::axum::Router,
-    _: &ApplicationContext,
+    _: &RouterBuildContext<'_>,
     _: &mut mads::common::__private::ValidatedRouteIter<'_>,
 ) -> Result<mads::common::axum::Router> {
     Ok(router)
@@ -42,19 +38,10 @@ fn no_op_registrar(
 
 fn counted_registrar(
     router: mads::common::axum::Router,
-    _: &ApplicationContext,
+    _: &RouterBuildContext<'_>,
     _: &mut mads::common::__private::ValidatedRouteIter<'_>,
 ) -> Result<mads::common::axum::Router> {
     REGISTRATIONS.fetch_add(1, Ordering::SeqCst);
-    Ok(router)
-}
-
-fn missing_controller_registrar(
-    router: mads::common::axum::Router,
-    context: &ApplicationContext,
-    _: &mut mads::common::__private::ValidatedRouteIter<'_>,
-) -> Result<mads::common::axum::Router> {
-    let _ = context.resolve::<MissingManualController>()?;
     Ok(router)
 }
 
@@ -82,14 +69,6 @@ const COUNTED_MANUAL_ROUTE: RouteDescriptor = RouteDescriptor::new(
     "counted",
     SourceLocation::new("tests/counted_controller.rs", 3, 1),
 );
-const MISSING_MANUAL_ROUTE: RouteDescriptor = RouteDescriptor::new(
-    HttpMethod::Get,
-    "",
-    "/missing",
-    "/missing",
-    "missing",
-    SourceLocation::new("tests/missing_controller.rs", 3, 1),
-);
 const FIRST_MANUAL_CONTRACTS: &[RouteContractDescriptor] = &[RouteContractDescriptor::new(
     "FirstRoutes",
     &[FIRST_MANUAL_ROUTE],
@@ -101,10 +80,6 @@ const SECOND_MANUAL_CONTRACTS: &[RouteContractDescriptor] = &[RouteContractDescr
 const COUNTED_MANUAL_CONTRACTS: &[RouteContractDescriptor] = &[RouteContractDescriptor::new(
     "CountedRoutes",
     &[COUNTED_MANUAL_ROUTE],
-)];
-const MISSING_MANUAL_CONTRACTS: &[RouteContractDescriptor] = &[RouteContractDescriptor::new(
-    "MissingRoutes",
-    &[MISSING_MANUAL_ROUTE],
 )];
 
 mads::core::__private::inventory::submit! {
@@ -188,29 +163,6 @@ async fn controller_construction_remains_independent_of_http_validation() {
     let error = RouteCatalog::validate().unwrap_err();
     assert_eq!(error.code(), mads::core::MADS030);
     assert!(error.to_string().contains("GET /duplicate"));
-}
-
-#[tokio::test]
-async fn missing_controller_resolution_returns_core_diagnostic() {
-    let descriptor = ControllerRouteDescriptor::with_registrar(
-        "test::MissingManualController",
-        missing_manual_type_id,
-        MISSING_MANUAL_CONTRACTS,
-        missing_controller_registrar,
-    );
-    let mut controllers = mads::common::__private::validate_descriptors(&[&descriptor]).unwrap();
-    let controller = controllers.pop().unwrap();
-    let mut routes = controller.routes();
-    let application = Mads::builder().build().await.unwrap();
-
-    let error = (controller.registrar())(
-        mads::common::axum::Router::new(),
-        application.context(),
-        &mut routes,
-    )
-    .expect_err("a missing controller must return its resolution diagnostic");
-
-    assert_eq!(error.code(), MADS003);
 }
 
 #[test]

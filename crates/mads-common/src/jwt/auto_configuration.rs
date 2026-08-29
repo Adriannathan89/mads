@@ -32,7 +32,7 @@ fn jwt_service_type_id() -> TypeId {
 }
 
 fn evaluate(context: &AutoConfigurationContext<'_>) -> AutoConfigurationEvaluation {
-    let guard_requirements = match guard_requirements() {
+    let guard_requirements = match guard_requirements(context) {
         Ok(requirements) => requirements,
         Err(error) => {
             return AutoConfigurationEvaluation::failed(
@@ -94,12 +94,14 @@ fn evaluate(context: &AutoConfigurationContext<'_>) -> AutoConfigurationEvaluati
 }
 
 #[cfg(feature = "http")]
-fn guard_requirements() -> Result<Vec<AutoConfigurationRequirement>> {
-    use crate::passport::{GuardCatalog, PassportStrategyCatalog};
+fn guard_requirements(
+    context: &AutoConfigurationContext<'_>,
+) -> Result<Vec<AutoConfigurationRequirement>> {
+    use crate::{http_scope::HttpApplicationScope, passport::PassportStrategyCatalog};
 
-    let guards = GuardCatalog::guards();
-    GuardCatalog::validate_descriptors(&guards)?;
-    let preflight = PassportStrategyCatalog::preflight(&guards)?;
+    let http = HttpApplicationScope::for_module_graph(context.module_graph())?;
+    let preflight =
+        PassportStrategyCatalog::preflight_scoped(context.module_graph(), http.guards())?;
     Ok(preflight
         .bindings()
         .iter()
@@ -111,7 +113,9 @@ fn guard_requirements() -> Result<Vec<AutoConfigurationRequirement>> {
 }
 
 #[cfg(not(feature = "http"))]
-fn guard_requirements() -> Result<Vec<AutoConfigurationRequirement>> {
+fn guard_requirements(
+    _context: &AutoConfigurationContext<'_>,
+) -> Result<Vec<AutoConfigurationRequirement>> {
     Ok(Vec::new())
 }
 

@@ -1,0 +1,10 @@
+[package]
+name = "mads-automatic-run-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+
+[dependencies]
+mads = { path = "../../.." }
+
+[workspace]

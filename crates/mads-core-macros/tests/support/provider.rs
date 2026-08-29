@@ -43,6 +43,19 @@
         }
 
         #[test]
+        fn provider_expansion_records_the_declaration_namespace() {
+            let item = function("pub fn value() -> i32 { 1 }");
+            let expanded = expand_provider_with_core(item, syn::parse_quote!(mads_core))
+                .expect("provider should expand")
+                .to_string();
+
+            assert!(
+                expanded.contains(". with_namespace (module_path ! ())"),
+                "expanded descriptor did not record its namespace: {expanded}"
+            );
+        }
+
+        #[test]
         fn recognizes_fallible_output_forms() {
             for source in [
                 "Result<i32>",

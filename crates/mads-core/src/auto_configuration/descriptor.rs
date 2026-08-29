@@ -8,7 +8,7 @@ use crate::graph::SatisfiedProvider;
 use crate::{
     AutoConfigurationConfigEvidence, AutoConfigurationReasonCode, AutoConfigurationReport,
     AutoConfigurationRequirement, AutoConfigurationStatus, Config, ErasedProvider, Error,
-    LifecycleHook, ProviderDescriptor, SourceLocation,
+    LifecycleHook, ModuleGraph, ProviderDescriptor, SourceLocation,
 };
 
 /// Evaluates the side-effect-free conditions for an official integration.
@@ -104,6 +104,7 @@ pub struct AutoConfigurationContext<'a> {
     providers: &'a [&'static ProviderDescriptor],
     satisfied: &'a [SatisfiedProvider],
     inputs: &'a AutoConfigurationInputs,
+    module_graph: Option<&'a ModuleGraph>,
 }
 
 impl<'a> AutoConfigurationContext<'a> {
@@ -113,6 +114,7 @@ impl<'a> AutoConfigurationContext<'a> {
         providers: &'a [&'static ProviderDescriptor],
         satisfied: &'a [SatisfiedProvider],
         inputs: &'a AutoConfigurationInputs,
+        module_graph: Option<&'a ModuleGraph>,
     ) -> Self {
         Self {
             identifier,
@@ -120,7 +122,14 @@ impl<'a> AutoConfigurationContext<'a> {
             providers,
             satisfied,
             inputs,
+            module_graph,
         }
+    }
+
+    /// Returns the selected module graph for rooted analysis.
+    #[doc(hidden)]
+    pub const fn module_graph(&self) -> Option<&ModuleGraph> {
+        self.module_graph
     }
 
     /// Returns the immutable builder configuration.
@@ -187,6 +196,7 @@ pub struct AutoConfigurationApplyContext<'a> {
     identifier: &'static str,
     config: &'a Config,
     inputs: &'a AutoConfigurationInputs,
+    module_graph: Option<&'a ModuleGraph>,
 }
 
 impl<'a> AutoConfigurationApplyContext<'a> {
@@ -194,12 +204,20 @@ impl<'a> AutoConfigurationApplyContext<'a> {
         identifier: &'static str,
         config: &'a Config,
         inputs: &'a AutoConfigurationInputs,
+        module_graph: Option<&'a ModuleGraph>,
     ) -> Self {
         Self {
             identifier,
             config,
             inputs,
+            module_graph,
         }
+    }
+
+    /// Returns the selected module graph for a rooted build.
+    #[doc(hidden)]
+    pub const fn module_graph(&self) -> Option<&ModuleGraph> {
+        self.module_graph
     }
 
     /// Returns the immutable builder configuration.

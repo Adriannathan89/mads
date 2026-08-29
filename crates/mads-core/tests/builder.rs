@@ -6,10 +6,38 @@ use std::sync::{Arc, Mutex};
 
 use mads_core::{
     ApplicationContext, Catalog, ConstructionContext, ConstructionStep, DependencyDescriptor,
-    ErasedProvider, LifecycleFuture, LifecycleHook, LifecycleState, MADS003, Mads,
+    ErasedProvider, LifecycleFuture, LifecycleHook, LifecycleState, MADS003, MADS008, Mads,
     ProviderDescriptor, ProviderFuture, ProviderKind, ProviderOrigin, ProviderState,
     ProviderVisibility, SourceLocation,
 };
+
+mod rooted {
+    pub mod app {
+        #[mads_core::module]
+        pub struct AppModule;
+
+        #[derive(Clone)]
+        pub struct ReachableService;
+
+        #[mads_core::provider]
+        pub fn reachable_service() -> ReachableService {
+            ReachableService
+        }
+    }
+
+    pub mod unreachable {
+        #[mads_core::module]
+        pub struct UnreachableModule;
+
+        #[derive(Clone)]
+        pub struct UnreachableService;
+
+        #[mads_core::provider]
+        pub fn unreachable_service() -> UnreachableService {
+            UnreachableService
+        }
+    }
+}
 
 struct Database;
 
@@ -134,6 +162,8 @@ fn builder_analysis_is_repeatable_and_side_effect_free() {
 
     assert!(first.is_valid());
     assert!(second.is_valid());
+    assert!(first.module_graph().is_none());
+    assert!(second.module_graph().is_none());
     assert_eq!(database_constructions(), 0);
     assert_eq!(
         first
@@ -154,6 +184,51 @@ fn builder_analysis_is_repeatable_and_side_effect_free() {
 }
 
 #[tokio::test]
+async fn rooted_builder_constructs_only_the_selected_application() {
+    use rooted::{
+        app::{AppModule, ReachableService},
+        unreachable::UnreachableService,
+    };
+
+    let mut builder = Mads::builder();
+    builder.root::<AppModule>().unwrap();
+
+    let analysis = builder.analyze();
+    assert_eq!(
+        analysis.module_graph().unwrap().root().type_name(),
+        std::any::type_name::<AppModule>()
+    );
+    assert!(analysis.graph().provider::<ReachableService>().is_some());
+    assert!(analysis.graph().provider::<UnreachableService>().is_none());
+
+    let application = builder.build().await.unwrap();
+    assert_eq!(
+        application.module_graph().unwrap().root().type_name(),
+        std::any::type_name::<AppModule>()
+    );
+    assert!(application.context().resolve::<ReachableService>().is_ok());
+    assert!(
+        application
+            .context()
+            .resolve::<UnreachableService>()
+            .is_err()
+    );
+}
+
+#[test]
+fn root_can_be_selected_only_once() {
+    use rooted::app::AppModule;
+
+    let mut builder = Mads::builder();
+    builder.root::<AppModule>().unwrap();
+    let error = match builder.root::<AppModule>() {
+        Ok(_) => panic!("a second root selection must fail"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code(), MADS008);
+}
+
+#[tokio::test]
 async fn explicit_and_preconstructed_values_have_distinct_states() {
     let mut builder = Mads::builder();
     builder.provide(Database::new()).unwrap();
@@ -168,7 +243,16 @@ async fn explicit_and_preconstructed_values_have_distinct_states() {
         analysis.graph().provider::<Repository>().unwrap().state(),
         ProviderState::Preconstructed
     );
-    assert!(analysis.construction_plan().unwrap().steps().is_empty());
+    assert_eq!(
+        analysis
+            .construction_plan()
+            .unwrap()
+            .steps()
+            .iter()
+            .map(ConstructionStep::type_name)
+            .collect::<Vec<_>>(),
+        ["ReachableService", "UnreachableService"]
+    );
 }
 
 #[tokio::test]
@@ -186,7 +270,12 @@ async fn build_constructs_the_complete_graph_in_dependency_order() {
             .iter()
             .map(ConstructionStep::type_name)
             .collect::<Vec<_>>(),
-        ["builder::Database", "builder::Repository"],
+        [
+            "ReachableService",
+            "UnreachableService",
+            "builder::Database",
+            "builder::Repository",
+        ],
     );
 }
 

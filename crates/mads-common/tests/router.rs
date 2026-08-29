@@ -4,13 +4,104 @@
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
+use axum::routing::get;
+use mads_common::__private::enable_automatic_cors_for_test;
 use mads_common::{
-    Created, Header, HttpResult, Json, NoContent, Path, Query, build_router, controller, headers,
-    routes,
+    Created, Header, HttpResult, Json, NoContent, Path, Query, build_router, configure_router,
+    controller, headers, routes,
 };
-use mads_core::Mads;
+use mads_core::{Config, ConfigBuilder, Mads, MadsBuilder, MapSource};
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
+
+const ALLOWED_ORIGIN: &str = "https://app.example.com";
+
+mod cors_routes {
+    #[mads_common::routes]
+    pub trait CorsRoutes {
+        #[mads_common::get("/ok")]
+        async fn ok(&self) -> &'static str;
+    }
+
+    #[mads_common::controller(routes = [CorsRoutes])]
+    pub struct CorsController;
+
+    impl CorsRoutes for CorsController {
+        async fn ok(&self) -> &'static str {
+            "ok"
+        }
+    }
+
+    #[mads_common::core::module]
+    pub struct CorsApplication;
+}
+
+fn cors_config() -> Config {
+    ConfigBuilder::new()
+        .source(
+            MapSource::new("test", std::iter::empty::<(&str, &str)>())
+                .with_string_array("server.cors.origins", [ALLOWED_ORIGIN])
+                .with_string_array("server.cors.methods", ["GET"]),
+        )
+        .build()
+        .unwrap()
+}
+
+fn automatic_cors_builder() -> MadsBuilder {
+    let mut builder = Mads::builder_with_config(cors_config());
+    builder.root::<cors_routes::CorsApplication>().unwrap();
+    assert!(enable_automatic_cors_for_test(&mut builder));
+    builder
+}
+
+fn origin_request(path: &str) -> Request<Body> {
+    Request::builder()
+        .uri(path)
+        .header(header::ORIGIN, ALLOWED_ORIGIN)
+        .body(Body::empty())
+        .unwrap()
+}
+
+fn native_router() -> axum::Router {
+    axum::Router::new().route("/native", get(|| async { "native" }))
+}
+
+#[tokio::test]
+async fn raw_router_stays_unlayered_until_configured_after_native_merge() {
+    let application = automatic_cors_builder().build().await.unwrap();
+    let raw = build_router(&application).unwrap();
+
+    let raw_response = raw.clone().oneshot(origin_request("/ok")).await.unwrap();
+    assert!(
+        !raw_response
+            .headers()
+            .contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+    );
+
+    let router = configure_router(&application, raw.merge(native_router())).unwrap();
+    for path in ["/ok", "/native"] {
+        let response = router.clone().oneshot(origin_request(path)).await.unwrap();
+        assert_eq!(
+            response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            ALLOWED_ORIGIN
+        );
+    }
+}
+
+#[tokio::test]
+async fn raw_router_configuration_applies_cors_to_native_only_router() {
+    let application = Mads::builder_with_config(cors_config())
+        .build()
+        .await
+        .unwrap();
+    let router = configure_router(&application, native_router()).unwrap();
+
+    let response = router.oneshot(origin_request("/native")).await.unwrap();
+    assert_eq!(
+        response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+        ALLOWED_ORIGIN
+    );
+}
 
 #[routes]
 trait AlphaRoutes {
