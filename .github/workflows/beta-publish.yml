@@ -129,7 +129,7 @@ jobs:
 
           is_published() {
             local package="$1"
-            cargo info "${package}@${version}" >/dev/null 2>&1
+            cargo info --registry crates-io "${package}@${version}" >/dev/null 2>&1
           }
 
           for package in "${packages[@]}"; do
