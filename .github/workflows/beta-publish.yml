@@ -98,8 +98,11 @@ jobs:
       - postgres
     runs-on: ubuntu-latest
     environment: beta
+    permissions:
+      contents: write
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -154,3 +157,26 @@ jobs:
             cargo publish --locked --package "$package"
             wait_until_published "$package"
           done
+      - name: Create GitHub prerelease and tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
+          tag="v${version}"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Skipping ${tag}: GitHub release already exists."
+            exit 0
+          fi
+
+          awk -v heading="## [${version}]" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md | gh release create "$tag" \
+            --target "$GITHUB_SHA" \
+            --title "MADS.rs ${version}" \
+            --prerelease \
+            --latest=false \
+            --notes-file -

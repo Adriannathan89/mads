@@ -187,6 +187,11 @@ idempotent. The publish job requires a GitHub repository or `beta` environment
 secret named `CRATES_IO_TOKEN`. Store a crates.io API token in that secret;
 never commit or print the token.
 
+After every crate is available on crates.io, the same job creates the matching
+`v<version>` tag at the tested `beta` commit and publishes a GitHub prerelease
+using that version's `CHANGELOG.md` section. Existing releases are skipped so
+a rerun can safely recover after a partial registry publication.
+
 Publishing to crates.io is permanent. Increment the prerelease suffix before
 publishing changed package contents; an existing crate version cannot be
 overwritten.
