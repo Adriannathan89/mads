@@ -129,22 +129,7 @@ jobs:
 
           is_published() {
             local package="$1"
-            curl --silent --show-error --fail \
-              "https://crates.io/api/v1/crates/${package}/${version}" \
-              >/dev/null 2>&1
-          }
-
-          wait_until_published() {
-            local package="$1"
-            for attempt in {1..30}; do
-              if is_published "$package"; then
-                return 0
-              fi
-              echo "Waiting for ${package} ${version} to appear in crates.io (${attempt}/30)"
-              sleep 10
-            done
-            echo "Timed out waiting for ${package} ${version} in crates.io." >&2
-            return 1
+            cargo info "${package}@${version}" >/dev/null 2>&1
           }
 
           for package in "${packages[@]}"; do
@@ -155,7 +140,6 @@ jobs:
 
             echo "Publishing ${package} ${version}"
             cargo publish --locked --package "$package"
-            wait_until_published "$package"
           done
       - name: Create GitHub prerelease and tag
         shell: bash

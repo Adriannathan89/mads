@@ -183,9 +183,11 @@ To publish a beta:
 Every push to `beta` runs `.github/workflows/beta-publish.yml`. After its
 release gates pass, it publishes crates in dependency order. A crate/version
 already present on crates.io is skipped, making documentation-only pushes
-idempotent. The publish job requires a GitHub repository or `beta` environment
-secret named `CRATES_IO_TOKEN`. Store a crates.io API token in that secret;
-never commit or print the token.
+idempotent. Availability checks use Cargo's registry client, and each successful
+`cargo publish` already waits for the crate to enter the registry index before
+the next dependent crate is published. The publish job requires a GitHub
+repository or `beta` environment secret named `CRATES_IO_TOKEN`. Store a
+crates.io API token in that secret; never commit or print the token.
 
 After every crate is available on crates.io, the same job creates the matching
 `v<version>` tag at the tested `beta` commit and publishes a GitHub prerelease
