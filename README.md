@@ -1,10 +1,13 @@
 # MADS.rs
 
-MADS.rs 0.6.0 is a Rust application framework with a framework-neutral core,
+MADS.rs 0.6.0-beta.1 is a beta Rust application framework with a framework-neutral core,
 a scoped Axum HTTP runtime, and explainable PostgreSQL/Diesel conditional
 defaults. A root module selects one application; startup validates its scoped
 graph and routes before it starts lifecycle hooks, checks a database, or binds
 a socket.
+
+> This prerelease is intended for adopter feedback. Public APIs may change in
+> later `0.6.0-beta.*` releases before `0.6.0` becomes stable.
 
 ## Standard application
 
@@ -46,7 +49,7 @@ strategies, and official auto-configurations reachable through that graph.
 
 ```toml
 [dependencies]
-mads = "0.6.0"
+mads = "0.6.0-beta.1"
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
@@ -461,3 +464,8 @@ cargo +1.85.0 test --locked --workspace --all-features
 CI also provisions PostgreSQL 16 and runs the ignored database suites plus the
 85% line-coverage gate. To run those locally, set `MADS_TEST_DATABASE_URL` to a
 PostgreSQL 16 database and use the commands in the [v0.5 requirements](docs/importance/version_0.5/auto-configuration.md).
+
+## License
+
+MADS.rs is licensed under either the [Apache License 2.0](LICENSE-APACHE) or
+the [MIT License](LICENSE-MIT), at your option.

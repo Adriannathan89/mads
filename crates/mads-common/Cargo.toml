@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
+license.workspace = true
+readme.workspace = true
+description = "HTTP, PostgreSQL, JWT, cookies, and Passport integrations for MADS.rs"
 
 [features]
 default = ["http", "database"]
@@ -42,8 +45,8 @@ deadpool-diesel = { workspace = true, optional = true }
 diesel = { workspace = true, optional = true }
 diesel_migrations = { workspace = true, optional = true }
 jsonwebtoken = { workspace = true, optional = true }
-mads-common-macros = { path = "../mads-common-macros", optional = true }
-mads-core = { path = "../mads-core" }
+mads-common-macros = { path = "../mads-common-macros", version = "=0.6.0-beta.1", optional = true }
+mads-core = { path = "../mads-core", version = "=0.6.0-beta.1" }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }

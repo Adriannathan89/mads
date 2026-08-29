@@ -5,9 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
+license.workspace = true
+readme.workspace = true
+description = "Extension boundary for optional MADS.rs framework capabilities"
 
 [dependencies]
-mads-core = { path = "../mads-core" }
+mads-core = { path = "../mads-core", version = "=0.6.0-beta.1" }
 
 [lints]
 workspace = true

@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
+license.workspace = true
+readme.workspace = true
+description = "HTTP, controller, Passport, and route procedural macros for MADS.rs"
 
 [features]
 passport = []
