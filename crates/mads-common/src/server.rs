@@ -908,6 +908,7 @@ mod tests {
             other => panic!("expected lifecycle failure, got {other:?}"),
         }
         assert_eq!(BINDS.load(Ordering::SeqCst), 0);
+        assert_eq!(*events.lock().unwrap(), ["router_preflight"]);
         let output = format!("{error}\n{error:?}");
         assert!(!output.contains(database_url));
     }
@@ -983,7 +984,7 @@ mod tests {
         }
         assert_eq!(STARTS.load(Ordering::SeqCst), 0);
         assert_eq!(BINDS.load(Ordering::SeqCst), 0);
-        assert!(events.lock().unwrap().is_empty());
+        assert_eq!(*events.lock().unwrap(), ["router_preflight"]);
         assert!(database.is_closed());
         let output = format!("{error}\n{error:?}");
         assert!(!output.contains(&database_url));
