@@ -164,3 +164,29 @@ should:
 Address review feedback with additional commits, push them to the same branch,
 and keep the discussion in the pull request. Maintainers will merge the pull
 request after review and required checks pass.
+
+## Publishing a beta
+
+The workspace uses one prerelease version for all crates. Internal path
+dependencies also carry an exact crates.io version so packaged crates resolve
+to the matching release outside this repository.
+
+To publish a beta:
+
+1. Set `[workspace.package].version` and every internal dependency version to
+   the same prerelease, for example `0.6.0-beta.2`.
+2. Update `Cargo.lock`, `README.md`, examples, CLI version assertions, and
+   `CHANGELOG.md`.
+3. Run the complete validation commands above.
+4. Promote the release commit to the protected `beta` branch.
+
+Every push to `beta` runs `.github/workflows/beta-publish.yml`. After its
+release gates pass, it publishes crates in dependency order. A crate/version
+already present on crates.io is skipped, making documentation-only pushes
+idempotent. The publish job requires a GitHub repository or `beta` environment
+secret named `CRATES_IO_TOKEN`. Store a crates.io API token in that secret;
+never commit or print the token.
+
+Publishing to crates.io is permanent. Increment the prerelease suffix before
+publishing changed package contents; an existing crate version cannot be
+overwritten.

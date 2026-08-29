@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
+license.workspace = true
+readme.workspace = true
+description = "Procedural macros for the framework-neutral MADS.rs core"
 
 [dependencies]
 proc-macro-crate.workspace = true

@@ -5,11 +5,14 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
+license.workspace = true
+readme.workspace = true
+description = "Framework-neutral dependency injection, configuration, and lifecycle core for MADS.rs"
 
 [dependencies]
 dotenvy.workspace = true
 inventory.workspace = true
-mads-core-macros = { path = "../mads-core-macros" }
+mads-core-macros = { path = "../mads-core-macros", version = "=0.6.0-beta.1" }
 tokio = { workspace = true, optional = true }
 toml.workspace = true
 toml_edit.workspace = true
