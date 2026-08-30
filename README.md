@@ -432,6 +432,52 @@ generated router; merge native routes before `configure_router` or
 with Tower's `ServiceExt::oneshot` for in-process route tests without binding a
 listener.
 
+## Exploratory native Axum comparison
+
+An external apples-to-apples harness compared release builds of native Axum
+0.8 and MADS 0.6.0-beta.1 with the same Tokio policy, payloads, JWT policy,
+PostgreSQL data and pool size. It used `oha 1.16.0`, one server at a time on
+localhost, five alternating repetitions, concurrency 1/32/128, and both
+saturation and latency-corrected fixed-rate runs at 1,000 requests/second.
+
+The table shows median saturation throughput at concurrency `1 / 32 / 128`.
+The delta is `(MADS - Axum) / Axum`; positive values favor MADS.
+
+| Endpoint | Axum req/s | MADS req/s | MADS delta |
+|---|---:|---:|---:|
+| Plain health | 27.7k / 237.6k / 270.0k | 30.0k / 205.4k / 289.6k | +8.29% / -13.52% / +7.25% |
+| JSON response | 28.0k / 232.8k / 278.2k | 28.2k / 209.9k / 253.8k | +0.65% / -9.84% / -8.78% |
+| Path and query | 28.1k / 198.7k / 280.2k | 24.8k / 227.5k / 260.4k | -11.65% / +14.47% / -7.06% |
+| JSON echo | 25.6k / 204.3k / 254.8k | 24.7k / 205.6k / 243.7k | -3.50% / +0.62% / -4.38% |
+| JWT and policy | 21.9k / 180.7k / 196.4k | 19.4k / 176.5k / 206.4k | -11.36% / -2.32% / +5.06% |
+| PostgreSQL lookup | 4.6k / 28.1k / 25.1k | 4.9k / 24.8k / 25.1k | +5.83% / -11.92% / +0.17% |
+
+At the fixed 1,000 requests/second cap, both applications sustained the target.
+Across all six endpoints and three concurrency levels, the observed MADS
+latency deltas ranged from -1.47% to +3.96% at p50, -3.45% to +4.65% at p95,
+and -3.99% to +5.87% at p99.
+
+Every saturation throughput min-max range overlapped across the five
+repetitions, and several scenarios changed which application led as concurrency
+changed. This run therefore does **not** establish a statistically reliable
+performance winner. It completed 125,852,803 HTTP responses with status 200;
+9,134 in-flight requests were aborted only when `oha` reached its duration
+cutoff.
+
+| Resource/startup measure | Axum | MADS |
+|---|---:|---:|
+| Median sampled server CPU | 139% | 139% |
+| Peak RSS | 28,556 KiB | 29,240 KiB |
+| Release binary | 2,323,520 bytes | 3,457,776 bytes |
+| Process start to first `/health`, median | 8 ms | 66 ms |
+| Process start to first `/health`, p95 | 65 ms | 67 ms |
+
+These are exploratory results: the complete 360-cell matrix used one-second
+warmups and five-second measured samples, which are noisier than the intended
+60-second runs. CPU values are local lifetime-average samples. Startup measured
+a native process becoming HTTP-ready across 30 starts, not an AWS Lambda cold
+start; Axum's 7-66 ms range also indicates scheduler and probe granularity.
+
 ## Current scope
 
 Version 0.6.0 provides root-module scope, Rust-namespace ownership, direct
