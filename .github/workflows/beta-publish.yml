@@ -127,15 +127,44 @@ jobs:
             mads-cli
           )
 
-          is_published() {
+          publication_status() {
             local package="$1"
-            cargo info --registry crates-io "${package}@${version}" >/dev/null 2>&1
+            local endpoint="https://crates.io/api/v1/crates/${package}/${version}"
+            local status
+
+            if ! status="$(
+              curl --silent --show-error --location \
+                --retry 3 --retry-all-errors \
+                --connect-timeout 10 --max-time 30 \
+                --output /dev/null --write-out '%{http_code}' \
+                --user-agent "mads-beta-publish/${version} (${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY})" \
+                "$endpoint"
+            )"; then
+              echo "Failed to check ${package} ${version} on crates.io." >&2
+              return 2
+            fi
+
+            case "$status" in
+              200) return 0 ;;
+              404) return 1 ;;
+              *)
+                echo "Unexpected crates.io status ${status} while checking ${package} ${version}." >&2
+                return 2
+                ;;
+            esac
           }
 
           for package in "${packages[@]}"; do
-            if is_published "$package"; then
+            echo "Checking ${package} ${version} on crates.io."
+            if publication_status "$package"; then
               echo "Skipping ${package} ${version}: already published."
               continue
+            else
+              status=$?
+            fi
+
+            if [[ "$status" -ne 1 ]]; then
+              exit "$status"
             fi
 
             echo "Publishing ${package} ${version}"
