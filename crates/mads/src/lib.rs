@@ -165,7 +165,6 @@
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
-#![doc = include_str!("../../../README.md")]
 
 /// Re-exports the framework-neutral MADS.rs core.
 pub use mads_core as core;
