@@ -1,6 +1,6 @@
 //! Process-level tests for the MADS CLI command surface.
 
-use std::fs;
+use std::{fs, path::Path};
 
 use assert_cmd::Command;
 use predicates::prelude::PredicateBooleanExt;
@@ -39,6 +39,26 @@ fn foundation_is_removed_with_usage_exit_two() {
         .assert()
         .code(2)
         .stderr(contains("unknown command: foundation"));
+}
+
+#[test]
+fn run_needs_no_selector_for_one_application_and_forwards_arguments() {
+    let fixture = fixture("single");
+
+    fixture_command("single")
+        .args(["run", "--", "--port", "4100", "two words"])
+        .assert()
+        .success()
+        .stdout(contains(format!("cwd={}", fixture.display())))
+        .stdout(contains("args=--port|4100|two words"));
+}
+
+#[test]
+fn run_preserves_the_application_exit_code() {
+    fixture_command("single")
+        .args(["run", "--", "--exit=23"])
+        .assert()
+        .code(23);
 }
 
 #[test]
@@ -195,6 +215,14 @@ fn database_command_never_prints_configured_password() {
 }
 
 fn database_command(root: &std::path::Path) -> Command {
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"database-cli-test\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("Cargo manifest should be written");
+    fs::create_dir_all(root.join("src")).expect("source directory should be created");
+    fs::write(root.join("src/lib.rs"), "").expect("library target should be written");
+
     let mut command = Command::cargo_bin("mads").expect("binary should build");
     command
         .current_dir(root)
@@ -206,4 +234,16 @@ fn database_command(root: &std::path::Path) -> Command {
 
 fn write_toml(root: &std::path::Path, contents: &str) {
     fs::write(root.join("mads.toml"), contents).expect("TOML should be written");
+}
+
+fn fixture_command(name: &str) -> Command {
+    let mut command = Command::cargo_bin("mads").expect("binary should build");
+    command.current_dir(fixture(name));
+    command
+}
+
+fn fixture(name: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/run")
+        .join(name)
 }

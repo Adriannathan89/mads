@@ -293,11 +293,7 @@ mod tests {
 
     fn foreign_server_artifact() -> String {
         let foreign = selected_fixture("web", "web");
-        artifact(
-            &foreign,
-            "server",
-            Some("/tmp/target/debug/foreign-server"),
-        )
+        artifact(&foreign, "server", Some("/tmp/target/debug/foreign-server"))
     }
 
     fn artifact(

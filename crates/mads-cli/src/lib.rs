@@ -13,74 +13,114 @@ mod command;
 mod database;
 #[allow(dead_code)]
 mod diagnostic;
+mod process;
 #[allow(dead_code)]
 mod project;
 
-use std::process::ExitCode;
+use std::{ffi::OsString, io, path::PathBuf, process::ExitCode};
 
-use command::{ApplicationCommand, Command, DatabaseCommand, DatabaseInvocation, ParseError};
+use command::{Command, DatabaseCommand, DatabaseInvocation, ParseError};
+use diagnostic::{CliError, MADS201, MADS202};
+use project::CargoProject;
 
 /// Runs the MADS.rs CLI using the process arguments.
 pub fn run() -> ExitCode {
-    let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    mads::core::runtime::block_on(run_with(
+        std::env::args_os().skip(1).collect(),
+        std::env::current_dir(),
+    ))
+}
 
-    match command::parse(&arguments) {
-        Ok(command) => run_command(command),
+async fn run_with(arguments: Vec<OsString>, current_dir: io::Result<PathBuf>) -> ExitCode {
+    let command = match command::parse(&arguments) {
+        Ok(command) => command,
         Err(error) => {
             print_parse_error(&error);
-            ExitCode::from(2)
+            return ExitCode::from(2);
+        }
+    };
+
+    match run_command(command, current_dir).await {
+        Ok(exit_code) => exit_code,
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::from(1)
         }
     }
 }
 
-fn run_command(command: Command) -> ExitCode {
+async fn run_command(
+    command: Command,
+    current_dir: io::Result<PathBuf>,
+) -> Result<ExitCode, CliError> {
     match command {
         Command::Help => {
             print_help(false);
-            ExitCode::SUCCESS
+            Ok(ExitCode::SUCCESS)
         }
         Command::Version => {
             println!("mads {}", env!("CARGO_PKG_VERSION"));
-            ExitCode::SUCCESS
+            Ok(ExitCode::SUCCESS)
         }
-        Command::Run(command) => run_application_command(command),
+        Command::Run(command) => {
+            let root = current_dir.map_err(current_directory_error)?;
+            let project = CargoProject::load(root)?;
+            let target = project.resolve_application(&command.target)?;
+            let built = cargo::build_application(&target).await?;
+            let status = process::run_application(&built, &command.arguments).await?;
+
+            match status.code() {
+                Some(code @ 0..=255) => Ok(ExitCode::from(code as u8)),
+                _ => Err(CliError::new(
+                    MADS202,
+                    "Application process failed",
+                    "the selected application terminated without an ordinary exit code",
+                )),
+            }
+        }
         Command::Database(DatabaseInvocation {
             command: DatabaseCommand::Help,
             ..
         }) => {
             print_database_help(false);
-            ExitCode::SUCCESS
+            Ok(ExitCode::SUCCESS)
         }
-        Command::Database(DatabaseInvocation { command, .. }) => run_database_command(command),
+        Command::Database(DatabaseInvocation { command, package }) => {
+            run_database_command(command, package.as_deref(), current_dir).await
+        }
     }
 }
 
-fn run_application_command(_command: ApplicationCommand) -> ExitCode {
-    eprintln!("error: application execution requires Cargo target resolution");
-    ExitCode::from(1)
-}
+async fn run_database_command(
+    command: DatabaseCommand,
+    package: Option<&str>,
+    current_dir: io::Result<PathBuf>,
+) -> Result<ExitCode, CliError> {
+    let root = current_dir.map_err(current_directory_error)?;
+    let project = CargoProject::load(root)?;
+    let package = project.resolve_package(package)?;
 
-fn run_database_command(command: DatabaseCommand) -> ExitCode {
-    let root = match std::env::current_dir() {
-        Ok(root) => root,
-        Err(_) => {
-            eprintln!("error: could not determine project root");
-            return ExitCode::from(1);
-        }
-    };
-
-    match mads::core::runtime::block_on(database::execute(command, &root)) {
+    match database::execute(command, package.package_root()).await {
         Ok(lines) => {
             for line in lines {
                 println!("{line}");
             }
-            ExitCode::SUCCESS
+            Ok(ExitCode::SUCCESS)
         }
         Err(error) => {
             eprintln!("error: {error}");
-            ExitCode::from(1)
+            Ok(ExitCode::from(1))
         }
     }
+}
+
+fn current_directory_error(error: io::Error) -> CliError {
+    CliError::new(
+        MADS201,
+        "Cargo project could not be loaded",
+        "could not determine the invocation directory",
+    )
+    .with_source(error)
 }
 
 fn print_parse_error(error: &ParseError) {
