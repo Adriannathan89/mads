@@ -1,0 +1,11 @@
+[package]
+name = "inspection-standard-fixture"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+default-run = "inspection-standard-fixture"
+
+[dependencies]
+mads = { path = "../../../../../mads", default-features = false, features = ["http", "runtime-tokio"] }
+
+[workspace]

@@ -217,7 +217,7 @@ fn ensure_child_is_running(child: &mut Child) -> Result<(), CliError> {
         inspection_error("could not observe the inspection application").with_source(error)
     })? {
         Some(status) => Err(inspection_error(format!(
-            "the application exited before completing private inspection ({status})"
+            "the application exited before completing private inspection ({status}); v0.7 inspection requires the standard Mads::run::<AppModule>() entry point"
         ))),
         None => Ok(()),
     }
