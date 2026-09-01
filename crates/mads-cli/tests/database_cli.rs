@@ -22,7 +22,24 @@ fn database_command_rejects_extra_arguments_with_exit_two() {
         .args(["db", "migrate", "extra"])
         .assert()
         .code(2)
-        .stderr(contains("unknown argument: extra"));
+        .stderr(contains("unknown argument: extra"))
+        .stderr(contains("Usage: mads db <command>"));
+}
+
+#[test]
+fn database_option_errors_print_database_help() {
+    for arguments in [
+        &["db", "status", "--bin", "server"][..],
+        &["db", "status", "--package", "api", "-p", "web"][..],
+        &["db", "status", "--package"][..],
+    ] {
+        Command::cargo_bin("mads")
+            .expect("binary should build")
+            .args(arguments)
+            .assert()
+            .code(2)
+            .stderr(contains("Usage: mads db <command>"));
+    }
 }
 
 #[test]

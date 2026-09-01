@@ -66,6 +66,8 @@ pub(crate) enum ParseError {
     MissingDatabaseCommand,
     /// A database subcommand was not recognized.
     UnknownDatabaseCommand(OsString),
+    /// A syntax error arose while parsing database command options.
+    DatabaseSyntax(Box<ParseError>),
 }
 
 /// Parses process arguments after the executable name.
@@ -131,9 +133,14 @@ fn parse_database_command(arguments: &[OsString]) -> Result<Command, ParseError>
     while let Some(argument) = options.get(index) {
         match argument.to_str() {
             Some("--package" | "-p") => {
-                parse_selector(options, &mut index, "--package", &mut package)?;
+                parse_selector(options, &mut index, "--package", &mut package)
+                    .map_err(|error| ParseError::DatabaseSyntax(Box::new(error)))?;
             }
-            _ => return Err(ParseError::UnknownArgument(argument.clone())),
+            _ => {
+                return Err(ParseError::DatabaseSyntax(Box::new(
+                    ParseError::UnknownArgument(argument.clone()),
+                )));
+            }
         }
         index += 1;
     }
@@ -167,7 +174,9 @@ impl ParseError {
     /// Returns whether the error arose while parsing a database command.
     pub(crate) fn is_database_command(&self) -> bool {
         match self {
-            Self::MissingDatabaseCommand | Self::UnknownDatabaseCommand(_) => true,
+            Self::MissingDatabaseCommand
+            | Self::UnknownDatabaseCommand(_)
+            | Self::DatabaseSyntax(_) => true,
             Self::UnknownCommand(_)
             | Self::UnknownArgument(_)
             | Self::MissingValue(_)
@@ -203,6 +212,7 @@ impl std::fmt::Display for ParseError {
                     command.to_string_lossy()
                 )
             }
+            Self::DatabaseSyntax(error) => error.fmt(formatter),
         }
     }
 }
@@ -279,7 +289,8 @@ mod tests {
         ));
         assert!(matches!(
             parse(&args(&["db", "status", "--package", "--bin"])),
-            Err(ParseError::MissingValue("--package"))
+            Err(ParseError::DatabaseSyntax(error))
+                if matches!(*error, ParseError::MissingValue("--package"))
         ));
 
         let mut arguments = args(&["run", "--package"]);
@@ -304,6 +315,25 @@ mod tests {
             parse(&args(&["db"])),
             Err(ParseError::MissingDatabaseCommand)
         ));
+    }
+
+    #[test]
+    fn every_database_option_error_keeps_database_help_scope() {
+        let cases = [
+            args(&["db", "status", "--bin", "server"]),
+            args(&["db", "status", "--package", "api", "-p", "web"]),
+            args(&["db", "status", "--package"]),
+        ];
+
+        for arguments in cases {
+            let error = parse(&arguments).unwrap_err();
+            assert!(error.is_database_command(), "error lost DB scope: {error}");
+        }
+
+        let mut non_unicode = args(&["db", "status", "--package"]);
+        non_unicode.push(non_unicode_argument());
+        let error = parse(&non_unicode).unwrap_err();
+        assert!(error.is_database_command(), "error lost DB scope: {error}");
     }
 
     #[test]

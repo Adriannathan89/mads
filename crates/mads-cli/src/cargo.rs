@@ -53,7 +53,7 @@ pub(crate) async fn build_application(
         )
     })?;
     let mut lines = BufReader::new(stdout).lines();
-    let mut messages = Vec::new();
+    let mut collector = ArtifactCollector::default();
 
     while let Some(line) = lines.next_line().await.map_err(|error| {
         CliError::new(
@@ -78,7 +78,7 @@ pub(crate) async fn build_application(
             eprint!("{rendered}");
         }
 
-        messages.push(Ok(message));
+        collector.process(target, message);
     }
 
     let status = child.wait().await.map_err(|error| {
@@ -97,7 +97,7 @@ pub(crate) async fn build_application(
         ));
     }
 
-    collect_artifact(target, messages)
+    collector.finish(target.clone())
 }
 
 impl BuiltApplication {
@@ -114,48 +114,61 @@ fn collect_artifact(
     target: &ResolvedApplication,
     messages: impl IntoIterator<Item = Result<Message, serde_json::Error>>,
 ) -> Result<BuiltApplication, CliError> {
-    let mut executable = None;
-    let mut successful = false;
+    let mut collector = ArtifactCollector::default();
 
     for message in messages {
-        match message.map_err(|error| {
+        let message = message.map_err(|error| {
             CliError::new(
                 MADS201,
                 "Cargo build failed",
                 "Cargo produced malformed build output",
             )
             .with_source(error)
-        })? {
+        })?;
+        collector.process(target, message);
+    }
+
+    collector.finish(target.clone())
+}
+
+#[derive(Default)]
+struct ArtifactCollector {
+    executable: Option<PathBuf>,
+    successful: bool,
+}
+
+impl ArtifactCollector {
+    fn process(&mut self, target: &ResolvedApplication, message: Message) {
+        match message {
             Message::CompilerArtifact(artifact) => {
                 if let Some(path) = matching_executable(target, &artifact) {
-                    executable = Some(path);
+                    self.executable = Some(path);
                 }
             }
-            Message::BuildFinished(finished) => successful = finished.success,
+            Message::BuildFinished(finished) => self.successful = finished.success,
             _ => {}
         }
     }
 
-    if !successful {
-        return Err(CliError::new(
-            MADS201,
-            "Cargo build failed",
-            "Cargo did not report a successful build",
-        ));
+    fn finish(self, target: ResolvedApplication) -> Result<BuiltApplication, CliError> {
+        if !self.successful {
+            return Err(CliError::new(
+                MADS201,
+                "Cargo build failed",
+                "Cargo did not report a successful build",
+            ));
+        }
+
+        let executable = self.executable.ok_or_else(|| {
+            CliError::new(
+                MADS201,
+                "Cargo build failed",
+                "Cargo did not produce the selected application binary",
+            )
+        })?;
+
+        Ok(BuiltApplication { target, executable })
     }
-
-    let executable = executable.ok_or_else(|| {
-        CliError::new(
-            MADS201,
-            "Cargo build failed",
-            "Cargo did not produce the selected application binary",
-        )
-    })?;
-
-    Ok(BuiltApplication {
-        target: target.clone(),
-        executable,
-    })
 }
 
 fn matching_executable(target: &ResolvedApplication, artifact: &Artifact) -> Option<PathBuf> {
@@ -183,7 +196,29 @@ mod tests {
         project::{CargoProject, ResolvedApplication},
     };
 
-    use super::collect_artifact;
+    use super::{ArtifactCollector, collect_artifact};
+
+    #[test]
+    fn artifact_collection_processes_messages_incrementally() {
+        let selected = selected_fixture("api", "server");
+        let mut collector = ArtifactCollector::default();
+
+        collector.process(
+            &selected,
+            serde_json::from_str(&worker_artifact(&selected)).unwrap(),
+        );
+        collector.process(
+            &selected,
+            serde_json::from_str(&server_artifact(&selected, "/tmp/target/debug/server")).unwrap(),
+        );
+        collector.process(
+            &selected,
+            serde_json::from_str(&build_finished(true)).unwrap(),
+        );
+
+        let artifact = collector.finish(selected).unwrap();
+        assert_eq!(artifact.executable(), Path::new("/tmp/target/debug/server"));
+    }
 
     #[test]
     fn selects_only_the_requested_executable_artifact() {
