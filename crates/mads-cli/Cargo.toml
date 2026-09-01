@@ -12,15 +12,16 @@ description = "Command-line tools for MADS.rs applications"
 [dependencies]
 cargo_metadata.workspace = true
 mads = { path = "../mads", version = "=0.7.0-beta.1" }
+mads-common = { path = "../mads-common", version = "=0.7.0-beta.1", default-features = false, features = ["http"] }
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tempfile = "3"
 tokio.workspace = true
 
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
-tempfile = "3"
 
 [[bin]]
 name = "mads"

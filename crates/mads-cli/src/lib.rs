@@ -13,6 +13,7 @@ mod command;
 mod database;
 #[allow(dead_code)]
 mod diagnostic;
+mod inspection;
 mod process;
 #[allow(dead_code)]
 mod project;
@@ -21,6 +22,7 @@ use std::{ffi::OsString, io, path::PathBuf, process::ExitCode};
 
 use command::{Command, DatabaseCommand, DatabaseInvocation, ParseError};
 use diagnostic::{CliError, MADS201, MADS202};
+use inspection::inspect_application;
 use project::CargoProject;
 
 /// Runs the MADS.rs CLI using the process arguments.
@@ -77,6 +79,14 @@ async fn run_command(
                     "the selected application terminated without an ordinary exit code",
                 )),
             }
+        }
+        Command::Inspect(command) => {
+            let root = current_dir.map_err(current_directory_error)?;
+            let project = CargoProject::load(root)?;
+            let target = project.resolve_application(&command.target)?;
+            let built = cargo::build_application(&target).await?;
+            let _report = inspect_application(&built, command.kind).await?;
+            Ok(ExitCode::SUCCESS)
         }
         Command::Database(DatabaseInvocation {
             command: DatabaseCommand::Help,

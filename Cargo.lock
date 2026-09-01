@@ -943,6 +943,7 @@ dependencies = [
  "assert_cmd",
  "cargo_metadata",
  "mads",
+ "mads-common",
  "predicates",
  "semver",
  "serde",

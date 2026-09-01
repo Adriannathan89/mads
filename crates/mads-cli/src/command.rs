@@ -2,6 +2,8 @@
 
 use std::ffi::{OsStr, OsString};
 
+use mads_common::__private::InspectionKind;
+
 /// Cargo package and binary selectors for an application command.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct TargetSelection {
@@ -14,6 +16,13 @@ pub(crate) struct TargetSelection {
 pub(crate) struct ApplicationCommand {
     pub(crate) target: TargetSelection,
     pub(crate) arguments: Vec<OsString>,
+}
+
+/// A command that requests a private application-inspection report.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct InspectionCommand {
+    pub(crate) kind: InspectionKind,
+    pub(crate) target: TargetSelection,
 }
 
 /// A database command and its selected Cargo package.
@@ -32,6 +41,8 @@ pub(crate) enum Command {
     Version,
     /// Builds and runs an application.
     Run(ApplicationCommand),
+    /// Inspects an application through its standard MADS entry point.
+    Inspect(InspectionCommand),
     /// Runs or describes a database command.
     Database(DatabaseInvocation),
 }
@@ -80,9 +91,35 @@ pub(crate) fn parse(arguments: &[OsString]) -> Result<Command, ParseError> {
         Some("--help" | "-h") if remaining.is_empty() => Ok(Command::Help),
         Some("--version" | "-V") if remaining.is_empty() => Ok(Command::Version),
         Some("run") => parse_application_command(remaining).map(Command::Run),
+        Some("routes") => parse_inspection_command(InspectionKind::Routes, remaining),
+        Some("graph") => parse_inspection_command(InspectionKind::Graph, remaining),
+        Some("doctor") => parse_inspection_command(InspectionKind::Doctor, remaining),
         Some("db") => parse_database_command(remaining),
         _ => Err(ParseError::UnknownCommand(command.clone())),
     }
+}
+
+fn parse_inspection_command(
+    kind: InspectionKind,
+    arguments: &[OsString],
+) -> Result<Command, ParseError> {
+    let mut target = TargetSelection::default();
+    let mut index = 0;
+
+    while let Some(argument) = arguments.get(index) {
+        match argument.to_str() {
+            Some("--package" | "-p") => {
+                parse_selector(arguments, &mut index, "--package", &mut target.package)?;
+            }
+            Some("--bin") => {
+                parse_selector(arguments, &mut index, "--bin", &mut target.binary)?;
+            }
+            _ => return Err(ParseError::UnknownArgument(argument.clone())),
+        }
+        index += 1;
+    }
+
+    Ok(Command::Inspect(InspectionCommand { kind, target }))
 }
 
 fn parse_application_command(arguments: &[OsString]) -> Result<ApplicationCommand, ParseError> {
@@ -221,8 +258,11 @@ impl std::fmt::Display for ParseError {
 mod tests {
     use std::ffi::OsString;
 
+    use mads_common::__private::InspectionKind;
+
     use super::{
-        ApplicationCommand, Command, DatabaseInvocation, ParseError, TargetSelection, parse,
+        ApplicationCommand, Command, DatabaseInvocation, InspectionCommand, ParseError,
+        TargetSelection, parse,
     };
 
     fn args(arguments: &[&str]) -> Vec<OsString> {
@@ -254,6 +294,21 @@ mod tests {
                 arguments: args(&["--port", "4100", "two words"]),
             })
         );
+    }
+
+    #[test]
+    fn parses_inspection_selectors_and_rejects_application_arguments() {
+        assert_eq!(
+            parse(&args(&["routes", "-p", "api", "--bin", "server"])).unwrap(),
+            Command::Inspect(InspectionCommand {
+                kind: InspectionKind::Routes,
+                target: TargetSelection {
+                    package: Some("api".into()),
+                    binary: Some("server".into()),
+                },
+            })
+        );
+        assert!(parse(&args(&["doctor", "--", "argument"])).is_err());
     }
 
     #[test]
