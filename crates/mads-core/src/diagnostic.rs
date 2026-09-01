@@ -127,6 +127,31 @@ impl Diagnostic {
     pub const fn code(&self) -> DiagnosticCode {
         self.code
     }
+
+    /// Returns this diagnostic's short title.
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// Returns this diagnostic's detailed message.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Returns the subject associated with this diagnostic, when present.
+    pub fn subject(&self) -> Option<&str> {
+        self.subject.as_deref()
+    }
+
+    /// Returns the source location associated with this diagnostic, when present.
+    pub const fn location(&self) -> Option<SourceLocation> {
+        self.location
+    }
+
+    /// Returns remediation suggestions in insertion order.
+    pub fn suggestions(&self) -> &[String] {
+        &self.suggestions
+    }
 }
 
 impl fmt::Display for Diagnostic {
