@@ -16,6 +16,16 @@ static TEST_LOCK: Mutex<()> = Mutex::new(());
 const OVERRIDE_URL: &str = "postgres://user:cli-secret@127.0.0.1:1/mads";
 
 #[test]
+fn database_command_rejects_extra_arguments_with_exit_two() {
+    Command::cargo_bin("mads")
+        .expect("binary should build")
+        .args(["db", "migrate", "extra"])
+        .assert()
+        .code(2)
+        .stderr(contains("unknown argument: extra"));
+}
+
+#[test]
 #[ignore = "requires PostgreSQL through MADS_TEST_DATABASE_URL"]
 fn database_migration_commands_are_real_and_redact_overrides() {
     let _lock = TEST_LOCK

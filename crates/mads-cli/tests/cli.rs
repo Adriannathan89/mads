@@ -1,4 +1,4 @@
-//! Process-level tests for the MADS CLI foundation.
+//! Process-level tests for the MADS CLI command surface.
 
 use std::fs;
 
@@ -18,26 +18,27 @@ fn version_reports_the_workspace_version() {
 }
 
 #[test]
-fn foundation_check_reports_available_boundaries() {
-    Command::cargo_bin("mads")
-        .expect("binary should build")
-        .arg("foundation")
-        .assert()
-        .success()
-        .stdout(contains("core: available"))
-        .stdout(contains("common contracts: available"))
-        .stdout(contains("common HTTP runtime: available"))
-        .stdout(contains("extra: reserved"));
-}
-
-#[test]
 fn help_is_printed_when_no_command_is_given() {
     Command::cargo_bin("mads")
         .expect("binary should build")
         .assert()
         .success()
         .stdout(contains("Usage: mads <command>"))
-        .stdout(contains("foundation"));
+        .stdout(contains("run"))
+        .stdout(contains("dev"))
+        .stdout(contains("routes"))
+        .stdout(contains("graph"))
+        .stdout(contains("doctor"));
+}
+
+#[test]
+fn foundation_is_removed_with_usage_exit_two() {
+    Command::cargo_bin("mads")
+        .expect("binary should build")
+        .arg("foundation")
+        .assert()
+        .code(2)
+        .stderr(contains("unknown command: foundation"));
 }
 
 #[test]
@@ -47,7 +48,7 @@ fn unknown_arguments_are_rejected_with_help() {
         .args(["unknown", "extra"])
         .assert()
         .code(2)
-        .stderr(contains("error: unknown argument(s): unknown extra"))
+        .stderr(contains("error: unknown command: unknown"))
         .stderr(contains("Usage: mads <command>"));
 }
 
@@ -58,13 +59,15 @@ fn help_lists_database_commands() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(contains("db          Manage Diesel migrations"));
+        .stdout(contains("db        Manage PostgreSQL migrations"));
 
     Command::cargo_bin("mads")
         .expect("binary should build")
         .args(["db", "--help"])
         .assert()
         .success()
+        .stdout(contains("generate"))
+        .stdout(contains("no name"))
         .stdout(contains("migrate"))
         .stdout(contains("rollback"))
         .stdout(contains("status"));
@@ -173,17 +176,6 @@ fn process_database_url_overrides_dotenv_before_migrations_validation() {
         .code(1)
         .stderr(contains(migrations_path.to_string_lossy().into_owned()))
         .stderr(contains("process-secret").not());
-}
-
-#[test]
-fn database_command_rejects_extra_arguments_with_exit_two() {
-    Command::cargo_bin("mads")
-        .expect("binary should build")
-        .args(["db", "migrate", "extra"])
-        .assert()
-        .code(2)
-        .stderr(contains("unknown argument(s): db migrate extra"))
-        .stderr(contains("Usage: mads db <command>"));
 }
 
 #[test]
