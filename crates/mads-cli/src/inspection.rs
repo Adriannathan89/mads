@@ -179,7 +179,7 @@ async fn supervise(
         ensure_child_is_running(child)?;
         if Instant::now() >= handshake_deadline {
             return Err(inspection_error(
-                "the application did not acknowledge the inspection request in time",
+                "the application did not acknowledge the inspection request in time; v0.7 inspection requires the standard Mads::run::<AppModule>() entry point",
             ));
         }
         tokio::time::sleep(timeouts.poll).await;
