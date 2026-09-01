@@ -21,6 +21,8 @@ mod extract;
 #[cfg(feature = "http")]
 mod http_scope;
 #[cfg(feature = "http")]
+mod inspection;
+#[cfg(feature = "http")]
 mod response;
 #[cfg(feature = "http")]
 mod route;
@@ -214,4 +216,13 @@ pub mod __private {
         crate::passport::PassportStrategyCatalog::preflight_scoped(module_graph, scope.guards())
     }
     pub use crate::route::{RouterBuildContext, ValidatedRouteIter, validate_descriptors};
+
+    #[doc(hidden)]
+    pub use crate::inspection::{
+        AutoConfigurationReport, ConfigurationEvidenceReport, DependencyReport, DiagnosticReport,
+        DoctorCheck, DoctorStatus, GraphReport, INSPECTION_ACK_ENV, INSPECTION_KIND_ENV,
+        INSPECTION_PROTOCOL_VERSION, INSPECTION_RESPONSE_ENV, INSPECTION_TOKEN_ENV,
+        INSPECTION_VERSION_ENV, InspectionEnvelope, InspectionKind, InspectionReport,
+        ModuleImportReport, ModuleReport, ProviderReport, RouteReport, SourceReport,
+    };
 }
