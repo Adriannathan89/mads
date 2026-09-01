@@ -112,6 +112,9 @@ pub use response::{Created, HttpError, HttpResult, NoContent};
 #[cfg(feature = "http")]
 pub use router::{build_router, configure_router};
 
+/// Invalid or failed private application-inspection request.
+#[cfg(feature = "http")]
+pub use inspection::MADS032;
 /// Runs validated applications and raw composed routers on the Axum HTTP runtime.
 #[cfg(feature = "http")]
 pub use server::{HttpRuntimeError, MADS031, MadsRunExt, serve, serve_router};
@@ -222,7 +225,7 @@ pub mod __private {
         AutoConfigurationReport, ConfigurationEvidenceReport, DependencyReport, DiagnosticReport,
         DoctorCheck, DoctorStatus, GraphReport, INSPECTION_ACK_ENV, INSPECTION_KIND_ENV,
         INSPECTION_PROTOCOL_VERSION, INSPECTION_RESPONSE_ENV, INSPECTION_TOKEN_ENV,
-        INSPECTION_VERSION_ENV, InspectionEnvelope, InspectionKind, InspectionReport,
+        INSPECTION_VERSION_ENV, InspectionEnvelope, InspectionKind, InspectionReport, MADS032,
         ModuleImportReport, ModuleReport, ProviderReport, RouteReport, SourceReport,
     };
 }

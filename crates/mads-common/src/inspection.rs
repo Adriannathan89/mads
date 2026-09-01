@@ -1,11 +1,13 @@
 //! Private, owned application inspection reports.
-#![allow(dead_code)] // Task 3 invokes the report assembler from the standard-run interception.
-
-use std::path::Path;
+use std::ffi::{OsStr, OsString};
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use mads_core::{
-    AutoConfigurationStatus, Config, Diagnostic, GraphInspectionSnapshot, Mads, Module,
-    ModuleGraph, ProviderOrigin, ProviderState, ProviderVisibility,
+    AutoConfigurationStatus, Config, Diagnostic, DiagnosticCode, Error, GraphInspectionSnapshot,
+    Mads, Module, ModuleGraph, ProviderOrigin, ProviderState, ProviderVisibility,
 };
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +37,11 @@ pub const INSPECTION_ACK_ENV: &str = "MADS_INTERNAL_INSPECTION_ACK";
 #[doc(hidden)]
 pub const INSPECTION_RESPONSE_ENV: &str = "MADS_INTERNAL_INSPECTION_RESPONSE";
 
+/// Invalid or failed private application-inspection request.
+pub const MADS032: DiagnosticCode = DiagnosticCode::new("MADS032");
+
+static TEMPORARY_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
 /// A requested private inspection report kind.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -46,6 +53,242 @@ pub enum InspectionKind {
     Graph,
     /// Grouped readiness checks.
     Doctor,
+}
+
+#[derive(Debug)]
+struct InspectionRequest {
+    kind: InspectionKind,
+    token: String,
+    ack_path: PathBuf,
+    response_path: PathBuf,
+}
+
+impl InspectionRequest {
+    fn from_environment() -> mads_core::Result<Option<Self>> {
+        Self::from_values(
+            [
+                (
+                    INSPECTION_VERSION_ENV,
+                    std::env::var_os(INSPECTION_VERSION_ENV),
+                ),
+                (INSPECTION_KIND_ENV, std::env::var_os(INSPECTION_KIND_ENV)),
+                (INSPECTION_TOKEN_ENV, std::env::var_os(INSPECTION_TOKEN_ENV)),
+                (INSPECTION_ACK_ENV, std::env::var_os(INSPECTION_ACK_ENV)),
+                (
+                    INSPECTION_RESPONSE_ENV,
+                    std::env::var_os(INSPECTION_RESPONSE_ENV),
+                ),
+            ]
+            .into_iter()
+            .filter_map(|(key, value)| value.map(|value| (key, value))),
+        )
+    }
+
+    fn from_values<I, K>(values: I) -> mads_core::Result<Option<Self>>
+    where
+        I: IntoIterator<Item = (K, OsString)>,
+        K: AsRef<OsStr>,
+    {
+        let mut version = None;
+        let mut kind = None;
+        let mut token = None;
+        let mut ack_path = None;
+        let mut response_path = None;
+        let mut duplicate = false;
+
+        for (key, value) in values {
+            let slot = if key.as_ref() == OsStr::new(INSPECTION_VERSION_ENV) {
+                Some(&mut version)
+            } else if key.as_ref() == OsStr::new(INSPECTION_KIND_ENV) {
+                Some(&mut kind)
+            } else if key.as_ref() == OsStr::new(INSPECTION_TOKEN_ENV) {
+                Some(&mut token)
+            } else if key.as_ref() == OsStr::new(INSPECTION_ACK_ENV) {
+                Some(&mut ack_path)
+            } else if key.as_ref() == OsStr::new(INSPECTION_RESPONSE_ENV) {
+                Some(&mut response_path)
+            } else {
+                None
+            };
+            if let Some(slot) = slot {
+                duplicate |= slot.replace(value).is_some();
+            }
+        }
+
+        let present = [
+            version.is_some(),
+            kind.is_some(),
+            token.is_some(),
+            ack_path.is_some(),
+            response_path.is_some(),
+        ];
+        if !present.into_iter().any(|value| value) {
+            return Ok(None);
+        }
+        if duplicate || present.into_iter().any(|value| !value) {
+            return Err(inspection_error(
+                "the private inspection request is incomplete or duplicated",
+            ));
+        }
+
+        let version = unicode_field(version.unwrap(), "protocol version")?;
+        if version != INSPECTION_PROTOCOL_VERSION.to_string() {
+            return Err(inspection_error(
+                "the private inspection protocol version is unsupported",
+            ));
+        }
+        let kind = match unicode_field(kind.unwrap(), "inspection kind")?.as_str() {
+            "routes" => InspectionKind::Routes,
+            "graph" => InspectionKind::Graph,
+            "doctor" => InspectionKind::Doctor,
+            _ => return Err(inspection_error("the private inspection kind is invalid")),
+        };
+        let token = unicode_field(token.unwrap(), "inspection token")?;
+        if token.is_empty() {
+            return Err(inspection_error(
+                "the private inspection token must not be empty",
+            ));
+        }
+        let ack_path = PathBuf::from(ack_path.unwrap());
+        let response_path = PathBuf::from(response_path.unwrap());
+        if ack_path.as_os_str().is_empty() || response_path.as_os_str().is_empty() {
+            return Err(inspection_error(
+                "private inspection output paths must not be empty",
+            ));
+        }
+        if ack_path == response_path {
+            return Err(inspection_error(
+                "private inspection acknowledgement and response paths must differ",
+            ));
+        }
+
+        Ok(Some(Self {
+            kind,
+            token,
+            ack_path,
+            response_path,
+        }))
+    }
+
+    const fn kind(&self) -> InspectionKind {
+        self.kind
+    }
+
+    fn token(&self) -> &str {
+        &self.token
+    }
+
+    fn ack_path(&self) -> &Path {
+        &self.ack_path
+    }
+
+    fn response_path(&self) -> &Path {
+        &self.response_path
+    }
+}
+
+fn unicode_field(value: OsString, field: &str) -> mads_core::Result<String> {
+    value
+        .into_string()
+        .map_err(|_| inspection_error(format!("the private {field} must be valid Unicode")))
+}
+
+fn inspection_error(message: impl Into<String>) -> Error {
+    Error::new(
+        Diagnostic::new(MADS032, "application inspection failed", message)
+            .with_subject("private inspection request")
+            .with_suggestion("run the inspection through a matching MADS CLI version"),
+    )
+}
+
+fn publish_atomic(path: &Path, bytes: &[u8]) -> mads_core::Result<()> {
+    if path
+        .try_exists()
+        .map_err(|_| inspection_error("the private inspection output path is not accessible"))?
+    {
+        return Err(inspection_error(
+            "the private inspection output path already exists",
+        ));
+    }
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .unwrap_or_else(|| OsStr::new("inspection-output"));
+    let (temporary_path, mut temporary_file) = loop {
+        let sequence = TEMPORARY_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let mut temporary_name = file_name.to_os_string();
+        temporary_name.push(format!(".mads-{}-{sequence}.tmp", std::process::id()));
+        let temporary_path = parent.join(temporary_name);
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)
+        {
+            Ok(file) => break (temporary_path, file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => {
+                return Err(inspection_error(
+                    "the private inspection temporary output could not be created",
+                ));
+            }
+        }
+    };
+
+    let publication = (|| {
+        temporary_file
+            .write_all(bytes)
+            .map_err(|_| inspection_error("the private inspection output could not be written"))?;
+        temporary_file
+            .sync_all()
+            .map_err(|_| inspection_error("the private inspection output could not be synced"))?;
+        drop(temporary_file);
+        std::fs::hard_link(&temporary_path, path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                inspection_error("the private inspection output path already exists")
+            } else {
+                inspection_error("the private inspection output could not be published")
+            }
+        })?;
+        Ok(())
+    })();
+    let _ = std::fs::remove_file(&temporary_path);
+    publication
+}
+
+fn run_inspection<M: Module>(root: &Path, request: InspectionRequest) -> mads_core::Result<()> {
+    #[derive(Serialize)]
+    struct Acknowledgement<'a> {
+        protocol_version: u32,
+        token: &'a str,
+    }
+
+    let acknowledgement = serde_json::to_vec(&Acknowledgement {
+        protocol_version: INSPECTION_PROTOCOL_VERSION,
+        token: request.token(),
+    })
+    .map_err(|_| inspection_error("the private inspection acknowledgement could not be encoded"))?;
+    publish_atomic(request.ack_path(), &acknowledgement)?;
+
+    let report = inspect_standard_application::<M>(root, request.kind());
+    let response_path = request.response_path().to_owned();
+    let envelope = InspectionEnvelope::new(request.token, report);
+    let response = serde_json::to_vec(&envelope)
+        .map_err(|_| inspection_error("the private inspection response could not be encoded"))?;
+    publish_atomic(&response_path, &response)
+}
+
+pub(crate) fn try_run_inspection<M: Module>(
+    root: &Path,
+) -> Option<Result<(), crate::server::HttpRuntimeError>> {
+    let request = match InspectionRequest::from_environment() {
+        Ok(None) => return None,
+        Ok(Some(request)) => request,
+        Err(error) => {
+            return Some(Err(crate::server::HttpRuntimeError::Bootstrap(error)));
+        }
+    };
+    Some(run_inspection::<M>(root, request).map_err(crate::server::HttpRuntimeError::Bootstrap))
 }
 
 /// An owned source location carried by the private inspection transport.
@@ -691,6 +934,7 @@ fn auto_configuration_status(status: AutoConfigurationStatus) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
@@ -757,6 +1001,171 @@ mod tests {
         assert_eq!(first, second);
         assert!(!json.contains("inspection-secret"));
         assert!(!debug.contains("inspection-secret"));
+    }
+
+    #[test]
+    fn request_absence_does_not_enable_inspection() {
+        let request = InspectionRequest::from_values(Vec::<(&str, OsString)>::new()).unwrap();
+        assert!(request.is_none());
+    }
+
+    #[test]
+    fn request_complete_values_preserve_unicode_fields_and_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let ack = directory.path().join("ack.json");
+        let response = directory.path().join("response.json");
+        let request = InspectionRequest::from_values([
+            (INSPECTION_VERSION_ENV, OsString::from("1")),
+            (INSPECTION_KIND_ENV, OsString::from("doctor")),
+            (INSPECTION_TOKEN_ENV, OsString::from("tökén-1")),
+            (INSPECTION_ACK_ENV, ack.clone().into_os_string()),
+            (INSPECTION_RESPONSE_ENV, response.clone().into_os_string()),
+        ])
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(request.kind(), InspectionKind::Doctor);
+        assert_eq!(request.token(), "tökén-1");
+        assert_eq!(request.ack_path(), ack);
+        assert_eq!(request.response_path(), response);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn request_paths_may_be_non_unicode() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let ack = std::path::PathBuf::from(OsString::from_vec(vec![b'a', 0x80]));
+        let response = std::path::PathBuf::from(OsString::from_vec(vec![b'r', 0x81]));
+        let request = InspectionRequest::from_values([
+            (INSPECTION_VERSION_ENV, OsString::from("1")),
+            (INSPECTION_KIND_ENV, OsString::from("routes")),
+            (INSPECTION_TOKEN_ENV, OsString::from("token-1")),
+            (INSPECTION_ACK_ENV, ack.clone().into_os_string()),
+            (INSPECTION_RESPONSE_ENV, response.clone().into_os_string()),
+        ])
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(request.ack_path(), ack);
+        assert_eq!(request.response_path(), response);
+    }
+
+    #[test]
+    fn request_partial_values_are_rejected() {
+        let fields = [
+            (INSPECTION_VERSION_ENV, OsString::from("1")),
+            (INSPECTION_KIND_ENV, OsString::from("graph")),
+            (INSPECTION_TOKEN_ENV, OsString::from("token-1")),
+            (INSPECTION_ACK_ENV, OsString::from("ack.json")),
+            (INSPECTION_RESPONSE_ENV, OsString::from("response.json")),
+        ];
+
+        for missing in 0..fields.len() {
+            let values = fields
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index != missing)
+                .map(|(_, (key, value))| (*key, value.clone()));
+            let error = InspectionRequest::from_values(values).unwrap_err();
+            assert_eq!(error.code(), MADS032);
+        }
+    }
+
+    #[test]
+    fn request_invalid_values_are_rejected() {
+        let cases = [
+            ("2", "doctor", "token-1", "ack.json", "response.json"),
+            ("1", "unknown", "token-1", "ack.json", "response.json"),
+            ("1", "doctor", "", "ack.json", "response.json"),
+            ("1", "doctor", "token-1", "", "response.json"),
+            ("1", "doctor", "token-1", "ack.json", ""),
+            ("1", "doctor", "token-1", "same.json", "same.json"),
+        ];
+
+        for (version, kind, token, ack, response) in cases {
+            let error = InspectionRequest::from_values([
+                (INSPECTION_VERSION_ENV, OsString::from(version)),
+                (INSPECTION_KIND_ENV, OsString::from(kind)),
+                (INSPECTION_TOKEN_ENV, OsString::from(token)),
+                (INSPECTION_ACK_ENV, OsString::from(ack)),
+                (INSPECTION_RESPONSE_ENV, OsString::from(response)),
+            ])
+            .unwrap_err();
+            assert_eq!(error.code(), MADS032);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn request_non_unicode_text_values_are_rejected() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let error = InspectionRequest::from_values([
+            (INSPECTION_VERSION_ENV, OsString::from("1")),
+            (INSPECTION_KIND_ENV, OsString::from("doctor")),
+            (INSPECTION_TOKEN_ENV, OsString::from_vec(vec![0x80])),
+            (INSPECTION_ACK_ENV, OsString::from("ack.json")),
+            (INSPECTION_RESPONSE_ENV, OsString::from("response.json")),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.code(), MADS032);
+    }
+
+    #[test]
+    fn atomic_publication_creates_only_the_complete_final_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("response.json");
+
+        publish_atomic(&output, br#"{"complete":true}"#).unwrap();
+
+        assert_eq!(std::fs::read(&output).unwrap(), br#"{"complete":true}"#);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn atomic_publication_refuses_to_overwrite_a_final_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("response.json");
+        std::fs::write(&output, b"original").unwrap();
+
+        let error = publish_atomic(&output, b"replacement").unwrap_err();
+
+        assert_eq!(error.code(), MADS032);
+        assert_eq!(std::fs::read(&output).unwrap(), b"original");
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn inspection_run_publishes_token_bound_ack_and_response_without_construction() {
+        CONSTRUCTIONS.store(0, Ordering::SeqCst);
+        let root = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        let ack = output.path().join("ack.json");
+        let response = output.path().join("response.json");
+        let request = InspectionRequest::from_values([
+            (INSPECTION_VERSION_ENV, OsString::from("1")),
+            (INSPECTION_KIND_ENV, OsString::from("doctor")),
+            (INSPECTION_TOKEN_ENV, OsString::from("token-1")),
+            (INSPECTION_ACK_ENV, ack.clone().into_os_string()),
+            (INSPECTION_RESPONSE_ENV, response.clone().into_os_string()),
+        ])
+        .unwrap()
+        .unwrap();
+
+        run_inspection::<AppModule>(root.path(), request).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(ack).unwrap(),
+            r#"{"protocol_version":1,"token":"token-1"}"#
+        );
+        let envelope: InspectionEnvelope =
+            serde_json::from_slice(&std::fs::read(response).unwrap()).unwrap();
+        assert_eq!(envelope.token(), "token-1");
+        assert_eq!(envelope.protocol_version(), INSPECTION_PROTOCOL_VERSION);
+        assert_eq!(CONSTRUCTIONS.load(Ordering::SeqCst), 0);
+        assert_eq!(std::fs::read_dir(output.path()).unwrap().count(), 2);
     }
 
     #[cfg(not(feature = "jwt"))]
