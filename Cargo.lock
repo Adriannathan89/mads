@@ -965,6 +965,7 @@ dependencies = [
  "jsonwebtoken",
  "mads-common-macros",
  "mads-core",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

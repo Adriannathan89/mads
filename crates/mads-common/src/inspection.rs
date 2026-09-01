@@ -201,6 +201,34 @@ fn inspection_error(message: impl Into<String>) -> Error {
     )
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
+    rustix::fs::renameat_with(
+        rustix::fs::CWD,
+        from,
+        rustix::fs::CWD,
+        to,
+        rustix::fs::RenameFlags::NOREPLACE,
+    )
+    .map_err(Into::into)
+}
+
+#[cfg(target_os = "windows")]
+fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::rename(from, to)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
+    if to.try_exists()? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "destination already exists",
+        ));
+    }
+    std::fs::rename(from, to)
+}
+
 fn publish_atomic(path: &Path, bytes: &[u8]) -> mads_core::Result<()> {
     if path
         .try_exists()
@@ -243,7 +271,7 @@ fn publish_atomic(path: &Path, bytes: &[u8]) -> mads_core::Result<()> {
             .sync_all()
             .map_err(|_| inspection_error("the private inspection output could not be synced"))?;
         drop(temporary_file);
-        std::fs::hard_link(&temporary_path, path).map_err(|error| {
+        rename_noreplace(&temporary_path, path).map_err(|error| {
             if error.kind() == std::io::ErrorKind::AlreadyExists {
                 inspection_error("the private inspection output path already exists")
             } else {
@@ -1135,6 +1163,21 @@ mod tests {
         assert_eq!(error.code(), MADS032);
         assert_eq!(std::fs::read(&output).unwrap(), b"original");
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn atomic_rename_refuses_a_destination_created_after_preflight() {
+        let directory = tempfile::tempdir().unwrap();
+        let temporary = directory.path().join("response.json.tmp");
+        let output = directory.path().join("response.json");
+        std::fs::write(&temporary, b"replacement").unwrap();
+        std::fs::write(&output, b"original").unwrap();
+
+        let error = rename_noreplace(&temporary, &output).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&output).unwrap(), b"original");
+        assert_eq!(std::fs::read(&temporary).unwrap(), b"replacement");
     }
 
     #[test]
