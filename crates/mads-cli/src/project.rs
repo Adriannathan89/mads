@@ -84,6 +84,38 @@ impl CargoProject {
         })
     }
 
+    pub(crate) fn local_watch_roots(&self, application: &ResolvedApplication) -> Vec<PathBuf> {
+        let reachable = self.reachable_package_ids(application.package().package_id());
+        let mut roots = self
+            .metadata
+            .packages
+            .iter()
+            .filter(|package| package.source.is_none() && reachable.contains(&package.id))
+            .map(package_root)
+            .collect::<Vec<_>>();
+        let selected_root = canonical_path(application.package().package_root());
+
+        if !roots.contains(&selected_root) {
+            roots.push(selected_root);
+        }
+        roots.sort();
+        roots.dedup();
+        roots
+    }
+
+    pub(crate) fn local_package_roots(&self) -> Vec<PathBuf> {
+        let mut roots = self
+            .metadata
+            .packages
+            .iter()
+            .filter(|package| package.source.is_none())
+            .map(package_root)
+            .collect::<Vec<_>>();
+        roots.sort();
+        roots.dedup();
+        roots
+    }
+
     fn resolve_default_package(&self) -> Result<&Package, CliError> {
         let candidates = self.metadata.workspace_default_packages();
         match candidates.as_slice() {
@@ -147,6 +179,30 @@ impl CargoProject {
                 .find(|candidate| candidate.id == dependency.pkg && candidate.name == "mads")
                 .map(|candidate| candidate.version.clone())
         })
+    }
+
+    fn reachable_package_ids(
+        &self,
+        selected: &cargo_metadata::PackageId,
+    ) -> Vec<cargo_metadata::PackageId> {
+        let mut reachable = vec![selected.clone()];
+        let Some(resolve) = &self.metadata.resolve else {
+            return reachable;
+        };
+
+        let mut index = 0;
+        while index < reachable.len() {
+            let package_id = reachable[index].clone();
+            if let Some(node) = resolve.nodes.iter().find(|node| node.id == package_id) {
+                for dependency in &node.deps {
+                    if !reachable.contains(&dependency.pkg) {
+                        reachable.push(dependency.pkg.clone());
+                    }
+                }
+            }
+            index += 1;
+        }
+        reachable
     }
 }
 
@@ -286,6 +342,18 @@ fn sorted_package_names(packages: Vec<&Package>) -> Vec<String> {
     names
 }
 
+fn package_root(package: &Package) -> PathBuf {
+    let manifest = package.manifest_path.as_std_path();
+    let root = manifest
+        .parent()
+        .expect("Cargo manifests always have a parent directory");
+    canonical_path(root)
+}
+
+fn canonical_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,9 +395,61 @@ mod tests {
         assert!(error.to_string().contains("--package"));
     }
 
+    #[test]
+    fn local_watch_roots_include_reachable_path_dependencies_only() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path();
+        let app = root.join("app");
+        let dependency = root.join("dependency");
+        let unrelated = root.join("unrelated");
+
+        for package in [&app, &dependency, &unrelated] {
+            std::fs::create_dir_all(package.join("src")).unwrap();
+            std::fs::write(package.join("src/lib.rs"), "").unwrap();
+        }
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"app\", \"unrelated\"]\nresolver = \"3\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            app.join("Cargo.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\ndependency = { path = \"../dependency\" }\n",
+        )
+        .unwrap();
+        std::fs::write(app.join("src/main.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(
+            dependency.join("Cargo.toml"),
+            "[package]\nname = \"dependency\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            unrelated.join("Cargo.toml"),
+            "[package]\nname = \"unrelated\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+
+        let project = CargoProject::load(root).unwrap();
+        let application = project
+            .resolve_application(&TargetSelection {
+                package: Some("app".into()),
+                binary: None,
+            })
+            .unwrap();
+
+        assert_eq!(
+            project.local_watch_roots(&application),
+            vec![canonical(&app), canonical(&dependency)],
+        );
+    }
+
     fn fixture(name: &str) -> std::path::PathBuf {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/run")
             .join(name)
+    }
+
+    fn canonical(path: &std::path::Path) -> std::path::PathBuf {
+        path.canonicalize().unwrap()
     }
 }

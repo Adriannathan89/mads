@@ -3,6 +3,7 @@ use std::{error::Error, fmt};
 pub(crate) const MADS200: &str = "MADS200";
 pub(crate) const MADS201: &str = "MADS201";
 pub(crate) const MADS202: &str = "MADS202";
+pub(crate) const MADS220: &str = "MADS220";
 
 pub(crate) struct CliError {
     code: &'static str,

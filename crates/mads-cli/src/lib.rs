@@ -18,6 +18,8 @@ mod process;
 #[allow(dead_code)]
 mod project;
 mod render;
+#[allow(dead_code)]
+mod watch;
 
 use std::{ffi::OsString, io, path::PathBuf, process::ExitCode};
 
