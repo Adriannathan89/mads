@@ -9,6 +9,10 @@
 
 mod command;
 mod database;
+#[allow(dead_code)]
+mod diagnostic;
+#[allow(dead_code)]
+mod project;
 
 use std::process::ExitCode;
 
