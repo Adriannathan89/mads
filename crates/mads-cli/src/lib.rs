@@ -17,8 +17,11 @@ mod inspection;
 mod process;
 #[allow(dead_code)]
 mod project;
+mod render;
 
 use std::{ffi::OsString, io, path::PathBuf, process::ExitCode};
+
+use mads_common::__private::{InspectionKind, InspectionReport};
 
 use command::{Command, DatabaseCommand, DatabaseInvocation, ParseError};
 use diagnostic::{CliError, MADS201, MADS202};
@@ -85,8 +88,13 @@ async fn run_command(
             let project = CargoProject::load(root)?;
             let target = project.resolve_application(&command.target)?;
             let built = cargo::build_application(&target).await?;
-            let _report = inspect_application(&built, command.kind).await?;
-            Ok(ExitCode::SUCCESS)
+            let report = inspect_application(&built, command.kind).await?;
+            let (body, diagnostics, exit_code) = render_inspection_report(&report);
+            println!("{body}");
+            if !diagnostics.is_empty() {
+                eprintln!("{diagnostics}");
+            }
+            Ok(exit_code)
         }
         Command::Database(DatabaseInvocation {
             command: DatabaseCommand::Help,
@@ -99,6 +107,21 @@ async fn run_command(
             run_database_command(command, package.as_deref(), current_dir).await
         }
     }
+}
+
+fn render_inspection_report(report: &InspectionReport) -> (String, String, ExitCode) {
+    let body = match report.kind {
+        InspectionKind::Routes => render::render_routes(report),
+        InspectionKind::Graph => render::render_graph(report),
+        InspectionKind::Doctor => render::render_doctor(report),
+    };
+    let diagnostics = render::render_diagnostics(report);
+    let exit_code = if report.failed {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    };
+    (body, diagnostics, exit_code)
 }
 
 async fn run_database_command(
@@ -159,5 +182,55 @@ fn print_database_help(to_stderr: bool) {
         eprintln!("{help}");
     } else {
         println!("{help}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::ExitCode;
+
+    use mads_common::__private::{DiagnosticReport, GraphReport, InspectionKind, InspectionReport};
+
+    use super::render_inspection_report;
+
+    #[test]
+    fn inspection_output_selects_renderer_separates_diagnostics_and_maps_failure() {
+        let failed = InspectionReport {
+            kind: InspectionKind::Routes,
+            graph: GraphReport::default(),
+            routes: Vec::new(),
+            checks: Vec::new(),
+            diagnostics: vec![DiagnosticReport {
+                code: "MADS003".into(),
+                title: "missing provider".into(),
+                message: "UserService needs UserRepository".into(),
+                subject: Some("UserRepository".into()),
+                location: None,
+                suggestions: vec!["register UserRepository".into()],
+            }],
+            failed: true,
+        };
+
+        let (body, diagnostics, exit) = render_inspection_report(&failed);
+        assert_eq!(
+            body,
+            "METHOD  PATH        ROUTE                    CONTROLLER       GUARD  SOURCE\n(none)"
+        );
+        assert_eq!(
+            diagnostics,
+            "error[MADS003]: missing provider\n  = subject: UserRepository\n  = UserService needs UserRepository\n  help: register UserRepository"
+        );
+        assert_eq!(exit, ExitCode::from(1));
+
+        let successful = InspectionReport {
+            kind: InspectionKind::Doctor,
+            failed: false,
+            diagnostics: Vec::new(),
+            ..failed
+        };
+        let (body, diagnostics, exit) = render_inspection_report(&successful);
+        assert_eq!(body, "(none)");
+        assert!(diagnostics.is_empty());
+        assert_eq!(exit, ExitCode::SUCCESS);
     }
 }
