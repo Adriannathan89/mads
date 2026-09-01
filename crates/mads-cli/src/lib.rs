@@ -7,6 +7,8 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+#[allow(dead_code)]
+mod cargo;
 mod command;
 mod database;
 #[allow(dead_code)]
