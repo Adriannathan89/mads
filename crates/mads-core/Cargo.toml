@@ -12,13 +12,13 @@ description = "Framework-neutral dependency injection, configuration, and lifecy
 [dependencies]
 dotenvy.workspace = true
 inventory.workspace = true
-mads-core-macros = { path = "../mads-core-macros", version = "=0.6.0-beta.1" }
+mads-core-macros = { path = "../mads-core-macros", version = "=0.7.0-beta.1" }
 tokio = { workspace = true, optional = true }
 toml.workspace = true
 toml_edit.workspace = true
 
 [dev-dependencies]
-cargo_metadata = "0.19"
+cargo_metadata.workspace = true
 tempfile = "3"
 tokio.workspace = true
 

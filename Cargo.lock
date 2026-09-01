@@ -922,7 +922,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "mads"
-version = "0.6.0-beta.1"
+version = "0.7.0-beta.1"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -938,17 +938,22 @@ dependencies = [
 
 [[package]]
 name = "mads-cli"
-version = "0.6.0-beta.1"
+version = "0.7.0-beta.1"
 dependencies = [
  "assert_cmd",
+ "cargo_metadata",
  "mads",
  "predicates",
+ "semver",
+ "serde",
+ "serde_json",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
 name = "mads-common"
-version = "0.6.0-beta.1"
+version = "0.7.0-beta.1"
 dependencies = [
  "axum",
  "axum-extra",
@@ -970,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "mads-common-macros"
-version = "0.6.0-beta.1"
+version = "0.7.0-beta.1"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -980,7 +985,7 @@ dependencies = [
 
 [[package]]
 name = "mads-core"
-version = "0.6.0-beta.1"
+version = "0.7.0-beta.1"
 dependencies = [
  "cargo_metadata",
  "dotenvy",
@@ -994,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "mads-core-macros"
-version = "0.6.0-beta.1"
+version = "0.7.0-beta.1"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1004,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "mads-extra"
-version = "0.6.0-beta.1"
+version = "0.7.0-beta.1"
 dependencies = [
  "mads-core",
 ]
@@ -1776,6 +1781,7 @@ version = "1.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
 dependencies = [
+ "bytes",
  "libc",
  "mio",
  "pin-project-lite",
