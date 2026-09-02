@@ -733,9 +733,11 @@ mod tests {
     }
 
     #[test]
-    fn accepts_expect_attributes_on_tables_and_columns() {
+    fn accepts_expect_attributes_on_files_tables_and_columns() {
         let schema = parse_schema(
             r#"
+                #![expect(dead_code)]
+
                 diesel::table! {
                     #[expect(dead_code)]
                     users {
