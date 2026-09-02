@@ -8,7 +8,8 @@
 use std::error::Error as StdError;
 use std::fmt;
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use mads_core::{Diagnostic, DiagnosticCode, Error, MADS020, Mads, Module};
 use tokio::net::TcpListener;
@@ -390,7 +391,27 @@ async fn finish_after_error(
 }
 
 async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
+    let Some(path) = std::env::var_os(crate::__private::DEV_SHUTDOWN_ENV).map(PathBuf::from) else {
+        let _ = tokio::signal::ctrl_c().await;
+        return;
+    };
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = wait_for_dev_shutdown(path) => {}
+    }
+}
+
+async fn wait_for_dev_shutdown(path: PathBuf) {
+    loop {
+        if tokio::fs::metadata(&path)
+            .await
+            .is_ok_and(|metadata| metadata.is_file())
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 #[cfg(test)]
@@ -402,6 +423,7 @@ mod tests {
     use std::net::{Ipv4Addr, SocketAddr};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use mads_core::{
         ApplicationContext, AutoConfigurationStatus, ConfigBuilder, Diagnostic, Error,
@@ -411,7 +433,7 @@ mod tests {
 
     use super::{
         HttpRuntimeError, MADS031, StartupSummary, prepare_standard_application,
-        prepare_standard_run, serve_prepared, serve_router_with, serve_with,
+        prepare_standard_run, serve_prepared, serve_router_with, serve_with, wait_for_dev_shutdown,
     };
     use crate::cors::CORS_AUTO_CONFIGURATION_ID;
     use crate::server_config::{HttpRuntimeMode, SERVER_AUTO_CONFIGURATION_ID, ServerBinding};
@@ -426,6 +448,25 @@ mod tests {
     static STARTS: AtomicUsize = AtomicUsize::new(0);
     static BINDS: AtomicUsize = AtomicUsize::new(0);
     static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test]
+    async fn private_shutdown_file_completes_the_standard_shutdown_signal() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("shutdown");
+        let mut waiting = tokio::spawn(wait_for_dev_shutdown(path.clone()));
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(110), &mut waiting)
+                .await
+                .is_err()
+        );
+
+        tokio::fs::write(&path, b"stop").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("shutdown file should be observed")
+            .unwrap();
+    }
 
     #[mads_core::module]
     struct ServerTestApp;

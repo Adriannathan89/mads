@@ -173,6 +173,10 @@ pub use route::{
 #[doc(hidden)]
 #[cfg(feature = "http")]
 pub mod __private {
+    /// Environment variable used by the development supervisor for graceful shutdown.
+    #[doc(hidden)]
+    pub const DEV_SHUTDOWN_ENV: &str = "MADS_INTERNAL_DEV_SHUTDOWN_PATH";
+
     pub use axum::Router;
     pub use axum::routing::{delete, get, patch, post, put};
 
