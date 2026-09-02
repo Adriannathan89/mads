@@ -4,7 +4,10 @@ use std::{
 };
 
 use cargo_metadata::{Artifact, Message};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader, Lines},
+    process::{Child, ChildStdout},
+};
 
 use crate::{
     diagnostic::{CliError, MADS201},
@@ -43,67 +46,109 @@ pub(crate) async fn build_application(
 pub(crate) async fn build_application_owned(
     target: ResolvedApplication,
 ) -> Result<BuiltApplication, CliError> {
-    let mut child = cargo_build_command(&target).spawn().map_err(|error| {
-        CliError::new(
-            MADS201,
-            "Cargo build failed",
-            "could not start Cargo for the selected application",
-        )
-        .with_source(error)
-    })?;
-    let stdout = child.stdout.take().ok_or_else(|| {
-        CliError::new(
-            MADS201,
-            "Cargo build failed",
-            "could not read Cargo build output",
-        )
-    })?;
-    let mut lines = BufReader::new(stdout).lines();
-    let mut collector = ArtifactCollector::default();
+    let mut build = CargoBuild::start(target)?;
+    build.wait().await
+}
 
-    while let Some(line) = lines.next_line().await.map_err(|error| {
-        CliError::new(
-            MADS201,
-            "Cargo build failed",
-            "could not read Cargo build output",
-        )
-        .with_source(error)
-    })? {
-        let message = serde_json::from_str::<Message>(&line).map_err(|error| {
+pub(crate) struct CargoBuild {
+    target: ResolvedApplication,
+    child: Child,
+    lines: Lines<BufReader<ChildStdout>>,
+    collector: ArtifactCollector,
+}
+
+impl CargoBuild {
+    pub(crate) fn start(target: ResolvedApplication) -> Result<Self, CliError> {
+        let mut child = cargo_build_command(&target).spawn().map_err(|error| {
             CliError::new(
                 MADS201,
                 "Cargo build failed",
-                "Cargo produced malformed build output",
+                "could not start Cargo for the selected application",
             )
             .with_source(error)
         })?;
+        let stdout = child.stdout.take().ok_or_else(|| {
+            CliError::new(
+                MADS201,
+                "Cargo build failed",
+                "could not read Cargo build output",
+            )
+        })?;
 
-        if let Message::CompilerMessage(message) = &message
-            && let Some(rendered) = &message.message.rendered
-        {
-            eprint!("{rendered}");
+        Ok(Self {
+            target,
+            child,
+            lines: BufReader::new(stdout).lines(),
+            collector: ArtifactCollector::default(),
+        })
+    }
+
+    pub(crate) async fn wait(&mut self) -> Result<BuiltApplication, CliError> {
+        while let Some(line) = self.lines.next_line().await.map_err(|error| {
+            CliError::new(
+                MADS201,
+                "Cargo build failed",
+                "could not read Cargo build output",
+            )
+            .with_source(error)
+        })? {
+            let message = serde_json::from_str::<Message>(&line).map_err(|error| {
+                CliError::new(
+                    MADS201,
+                    "Cargo build failed",
+                    "Cargo produced malformed build output",
+                )
+                .with_source(error)
+            })?;
+
+            if let Message::CompilerMessage(message) = &message
+                && let Some(rendered) = &message.message.rendered
+            {
+                eprint!("{rendered}");
+            }
+
+            self.collector.process(&self.target, message);
         }
 
-        collector.process(&target, message);
+        let status = self.child.wait().await.map_err(|error| {
+            CliError::new(
+                MADS201,
+                "Cargo build failed",
+                "could not wait for Cargo to finish",
+            )
+            .with_source(error)
+        })?;
+        if !status.success() {
+            return Err(CliError::new(
+                MADS201,
+                "Cargo build failed",
+                "Cargo could not build the selected application",
+            ));
+        }
+
+        std::mem::take(&mut self.collector).finish(self.target.clone())
     }
 
-    let status = child.wait().await.map_err(|error| {
-        CliError::new(
-            MADS201,
-            "Cargo build failed",
-            "could not wait for Cargo to finish",
-        )
-        .with_source(error)
-    })?;
-    if !status.success() {
-        return Err(CliError::new(
-            MADS201,
-            "Cargo build failed",
-            "Cargo could not build the selected application",
-        ));
-    }
+    pub(crate) async fn cancel_and_wait(&mut self) -> Result<(), CliError> {
+        let kill_result = self.child.start_kill();
+        let wait_result = self.child.wait().await;
 
-    collector.finish(target)
+        match (kill_result, wait_result) {
+            (Ok(()), Ok(_)) => Ok(()),
+            (_, Err(error)) => Err(CliError::new(
+                MADS201,
+                "Cargo build failed",
+                "could not wait for the cancelled Cargo build",
+            )
+            .with_source(error)),
+            (Err(error), Ok(_)) => Err(CliError::new(
+                MADS201,
+                "Cargo build failed",
+                "could not cancel Cargo build",
+            )
+            .with_source(error)),
+        }
+    }
 }
 
 impl BuiltApplication {

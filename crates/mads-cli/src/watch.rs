@@ -166,7 +166,7 @@ impl WatchSet {
 }
 
 pub(crate) struct WatchEvents {
-    _watcher: notify::RecommendedWatcher,
+    _watcher: Option<notify::RecommendedWatcher>,
     receiver: tokio::sync::mpsc::UnboundedReceiver<Result<Event, notify::Error>>,
 }
 
@@ -188,9 +188,19 @@ impl WatchEvents {
         }
 
         Ok(Self {
-            _watcher: watcher,
+            _watcher: Some(watcher),
             receiver,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn synthetic(
+        receiver: tokio::sync::mpsc::UnboundedReceiver<Result<Event, notify::Error>>,
+    ) -> Self {
+        Self {
+            _watcher: None,
+            receiver,
+        }
     }
 
     pub(crate) async fn recv(&mut self) -> Result<Event, CliError> {
