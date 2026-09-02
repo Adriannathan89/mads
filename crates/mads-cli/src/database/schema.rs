@@ -440,6 +440,7 @@ fn reject_inert_attributes(attributes: &[Attribute], source: &Path) -> Result<()
             || attribute.path().is_ident("warn")
             || attribute.path().is_ident("deny")
             || attribute.path().is_ident("forbid")
+            || attribute.path().is_ident("expect")
     }) {
         return Ok(());
     }
@@ -729,6 +730,25 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn accepts_expect_attributes_on_tables_and_columns() {
+        let schema = parse_schema(
+            r#"
+                diesel::table! {
+                    #[expect(dead_code)]
+                    users {
+                        #[expect(dead_code)]
+                        id -> Int8,
+                    }
+                }
+            "#,
+        )
+        .expect("inert expect attributes should not prevent schema loading");
+
+        assert_eq!(schema.table_names(), ["public.users"]);
+        assert_eq!(schema["public.users"].columns[0].name, "id");
     }
 
     #[test]
