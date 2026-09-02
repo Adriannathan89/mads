@@ -303,7 +303,7 @@ fn plan_tables_ref(
         ));
     }
 
-    warnings.extend(unsupported_warnings(unsupported, &affected));
+    warnings.extend(unsupported_warnings(unsupported, foreign_keys, &affected));
     warnings.sort_by(|left, right| {
         (&left.subject, &left.message).cmp(&(&right.subject, &right.message))
     });
@@ -444,10 +444,15 @@ impl AffectedShape {
                 .get(&object.table)
                 .is_some_and(|columns| object.columns.iter().any(|column| columns.contains(column)))
     }
+
+    fn touches_table_or_column(&self, table: &QualifiedTableName) -> bool {
+        self.tables.contains(table) || self.columns.contains_key(table)
+    }
 }
 
 fn unsupported_warnings(
     unsupported: &[UnsupportedObject],
+    foreign_keys: &[ForeignKeyDependency],
     affected: &AffectedShape,
 ) -> Vec<MigrationWarning> {
     let mut objects = unsupported
@@ -457,7 +462,7 @@ fn unsupported_warnings(
     objects.sort_by(|left, right| {
         (&left.table, &left.kind, &left.name).cmp(&(&right.table, &right.kind, &right.name))
     });
-    objects
+    let mut warnings = objects
         .into_iter()
         .map(|object| {
             warning(
@@ -471,7 +476,22 @@ fn unsupported_warnings(
                 ),
             )
         })
-        .collect()
+        .collect::<Vec<_>>();
+    warnings.extend(
+        foreign_keys
+            .iter()
+            .filter(|dependency| affected.touches_table_or_column(&dependency.parent))
+            .map(|dependency| {
+                warning(
+                    format!(
+                        "{}.{}.{}",
+                        dependency.child.schema, dependency.child.table, dependency.name
+                    ),
+                    "unsupported foreign key is affected and will not be synthesized; review it manually",
+                )
+            }),
+    );
+    warnings
 }
 
 fn unsupported_kind_name(kind: &UnsupportedKind) -> &'static str {
@@ -823,6 +843,58 @@ mod tests {
         )
         .expect_err("retained child cannot reference a dropped parent");
         assert_eq!(error.code(), MADS212);
+    }
+
+    #[test]
+    fn parent_type_change_warns_for_each_retained_child_foreign_key() {
+        let plan = plan_tables(
+            tables([
+                table("parents", [("id", PgType::Integer, false)]),
+                table(
+                    "children",
+                    [
+                        ("id", PgType::BigInt, false),
+                        ("parent_id", PgType::Integer, false),
+                    ],
+                ),
+            ]),
+            vec![UnsupportedObject {
+                kind: UnsupportedKind::ForeignKey,
+                table: name("children"),
+                name: "children_parent_id_fkey".into(),
+                columns: vec!["parent_id".into()],
+            }],
+            vec![ForeignKeyDependency {
+                name: "children_parent_id_fkey".into(),
+                child: name("children"),
+                parent: name("parents"),
+            }],
+            tables([
+                table("parents", [("id", PgType::BigInt, false)]),
+                table(
+                    "children",
+                    [
+                        ("id", PgType::BigInt, false),
+                        ("parent_id", PgType::Integer, false),
+                    ],
+                ),
+            ]),
+        )
+        .expect("parent type change should plan with a foreign-key warning");
+
+        assert_eq!(
+            plan.warnings(),
+            &[
+                super::MigrationWarning {
+                    subject: "public.children.children_parent_id_fkey".into(),
+                    message: "unsupported foreign key is affected and will not be synthesized; review it manually".into(),
+                },
+                super::MigrationWarning {
+                    subject: "public.parents.id".into(),
+                    message: "changing a column type may require a risky cast; review the generated SQL".into(),
+                },
+            ]
+        );
     }
 
     #[test]
