@@ -37,7 +37,13 @@ pub(crate) fn cargo_build_command(target: &ResolvedApplication) -> tokio::proces
 pub(crate) async fn build_application(
     target: &ResolvedApplication,
 ) -> Result<BuiltApplication, CliError> {
-    let mut child = cargo_build_command(target).spawn().map_err(|error| {
+    build_application_owned(target.clone()).await
+}
+
+pub(crate) async fn build_application_owned(
+    target: ResolvedApplication,
+) -> Result<BuiltApplication, CliError> {
+    let mut child = cargo_build_command(&target).spawn().map_err(|error| {
         CliError::new(
             MADS201,
             "Cargo build failed",
@@ -78,7 +84,7 @@ pub(crate) async fn build_application(
             eprint!("{rendered}");
         }
 
-        collector.process(target, message);
+        collector.process(&target, message);
     }
 
     let status = child.wait().await.map_err(|error| {
@@ -97,7 +103,7 @@ pub(crate) async fn build_application(
         ));
     }
 
-    collector.finish(target.clone())
+    collector.finish(target)
 }
 
 impl BuiltApplication {

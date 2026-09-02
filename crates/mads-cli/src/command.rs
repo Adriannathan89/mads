@@ -41,6 +41,8 @@ pub(crate) enum Command {
     Version,
     /// Builds and runs an application.
     Run(ApplicationCommand),
+    /// Watches, rebuilds, and restarts an application.
+    Dev(ApplicationCommand),
     /// Inspects an application through its standard MADS entry point.
     Inspect(InspectionCommand),
     /// Runs or describes a database command.
@@ -91,6 +93,7 @@ pub(crate) fn parse(arguments: &[OsString]) -> Result<Command, ParseError> {
         Some("--help" | "-h") if remaining.is_empty() => Ok(Command::Help),
         Some("--version" | "-V") if remaining.is_empty() => Ok(Command::Version),
         Some("run") => parse_application_command(remaining).map(Command::Run),
+        Some("dev") => parse_application_command(remaining).map(Command::Dev),
         Some("routes") => parse_inspection_command(InspectionKind::Routes, remaining),
         Some("graph") => parse_inspection_command(InspectionKind::Graph, remaining),
         Some("doctor") => parse_inspection_command(InspectionKind::Doctor, remaining),
@@ -294,6 +297,47 @@ mod tests {
                 arguments: args(&["--port", "4100", "two words"]),
             })
         );
+    }
+
+    #[test]
+    fn parses_dev_selectors_and_preserves_forwarded_arguments() {
+        let command = parse(&args(&[
+            "dev",
+            "-p",
+            "api",
+            "--bin",
+            "server",
+            "--",
+            "--seed",
+            "42",
+            "two words",
+        ]))
+        .unwrap();
+
+        assert_eq!(
+            command,
+            Command::Dev(ApplicationCommand {
+                target: TargetSelection {
+                    package: Some("api".into()),
+                    binary: Some("server".into()),
+                },
+                arguments: args(&["--seed", "42", "two words"]),
+            })
+        );
+    }
+
+    #[test]
+    fn dev_rejects_duplicate_and_missing_selectors_like_run() {
+        for arguments in [
+            args(&["--package", "api", "-p", "web"]),
+            args(&["--bin"]),
+            args(&["--package", "--bin", "server"]),
+        ] {
+            assert_eq!(
+                parse(&[vec![OsString::from("dev")], arguments.clone()].concat()),
+                parse(&[vec![OsString::from("run")], arguments].concat()),
+            );
+        }
     }
 
     #[test]

@@ -11,6 +11,7 @@
 mod cargo;
 mod command;
 mod database;
+mod dev;
 #[allow(dead_code)]
 mod dev_state;
 #[allow(dead_code)]
@@ -28,6 +29,7 @@ use std::{ffi::OsString, io, path::PathBuf, process::ExitCode};
 use mads_common::__private::{InspectionKind, InspectionReport};
 
 use command::{Command, DatabaseCommand, DatabaseInvocation, ParseError};
+use dev::run_dev;
 use diagnostic::{CliError, MADS201, MADS202};
 use inspection::inspect_application;
 use project::CargoProject;
@@ -86,6 +88,10 @@ async fn run_command(
                     "the selected application terminated without an ordinary exit code",
                 )),
             }
+        }
+        Command::Dev(command) => {
+            let root = current_dir.map_err(current_directory_error)?;
+            run_dev(command, &root).await
         }
         Command::Inspect(command) => {
             let root = current_dir.map_err(current_directory_error)?;
