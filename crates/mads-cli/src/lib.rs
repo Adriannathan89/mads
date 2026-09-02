@@ -186,7 +186,7 @@ fn print_help(to_stderr: bool) {
 }
 
 fn print_database_help(to_stderr: bool) {
-    let help = "Usage: mads db <command> [--package <package>]\n\nCommands:\n  generate  Generate the complete schema diff (accepts no name)\n  migrate   Apply pending migrations\n  rollback  Revert the latest applied migration\n  status    Show applied and pending migrations\n\nApplication selection:\n  -p, --package <package>";
+    let help = "Usage: mads db <command> [--package <package>]\n\nCommands:\n  generate  Generate one complete schema diff as <timestamp>_schema_diff\n  migrate   Apply pending migrations\n  rollback  Revert the latest applied migration\n  status    Show applied and pending migrations\n\nApplication selection:\n  -p, --package <package>";
 
     if to_stderr {
         eprintln!("{help}");

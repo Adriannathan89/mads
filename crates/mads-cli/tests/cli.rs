@@ -86,8 +86,9 @@ fn help_lists_database_commands() {
         .args(["db", "--help"])
         .assert()
         .success()
-        .stdout(contains("generate"))
-        .stdout(contains("no name"))
+        .stdout(contains(
+            "generate  Generate one complete schema diff as <timestamp>_schema_diff",
+        ))
         .stdout(contains("migrate"))
         .stdout(contains("rollback"))
         .stdout(contains("status"));

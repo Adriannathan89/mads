@@ -52,6 +52,8 @@ pub(crate) enum Command {
 /// A supported database subcommand.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DatabaseCommand {
+    /// Generates one complete, review-required schema diff migration.
+    Generate,
     /// Applies pending migrations.
     Migrate,
     /// Reverts the most recently applied migration.
@@ -161,6 +163,7 @@ fn parse_database_command(arguments: &[OsString]) -> Result<Command, ParseError>
     };
 
     let command = match command.to_str() {
+        Some("generate") => DatabaseCommand::Generate,
         Some("migrate") => DatabaseCommand::Migrate,
         Some("rollback") => DatabaseCommand::Rollback,
         Some("status") => DatabaseCommand::Status,
@@ -264,8 +267,8 @@ mod tests {
     use mads_common::__private::InspectionKind;
 
     use super::{
-        ApplicationCommand, Command, DatabaseInvocation, InspectionCommand, ParseError,
-        TargetSelection, parse,
+        ApplicationCommand, Command, DatabaseCommand, DatabaseInvocation, InspectionCommand,
+        ParseError, TargetSelection, parse,
     };
 
     fn args(arguments: &[&str]) -> Vec<OsString> {
@@ -363,6 +366,37 @@ mod tests {
         ));
         assert!(parse(&args(&["db", "status", "--bin", "server"])).is_err());
         assert!(parse(&args(&["db", "status", "--", "extra"])).is_err());
+    }
+
+    #[test]
+    fn generate_accepts_only_an_optional_package_selector() {
+        assert!(matches!(
+            parse(&args(&["db", "generate"])),
+            Ok(Command::Database(DatabaseInvocation {
+                command: DatabaseCommand::Generate,
+                package: None,
+            }))
+        ));
+        assert!(matches!(
+            parse(&args(&["db", "generate", "-p", "api"])),
+            Ok(Command::Database(DatabaseInvocation {
+                command: DatabaseCommand::Generate,
+                package: Some(package),
+            })) if package == "api"
+        ));
+
+        for arguments in [
+            ["db", "generate", "users"].as_slice(),
+            ["db", "generate", "--diff-schema"].as_slice(),
+            ["db", "generate", "--bin", "server"].as_slice(),
+            ["db", "generate", "--", "extra"].as_slice(),
+            ["db", "generate", "-p", "api", "--package", "web"].as_slice(),
+        ] {
+            assert!(
+                parse(&args(arguments)).is_err(),
+                "{arguments:?} should fail"
+            );
+        }
     }
 
     #[test]

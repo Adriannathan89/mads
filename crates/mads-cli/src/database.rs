@@ -18,10 +18,17 @@ use crate::command::DatabaseCommand;
 mod catalog;
 #[allow(dead_code)]
 mod diff;
+mod publish;
 #[allow(dead_code)]
 mod schema;
 #[allow(dead_code)]
 mod sql;
+
+use catalog::LiveSchema;
+use diff::plan_diff;
+use publish::{SystemMigrationClock, publish_migration};
+use schema::DesiredSchema;
+use sql::render_migration;
 
 /// A database-enabled project whose migration source is loaded on demand.
 pub(crate) struct LoadedDatabaseProject {
@@ -75,6 +82,10 @@ impl CliError {
         }
         Self::from_error(error.to_string(), error)
     }
+
+    fn diagnostic(error: crate::diagnostic::CliError) -> Self {
+        Self::from_error(error.to_string(), error)
+    }
 }
 
 impl fmt::Display for CliError {
@@ -121,12 +132,17 @@ pub(crate) async fn execute(
     command: DatabaseCommand,
     root: &Path,
 ) -> Result<Vec<String>, CliError> {
+    if matches!(command, DatabaseCommand::Generate) {
+        return generate(root).await;
+    }
+
     let project = load_project(root)?;
     let migrations = match command {
         DatabaseCommand::Migrate | DatabaseCommand::Rollback | DatabaseCommand::Status => {
             Some(project.migrations()?)
         }
         DatabaseCommand::Help => None,
+        DatabaseCommand::Generate => unreachable!("generate returns before loading configuration"),
     };
     let database = project.connect()?;
 
@@ -177,11 +193,38 @@ pub(crate) async fn execute(
                 ));
                 lines
             }),
-        DatabaseCommand::Help => Ok(Vec::new()),
+        DatabaseCommand::Generate | DatabaseCommand::Help => Ok(Vec::new()),
     };
     database.close();
 
     result.map_err(CliError::database)
+}
+
+/// Generates one full supported schema-shape migration without applying it.
+pub(crate) async fn generate(root: &Path) -> Result<Vec<String>, CliError> {
+    let desired = DesiredSchema::load(root).map_err(CliError::diagnostic)?;
+    let project = load_project(root)?;
+    let database = project.connect()?;
+    let namespaces = desired.namespaces();
+    let live_result = LiveSchema::load(&database, &namespaces).await;
+    database.close();
+    let live = live_result.map_err(CliError::diagnostic)?;
+    let plan = plan_diff(&desired, &live).map_err(CliError::diagnostic)?;
+    if plan.is_empty() {
+        return Ok(vec!["schema is up to date".to_owned()]);
+    }
+
+    let rendered = render_migration(&plan);
+    let path =
+        publish_migration(root, &rendered, &SystemMigrationClock).map_err(CliError::diagnostic)?;
+    let mut lines = rendered
+        .warnings
+        .iter()
+        .map(|warning| format!("warning: {warning}"))
+        .collect::<Vec<_>>();
+    lines.push(format!("generated {}", path.display()));
+    lines.push("review up.sql and down.sql before applying".to_owned());
+    Ok(lines)
 }
 
 fn contains_no_migration(error: &DatabaseError) -> bool {
