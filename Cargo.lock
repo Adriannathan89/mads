@@ -991,6 +991,7 @@ version = "0.7.0-beta.1"
 dependencies = [
  "assert_cmd",
  "cargo_metadata",
+ "diesel_table_macro_syntax",
  "mads",
  "mads-common",
  "notify",
@@ -998,6 +999,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "syn 2.0.119",
  "tempfile",
  "tokio",
 ]

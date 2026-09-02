@@ -14,6 +14,9 @@ use mads::{
 
 use crate::command::DatabaseCommand;
 
+#[allow(dead_code)]
+mod schema;
+
 /// A database-enabled project whose migration source is loaded on demand.
 pub(crate) struct LoadedDatabaseProject {
     root: PathBuf,
