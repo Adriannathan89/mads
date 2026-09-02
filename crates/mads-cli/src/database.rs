@@ -20,6 +20,8 @@ mod catalog;
 mod diff;
 #[allow(dead_code)]
 mod schema;
+#[allow(dead_code)]
+mod sql;
 
 /// A database-enabled project whose migration source is loaded on demand.
 pub(crate) struct LoadedDatabaseProject {
