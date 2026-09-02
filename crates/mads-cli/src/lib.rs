@@ -12,6 +12,8 @@ mod cargo;
 mod command;
 mod database;
 #[allow(dead_code)]
+mod dev_state;
+#[allow(dead_code)]
 mod diagnostic;
 mod inspection;
 mod process;

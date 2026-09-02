@@ -240,6 +240,24 @@ impl ResolvedApplication {
     pub(crate) fn mads_version(&self) -> Option<&semver::Version> {
         self.mads_version.as_ref()
     }
+
+    #[cfg(test)]
+    pub(crate) fn test_identity(binary_name: &str) -> Self {
+        Self {
+            package: ResolvedPackage {
+                workspace_root: PathBuf::from("/tmp/mads-dev-state"),
+                package_root: PathBuf::from("/tmp/mads-dev-state"),
+                manifest_path: PathBuf::from("/tmp/mads-dev-state/Cargo.toml"),
+                package_id: serde_json::from_value(serde_json::Value::String(format!(
+                    "mads-dev-state {binary_name}"
+                )))
+                .expect("test package identity is valid"),
+                package_name: "mads-dev-state".into(),
+            },
+            binary_name: binary_name.into(),
+            mads_version: None,
+        }
+    }
 }
 
 fn unknown_package(name: &str, package_names: Vec<String>) -> CliError {

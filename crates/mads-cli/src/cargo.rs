@@ -108,6 +108,14 @@ impl BuiltApplication {
     pub(crate) fn executable(&self) -> &Path {
         &self.executable
     }
+
+    #[cfg(test)]
+    pub(crate) fn test_identity(binary_name: &str) -> Self {
+        Self {
+            target: ResolvedApplication::test_identity(binary_name),
+            executable: PathBuf::from(format!("/tmp/mads-dev-state/{binary_name}")),
+        }
+    }
 }
 
 fn collect_artifact(
