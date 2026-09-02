@@ -10,6 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use assert_cmd::{Command as AssertCommand, cargo::CommandCargoExt};
 use predicates::prelude::*;
 
@@ -146,6 +149,8 @@ impl DevFixture {
         let output = self.project.parent().unwrap().join("dev-output.log");
         let output_file = OpenOptions::new().create(true).append(true).open(&output)?;
         let mut command = ProcessCommand::cargo_bin("mads").map_err(io::Error::other)?;
+        #[cfg(windows)]
+        command.creation_flags(CREATE_NEW_CONSOLE);
         let child = command
             .current_dir(&self.project)
             .args(["dev", "--", "--seed", "42"])
@@ -355,17 +360,69 @@ fn request_dev_shutdown(pid: u32) -> io::Result<()> {
 
 #[cfg(windows)]
 fn request_dev_shutdown(pid: u32) -> io::Result<()> {
-    let status = ProcessCommand::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
+    let status = ProcessCommand::new(std::env::current_exe()?)
+        .args(["--exact", "windows_dev_shutdown_helper", "--nocapture"])
+        .env("MADS_TEST_DEV_PID", pid.to_string())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()?;
     if status.success() {
         Ok(())
     } else {
-        Err(io::Error::other("could not terminate mads dev"))
+        Err(io::Error::other("could not send Ctrl-C to mads dev"))
     }
 }
+
+// Windows does not let a Ctrl-C event target one process group. The test starts
+// `mads dev` in a dedicated console, then this helper attaches to that console
+// and sends Ctrl-C only to its processes. Keeping the P/Invoke inside PowerShell
+// makes this test-only path work without unsafe Rust or production signal code.
+#[cfg(windows)]
+#[test]
+fn windows_dev_shutdown_helper() {
+    let Some(pid) = std::env::var_os("MADS_TEST_DEV_PID") else {
+        return;
+    };
+    let script = r#"
+$signature = @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class MadsDevTestConsole {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool FreeConsole();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool AttachConsole(uint processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool SetConsoleCtrlHandler(IntPtr handler, bool add);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GenerateConsoleCtrlEvent(uint eventType, uint processGroupId);
+}
+'@
+Add-Type -TypeDefinition $signature
+$pid = [uint32]$env:MADS_TEST_DEV_PID
+[MadsDevTestConsole]::FreeConsole() | Out-Null
+if (-not [MadsDevTestConsole]::AttachConsole($pid)) {
+    throw "could not attach to mads dev console: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+}
+[MadsDevTestConsole]::SetConsoleCtrlHandler([IntPtr]::Zero, $true) | Out-Null
+if (-not [MadsDevTestConsole]::GenerateConsoleCtrlEvent(0, 0)) {
+    throw "could not generate Ctrl-C: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+}
+"#;
+    let status = ProcessCommand::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env("MADS_TEST_DEV_PID", pid)
+        .status()
+        .expect("Windows Ctrl-C helper should run");
+    assert!(status.success(), "Windows Ctrl-C helper should succeed");
+}
+
+#[cfg(windows)]
+const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
 
 #[cfg(not(any(unix, windows)))]
 fn request_dev_shutdown(pid: u32) -> io::Result<()> {
