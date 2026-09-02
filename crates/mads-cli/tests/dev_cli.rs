@@ -403,9 +403,9 @@ public static class MadsDevTestConsole {
 }
 '@
 Add-Type -TypeDefinition $signature
-$pid = [uint32]$env:MADS_TEST_DEV_PID
+$devPid = [uint32]$env:MADS_TEST_DEV_PID
 [MadsDevTestConsole]::FreeConsole() | Out-Null
-if (-not [MadsDevTestConsole]::AttachConsole($pid)) {
+if (-not [MadsDevTestConsole]::AttachConsole($devPid)) {
     throw "could not attach to mads dev console: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
 }
 [MadsDevTestConsole]::SetConsoleCtrlHandler([IntPtr]::Zero, $true) | Out-Null
