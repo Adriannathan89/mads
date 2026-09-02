@@ -1,5 +1,6 @@
 use crate::{cargo::BuiltApplication, watch::ChangeImpact};
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub(crate) enum DevEvent {
     Start,
