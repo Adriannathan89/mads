@@ -80,7 +80,12 @@ fn qualified(table: &QualifiedTableName) -> String {
 fn normalized_warnings(warnings: &[MigrationWarning]) -> Vec<String> {
     let mut normalized = warnings
         .iter()
-        .map(|warning| (&warning.subject, &warning.message))
+        .map(|warning| {
+            (
+                escape_warning_line_breaks(&warning.subject),
+                escape_warning_line_breaks(&warning.message),
+            )
+        })
         .collect::<Vec<_>>();
     normalized.sort();
     normalized.dedup();
@@ -88,6 +93,10 @@ fn normalized_warnings(warnings: &[MigrationWarning]) -> Vec<String> {
         .into_iter()
         .map(|(subject, message)| format!("{subject}: {message}"))
         .collect()
+}
+
+fn escape_warning_line_breaks(content: &str) -> String {
+    content.replace('\r', "\\r").replace('\n', "\\n")
 }
 
 fn render_document(warnings: &[String], operations: &[Operation]) -> String {
@@ -306,6 +315,32 @@ mod tests {
                 "-- WARNING: public.users.email: cast review\n"
             )
         );
+    }
+
+    #[test]
+    fn escapes_warning_line_breaks_before_exposing_or_rendering_them() {
+        let warnings = normalized_warnings(&[
+            MigrationWarning {
+                subject: "public.users\nDROP TABLE \"public\".\"accounts\";".into(),
+                message: "review\rthis\ncarefully".into(),
+            },
+            MigrationWarning {
+                subject: "public.users\\nDROP TABLE \"public\".\"accounts\";".into(),
+                message: "review\\rthis\\ncarefully".into(),
+            },
+        ]);
+        let expected =
+            "public.users\\nDROP TABLE \"public\".\"accounts\";: review\\rthis\\ncarefully";
+
+        assert_eq!(warnings, [expected]);
+
+        let up_sql = render_document(&warnings, &[]);
+        let down_sql = render_document(&warnings, &[]);
+        for document in [up_sql, down_sql] {
+            assert!(document.contains(&format!("-- WARNING: {expected}")));
+            assert!(!document.contains("\r"));
+            assert!(!document.contains("\nDROP TABLE \"public\".\"accounts\";"));
+        }
     }
 
     fn users_table() -> TableSchema {
