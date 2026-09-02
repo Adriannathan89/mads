@@ -480,6 +480,15 @@ fn parse_catalog_type(catalog_type: &str) -> Option<PgType> {
     if catalog_type == "numeric" || catalog_type.starts_with("numeric(") {
         return Some(PgType::Numeric);
     }
+    if temporal_type(catalog_type, "time", " without time zone") {
+        return Some(PgType::Time);
+    }
+    if temporal_type(catalog_type, "timestamp", " without time zone") {
+        return Some(PgType::Timestamp);
+    }
+    if temporal_type(catalog_type, "timestamp", " with time zone") {
+        return Some(PgType::TimestampWithTimeZone);
+    }
     match catalog_type {
         "boolean" | "bool" => Some(PgType::Bool),
         "smallint" | "int2" => Some(PgType::SmallInt),
@@ -490,9 +499,6 @@ fn parse_catalog_type(catalog_type: &str) -> Option<PgType> {
         "text" => Some(PgType::Text),
         "bytea" => Some(PgType::Bytea),
         "date" => Some(PgType::Date),
-        "time without time zone" => Some(PgType::Time),
-        "timestamp without time zone" => Some(PgType::Timestamp),
-        "timestamp with time zone" => Some(PgType::TimestampWithTimeZone),
         "json" => Some(PgType::Json),
         "jsonb" => Some(PgType::Jsonb),
         "uuid" => Some(PgType::Uuid),
@@ -501,6 +507,24 @@ fn parse_catalog_type(catalog_type: &str) -> Option<PgType> {
         "macaddr" => Some(PgType::MacAddr),
         _ => None,
     }
+}
+
+fn temporal_type(catalog_type: &str, base: &str, qualifier: &str) -> bool {
+    let Some(suffix) = catalog_type.strip_prefix(base) else {
+        return false;
+    };
+    if suffix == qualifier {
+        return true;
+    }
+    let Some((precision, suffix)) = suffix
+        .strip_prefix('(')
+        .and_then(|suffix| suffix.split_once(')'))
+    else {
+        return false;
+    };
+    !precision.is_empty()
+        && precision.bytes().all(|byte| byte.is_ascii_digit())
+        && suffix == qualifier
 }
 
 fn type_length(catalog_type: &str, base: &str) -> Option<Option<u32>> {
@@ -542,7 +566,7 @@ mod tests {
 
     use super::{
         CatalogRows, ColumnRow, ForeignKeyRow, IndexRow, LiveSchema, NamedObjectRow,
-        UnsupportedKind, snapshot_from_rows,
+        UnsupportedKind, parse_catalog_type, snapshot_from_rows,
     };
     use crate::{
         database::schema::{PgType, QualifiedTableName},
@@ -598,6 +622,28 @@ mod tests {
         assert!(!rendered.contains("secret_extension_type"));
         assert!(!rendered.contains("postgres://"));
         assert!(!format!("{error:?}").contains("password"));
+    }
+
+    #[test]
+    fn normalizes_precision_qualified_supported_temporal_types() {
+        for (catalog_type, expected) in [
+            ("time(3) without time zone", PgType::Time),
+            ("timestamp(6) without time zone", PgType::Timestamp),
+            ("timestamp(6) with time zone", PgType::TimestampWithTimeZone),
+            (
+                "time(3) without time zone[]",
+                PgType::Array(Box::new(PgType::Time)),
+            ),
+            (
+                "timestamp(6) with time zone[]",
+                PgType::Array(Box::new(PgType::TimestampWithTimeZone)),
+            ),
+        ] {
+            assert_eq!(parse_catalog_type(catalog_type), Some(expected));
+        }
+
+        assert_eq!(parse_catalog_type("timestamp(full) with time zone"), None);
+        assert_eq!(parse_catalog_type("time(3) with time zone"), None);
     }
 
     #[test]
