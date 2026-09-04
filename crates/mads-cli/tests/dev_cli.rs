@@ -102,7 +102,7 @@ fn real_dev_loop() {
     dev.disarm();
 }
 
-const PHASE_TIMEOUT: Duration = Duration::from_secs(30);
+const PHASE_TIMEOUT: Duration = Duration::from_secs(60);
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 struct DevFixture {

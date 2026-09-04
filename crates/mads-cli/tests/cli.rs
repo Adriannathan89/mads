@@ -9,12 +9,14 @@ use tempfile::tempdir;
 
 #[test]
 fn version_reports_the_workspace_version() {
+    let expected = format!("mads {}", env!("CARGO_PKG_VERSION"));
+
     Command::cargo_bin("mads")
         .expect("binary should build")
         .arg("--version")
         .assert()
         .success()
-        .stdout(contains("mads 0.7.0-beta.1"));
+        .stdout(contains(expected));
 }
 
 #[test]
