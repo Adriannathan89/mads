@@ -4,11 +4,18 @@ use crate::Catalog;
 
 mod analysis;
 mod cycle;
+mod inspection;
 mod model;
 mod module;
 mod plan;
 mod scope;
 
+#[doc(hidden)]
+pub use inspection::{
+    AutoConfigurationInspectionSnapshot, DependencyInspectionSnapshot, GraphInspectionSnapshot,
+    ModuleImportInspectionSnapshot, ModuleInspectionSnapshot, OwnedSourceLocation,
+    ProviderInspectionSnapshot,
+};
 pub use model::{
     ApplicationGraph, ConstructionPlan, ConstructionStep, DependencyEdge, GraphAnalysis,
     ProviderNode, ProviderOrigin, ProviderState,

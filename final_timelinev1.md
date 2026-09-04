@@ -28,10 +28,12 @@ Target utama v1:
 0.5.5  Configuration Arrays + Cookies + Passport/JWT
   ↓
 0.6.0  Modules + Scoped HTTP Runtime
+  └─ beta.1  Public HTTP application foundation
   ↓
-0.7.0  Validation + Errors
+0.7.0  CLI + Dev Loop + Diagnostics
+  └─ beta.1  Complete v0.7 feature set before stable promotion
   ↓
-0.8.0  CLI + Diagnostics
+0.8.0  Input Validation + REST Errors + Configuration UX
   ↓
 0.9.0  Testing + Hardening
   ↓
@@ -393,7 +395,7 @@ tidak pernah resolved configuration values atau credentials.
 - default database wiring membutuhkan zero bootstrap code di `main`;
 - custom Database provider dapat override default;
 - auto-config activation deterministic;
-- reason dapat dipakai oleh `mads doctor` di milestone v0.8.
+- reason dapat dipakai oleh `mads doctor` di milestone v0.7.
 - `DatabaseBootstrap` tetap merupakan explicit override; embedded migrations
   didaftarkan secara terpisah dan tidak pernah dihasilkan otomatis.
 
@@ -554,11 +556,158 @@ compatibility low-level.
 
 ---
 
-# v0.7.0 — Validation, Errors, and Configuration UX
+# v0.7.0 — CLI, Dev Loop, and Framework Diagnostics
 
 ## Objective
 
-Membuat common REST application tidak perlu merakit validation/error plumbing sendiri.
+Menjadikan explainable magic dan development loop sebagai bagian produk. Hanya
+diagnostic, error, configuration inspection, dan framework metadata yang
+dibutuhkan CLI yang masuk milestone ini.
+
+`0.7.0-beta.1` harus membawa seluruh feature set v0.7. Stable `0.7.0` hanya
+menambahkan bug fix, koreksi dokumentasi, testing, dan release verification;
+stable tidak menambahkan fitur baru setelah beta.
+
+### CLI
+
+```bash
+mads dev [--package <package>] [--bin <bin>] [-- <app-args>...]
+mads run [--package <package>] [--bin <bin>] [-- <app-args>...]
+mads routes [--package <package>] [--bin <bin>]
+mads graph [--package <package>] [--bin <bin>]
+mads doctor [--package <package>] [--bin <bin>]
+mads db generate [--package <package>]
+mads db migrate [--package <package>]
+mads db rollback [--package <package>]
+mads db status [--package <package>]
+```
+
+`-p` merupakan alias Cargo-native untuk `--package`. Jika selector tidak
+diberikan, Cargo memilih target atau melaporkan ambiguity dengan aturan normal.
+Argument setelah `--` diteruskan tanpa perubahan ke application. Command
+`mads foundation` dihapus karena capability-nya digantikan oleh `mads doctor`.
+
+Output v0.7 deterministik dan human-readable. JSON atau machine-readable output
+ditunda ke v0.8.
+
+### Application Inspection Protocol
+
+`mads routes`, `mads graph`, dan `mads doctor` menjalankan selected application
+binary sebagai short-lived child dalam private versioned inspection mode.
+`Mads::run::<AppModule>()` mendeteksi mode ini sebelum provider construction,
+lifecycle startup, database connection, migration, listener bind, atau request
+serving. Child mengembalikan structured report lalu keluar; hanya parent CLI
+yang merender output.
+
+v0.7 mendukung standard `Mads::run::<AppModule>()` entry point. Low-level custom
+builder tidak diinspeksi dan menerima unsupported-entry-point diagnostic.
+Protocol handshake, version check, timeout, dan child termination mencegah
+process yang tidak kompatibel dibiarkan berjalan. Jaminan tanpa runtime side
+effect berlaku untuk MADS startup; Cargo build scripts atau arbitrary user code
+sebelum `Mads::run` berada di luar standard entry-point contract.
+
+### `mads run` and `mads dev`
+
+`mads run` membangun dan menjalankan selected Cargo binary, meneruskan output,
+argument, signal, dan application exit result.
+
+`mads dev` menyediakan watcher sendiri tanpa executable `cargo-watch`. Watcher
+mencakup Rust sources, local path dependencies, Cargo manifests/lockfile,
+`mads.toml`, `.env`, migrations, dan schema files. Rust, Cargo, schema, atau
+embedded migration changes memakai Cargo incremental build. Config-only change
+me-restart last successful binary tanpa rebuild.
+
+Events di-debounce. Last successful application tetap berjalan selama rebuild;
+successful build menggantinya secara graceful, sedangkan compile failure
+menampilkan Cargo/rustc output apa adanya dan tetap menunggu perubahan baru.
+Tidak ada HMR atau in-process code swapping pada v0.7.
+
+### Routes, Graph, and Doctor
+
+`mads routes` menampilkan method, full path, route trait/handler, controller,
+source location, dan guard state. Conflict atau invalid route tetap menampilkan
+partial useful output, diagnostic, dan failure exit.
+
+`mads graph` menampilkan root/direct-import tree, selected providers, dependency
+edges, owner, origin, visibility, state, dan construction order ketika valid.
+Invalid graph tetap ditampilkan sebatas data yang dapat dianalisis lalu diikuti
+diagnostic.
+
+`mads doctor` melakukan offline framework checks untuk configuration, module
+graph, providers, routes, guards/strategies, server/CORS, dan auto-configuration.
+Status report menggunakan `PASS`, `SKIPPED`, `OVERRIDDEN`, dan `FAILED`.
+Command tidak membuka database connection, menjalankan migration, lifecycle,
+atau listener.
+
+### Database Migration Generation
+
+`mads db generate` tidak menerima nama. Command memuat `src/schema.rs` dan semua
+Rust files di bawah `src/schema/` secara recursive, lalu menggabungkan
+`diesel::table!` declarations secara deterministik. Tidak dibutuhkan external
+Diesel CLI.
+
+Schema dibandingkan dengan live PostgreSQL menggunakan CLI configuration chain
+yang sudah ada: selected package root, optional `.env`, required `mads.toml`,
+`MADS_*` overrides, dan `database.url`.
+
+Supported diff v0.7:
+
+```text
+create/drop table
+add/drop column
+column type change
+column nullability change
+primary-key preservation for created tables
+reversible up/down SQL from captured live state
+```
+
+Jika ada perbedaan, generation membuat:
+
+```text
+migrations/<timestamp>_schema_diff/up.sql
+migrations/<timestamp>_schema_diff/down.sql
+```
+
+Defaults, indexes, checks, triggers, exact foreign-key policies, risky casts,
+dan required columns pada populated tables tidak ditebak diam-diam. Generator
+memberi warning dan review comments. SQL selalu review-required, tidak pernah
+diterapkan otomatis, tidak menimpa path, dan dibuat secara atomic. Failure atau
+no-diff tidak meninggalkan file parsial; no-diff merupakan success.
+
+### Diagnostics and Configuration Inspection
+
+Existing diagnostic model mendapat read-only structured fields dan CLI codes
+yang diperlukan untuk Cargo selection, inspection, graph/routes, watcher,
+schema parsing, database introspection, dan generation safety. Cargo/rustc
+diagnostics tetap diteruskan apa adanya.
+
+Configuration inspection hanya melaporkan presence, winning source, dan hasil
+validation yang diperlukan `doctor`. Generic report tidak mencetak raw values
+atau credentials.
+
+### Exit Criteria
+
+- seluruh command tersedia di `0.7.0-beta.1` dan bekerja di Linux, macOS, dan
+  Windows;
+- `run` dan `dev` memakai Cargo selectors dan argument forwarding yang benar;
+- `routes`, `graph`, dan `doctor` dapat menganalisis standard application tanpa
+  startup side effects;
+- watcher hanya rebuild ketika category perubahan memerlukannya;
+- split schema files menghasilkan satu deterministic complete database diff;
+- generated up/down SQL lolos real PostgreSQL round-trip tests untuk supported
+  operations;
+- no-diff dan failure tidak membuat migration files;
+- stable `0.7.0` tidak menambah fitur setelah beta.
+
+---
+
+# v0.8.0 — Input Validation, REST Errors, and Configuration UX
+
+## Objective
+
+Membuat common REST application tidak perlu merakit input validation, standard
+error mapping, dan typed configuration plumbing sendiri. Scope ini tidak
+memblokir CLI v0.7.
 
 ### Validation
 
@@ -596,96 +745,25 @@ ValidationError
 InternalError
 ```
 
-Error response schema dibuat konsisten.
+Error response schema dibuat konsisten. Common Diesel errors dapat dipetakan ke
+framework result tanpa menghapus kemampuan developer untuk mengembalikan native
+Axum response.
 
-### Typed Config
+### Typed Config and Deferred Diagnostic UX
 
-Implement:
-
-```text
-mads.toml
-environment interpolation
-typed config structs
-startup validation
-secret-safe values foundation
-```
+Implement generic typed configuration, startup validation, environment
+interpolation policy, dan dedicated secret-safe value APIs. Improved opaque
+trait-bound/compiler diagnostics serta optional machine-readable CLI output
+juga dapat diselesaikan di milestone ini karena tidak memblokir CLI v0.7.
 
 ### Exit Criteria
 
 - invalid input tidak masuk handler;
+- validation response konsisten dan source-aware;
 - missing configuration error memiliki source/path yang jelas;
-- common Diesel errors dapat dipetakan ke framework Result;
+- common Diesel errors memiliki standard opt-in mapping;
+- secret values aman dalam display dan debug output;
 - developer tetap dapat return native Axum response.
-
----
-
-# v0.8.0 — CLI, Dev Loop, and Framework Diagnostics
-
-## Objective
-
-Menjadikan explainable magic sebagai bagian produk, bukan debugging internal.
-
-### CLI
-
-```bash
-mads dev
-mads run
-mads routes
-mads graph
-mads doctor
-mads db migrate
-mads db rollback
-mads db status
-```
-
-### `mads dev`
-
-Implement:
-
-```text
-source watch
-incremental build integration
-restart
-route table
-startup summary
-MADS diagnostic rendering
-```
-
-### Diagnostics
-
-Minimum codes/categories:
-
-```text
-unresolved dependency
-duplicate provider
-ambiguous dependency
-dependency cycle
-module cycle
-private provider
-database auto-config failure
-invalid route
-invalid configuration
-```
-
-### `mads doctor`
-
-Example:
-
-```text
-ACTIVE
-✓ HttpServerAutoConfiguration
-✓ DieselDatabaseAutoConfiguration
-
-OVERRIDDEN
-↷ <capability> default provider
-```
-
-### Exit Criteria
-
-- developer dapat melihat route table dan graph;
-- auto-config dapat dijelaskan;
-- common framework failures tidak hanya muncul sebagai opaque trait-bound errors;
-- dev loop dapat digunakan untuk membangun sample CRUD secara nyaman.
 
 ---
 
