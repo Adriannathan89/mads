@@ -4,7 +4,9 @@ use std::any::TypeId;
 
 use mads_core::{Catalog, Mads, ModuleDescriptor, ModuleGraph, Result};
 
-use crate::{ControllerRouteDescriptor, HttpMethod, RouteCatalog, RouteDescriptor};
+use crate::{
+    ControllerRouteDescriptor, HttpMethod, RouteCatalog, RouteContractDescriptor, RouteDescriptor,
+};
 
 #[cfg(feature = "jwt")]
 use crate::{GuardCatalog, GuardDescriptor};
@@ -137,12 +139,59 @@ impl HttpApplicationScope {
         })
     }
 
+    /// Creates an inspection-only scope rooted in a successfully analyzed module graph.
+    ///
+    /// Unlike complete-catalog runtime selection, missing rooted analysis deliberately
+    /// produces an empty scope so inspection cannot expose unrelated linked metadata.
+    #[allow(dead_code)] // Used by the private inspection path added in the next task.
+    pub(crate) fn for_rooted_inspection(module_graph: Option<&ModuleGraph>) -> Result<Self> {
+        let controllers = module_graph
+            .map(Self::rooted_controllers)
+            .unwrap_or_default();
+        #[cfg(feature = "jwt")]
+        let guards = match module_graph {
+            Some(graph) => Self::selected_guards(Some(graph), &controllers),
+            None => Vec::new(),
+        };
+        Ok(Self {
+            controllers,
+            #[cfg(feature = "jwt")]
+            guards,
+        })
+    }
+
     pub(crate) fn controllers(&self) -> &[ScopedController] {
         &self.controllers
     }
 
     pub(crate) fn has_routes(&self) -> bool {
         self.controllers.iter().any(ScopedController::has_routes)
+    }
+
+    /// Iterates selected static route metadata without constructing controllers.
+    #[allow(dead_code)] // Used by the private inspection path added in the next task.
+    pub(crate) fn route_records(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &ControllerRouteDescriptor,
+            &RouteContractDescriptor,
+            &RouteDescriptor,
+        ),
+    > {
+        self.controllers.iter().flat_map(|controller| {
+            controller
+                .descriptor()
+                .contracts()
+                .iter()
+                .flat_map(move |contract| {
+                    contract
+                        .routes()
+                        .iter()
+                        .filter(move |route| controller.selects(route))
+                        .map(move |route| (controller.descriptor(), contract, route))
+                })
+        })
     }
 
     #[cfg(feature = "jwt")]

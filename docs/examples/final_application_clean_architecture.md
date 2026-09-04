@@ -1,9 +1,28 @@
 # MADS.rs — Clean Architecture CRUD User Example
 
-> **Version scope:** The module declarations and `Mads::run::<AppModule>()`
-> startup shown here are the MADS v0.6.0 API. Trait bindings,
-> `Inject<dyn Trait>`, and validation annotations later in this document are
-> conceptual v1 targets and are not part of v0.6.0.
+> **Version scope:** The module declarations, standard
+> `Mads::run::<AppModule>()` startup, and CLI workflow shown here are the MADS
+> v0.7.0 API. Trait bindings, `Inject<dyn Trait>`, and validation
+> annotations later in this document are deferred v0.8/v1 concepts and are
+> not part of the current release.
+
+## v0.7 CLI workflow
+
+Use the standard entry point from the project root:
+
+```bash
+mads doctor
+mads routes
+mads run
+# source/configuration changes are supervised during development
+mads dev
+```
+
+For split Diesel schema declarations, place files such as
+`src/schema/user.rs` and `src/schema/comment.rs` under `src/schema/`. The CLI
+loads that directory recursively in lexical order. `mads db generate` creates
+one automatically named, review-required diff; inspect `up.sql` and `down.sql`
+before `mads db migrate`. Generation never applies migrations automatically.
 
 ## Goal
 
@@ -183,7 +202,7 @@ export DATABASE_URL="postgres://postgres:postgres@localhost/clean_user_api"
 
 Infrastructure configuration stays outside domain/application.
 
-Standard v0.6.0 startup does not discover embedded migrations from the
+Standard v0.7.0 startup does not discover embedded migrations from the
 `migrations/` directory. Readers who set `migrate = true` must use the
 documented low-level builder registration path,
 `builder.database_migrations(MIGRATIONS)?`, before `build().await`.

@@ -1,0 +1,10 @@
+[package]
+name = "mads-inspection-protocol-fixture"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+mads = { path = "../../../../../mads", default-features = false, features = ["http"] }
+mads-common = { path = "../../../../../mads-common", default-features = false, features = ["http"] }

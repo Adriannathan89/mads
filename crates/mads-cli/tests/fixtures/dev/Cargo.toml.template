@@ -1,0 +1,11 @@
+[package]
+name = "dev-loop-fixture"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+default-run = "dev-loop-fixture"
+
+[dependencies]
+mads = { path = "@MADS_PATH@", default-features = false, features = ["http", "runtime-tokio"] }
+
+[workspace]

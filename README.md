@@ -1,10 +1,26 @@
 # MADS.rs
 
-MADS.rs 0.6.0 is a Rust application framework with a framework-neutral core,
+MADS.rs 0.7.0 is a Rust application framework with a framework-neutral core,
 a scoped Axum HTTP runtime, and explainable PostgreSQL/Diesel conditional
 defaults. A root module selects one application; startup validates its scoped
 graph and routes before it starts lifecycle hooks, checks a database, or binds
 a socket.
+
+## CLI quick start
+
+From a project containing one MADS package and binary:
+
+```bash
+mads doctor
+mads routes
+mads run
+# during development
+mads dev
+```
+
+See the [authoritative CLI reference](docs/CLI.md) for target selectors,
+forwarded application arguments, diagnostics, watcher behavior, inspection
+limits, and database commands.
 
 ## Standard application
 
@@ -46,7 +62,7 @@ strategies, and official auto-configurations reachable through that graph.
 
 ```toml
 [dependencies]
-mads = "0.6.0"
+mads = "0.7.0"
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
@@ -140,9 +156,11 @@ activates the linked default only after configuration and virtual graph
 validation. `database_migrations` separately registers one embedded source; it
 does not create a pool, connect, or run migrations. It is required only when
 `database.migrate = true`; existing pending embedded migrations then run after
-readiness, and no pending migrations are a successful no-op. MADS never
-generates migration SQL, derives schema changes, or auto-loads a migration
-directory.
+readiness, and no pending migrations are a successful no-op. Normal startup
+never generates or auto-applies migrations. The explicit `mads db generate`
+command can create one review-required schema-diff migration from `src/schema.rs`
+or recursively loaded `src/schema/**/*.rs`; inspect the generated `up.sql` and
+`down.sql` before applying it with `mads db migrate`.
 
 Inspect the retained, redacted decision records without exposing configuration
 values:
@@ -365,12 +383,16 @@ From a project root containing `mads.toml` and `migrations/`:
 mads db migrate   # apply pending file migrations
 mads db rollback  # revert the latest migration from this source
 mads db status    # report applied and pending versions
+mads db generate  # create one automatically named, review-required diff
 ```
 
-`mads db migrate` prints `applied <version>` for work performed or `database is
-up to date`; `rollback` prints `reverted <version>`; `status` prints individual
-versions plus an applied/pending summary. Invalid command syntax exits with 2;
-configuration, pool, or migration failures exit with 1.
+`mads db generate` never applies its output and has no positional name. It
+loads split Diesel schema files recursively and warns when a change needs
+manual SQL review. `mads db migrate` prints `applied <version>` for work
+performed or `database is up to date`; `rollback` prints `reverted <version>`;
+`status` prints individual versions plus an applied/pending summary. Invalid
+command syntax exits with 2; configuration, pool, or migration failures exit
+with 1.
 
 ## A typed HTTP route
 
@@ -429,13 +451,35 @@ generated router; merge native routes before `configure_router` or
 with Tower's `ServiceExt::oneshot` for in-process route tests without binding a
 listener.
 
+## Benchmarks
+
+The current benchmark suite covers native Axum/MADS throughput and
+process-start-to-ready comparisons with Axum, Go/Gin, and NestJS/Fastify.
+
+| Application | Startup P50 | Startup P95 |
+| --- | ---: | ---: |
+| Native Axum | 21 ms | 30 ms |
+| Go/Gin | 22 ms | 29 ms |
+| MADS | 22 ms | 30 ms |
+| NestJS/Fastify | 428 ms | 443 ms |
+
+The startup comparison uses 1,000 release-build starts per application and an
+equivalent PostgreSQL readiness check. In the exploratory throughput suite,
+every native Axum/MADS saturation range overlaps, while both sustain the fixed
+1,000 requests/second target with closely grouped latency.
+
+See [BENCHMARK.md](BENCHMARK.md) for the complete results, methodology,
+limitations, resource measurements, and interpretation guidance.
+
 ## Current scope
 
-Version 0.6.0 provides root-module scope, Rust-namespace ownership, direct
+Version 0.7.0 provides root-module scope, Rust-namespace ownership, direct
 public cross-module access, scoped providers/controllers/routes/guards/
 strategies/auto-configuration, conventional configuration, automatic one-listener
-HTTP startup, strict application-wide CORS, and raw native-router composition.
-It preserves the low-level builder and complete-catalog rootless compatibility.
+HTTP startup, strict application-wide CORS, raw native-router composition, the
+Cargo-native run/dev CLI, compiled route/graph/doctor inspection, and bounded
+PostgreSQL schema-diff generation. It preserves the low-level builder and
+complete-catalog rootless compatibility.
 
 It does **not** implement trait or interface bindings, `Inject<dyn Trait>`,
 request-validation derives or schemas, login or credential validation, refresh
@@ -443,7 +487,9 @@ endpoints or persistence/rotation/revocation, password hashing, CSRF, remote
 JWKS, JWE, generic typed configuration, third-party auto-configuration, or
 multiple-listener/TLS/HTTP2 server configuration. Database errors are not
 automatically mapped to HTTP responses; applications choose their delivery
-policy.
+policy. Input validation, expanded standard HTTP errors, generic typed
+configuration, compiler-diagnostic rewriting, and machine-readable CLI output
+are v0.8 work.
 
 ## Development
 
@@ -461,3 +507,8 @@ cargo +1.85.0 test --locked --workspace --all-features
 CI also provisions PostgreSQL 16 and runs the ignored database suites plus the
 85% line-coverage gate. To run those locally, set `MADS_TEST_DATABASE_URL` to a
 PostgreSQL 16 database and use the commands in the [v0.5 requirements](docs/importance/version_0.5/auto-configuration.md).
+
+## License
+
+MADS.rs is licensed under either the [Apache License 2.0](LICENSE-APACHE) or
+the [MIT License](LICENSE-MIT), at your option.

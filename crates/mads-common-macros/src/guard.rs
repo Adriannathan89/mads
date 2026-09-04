@@ -204,10 +204,10 @@ fn parse_source(input: ParseStream<'_>) -> syn::Result<TokenSourceSpec> {
         "cookie" => {
             #[cfg(not(feature = "cookies"))]
             {
-                return Err(Error::new(
+                Err(Error::new(
                     source.span(),
                     "cookie token sources require the `cookies` feature",
-                ));
+                ))
             }
 
             #[cfg(feature = "cookies")]

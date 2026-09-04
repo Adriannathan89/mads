@@ -1,6 +1,6 @@
-//! Process-level tests for the MADS CLI foundation.
+//! Process-level tests for the MADS CLI command surface.
 
-use std::fs;
+use std::{fs, path::Path};
 
 use assert_cmd::Command;
 use predicates::prelude::PredicateBooleanExt;
@@ -9,25 +9,14 @@ use tempfile::tempdir;
 
 #[test]
 fn version_reports_the_workspace_version() {
+    let expected = format!("mads {}", env!("CARGO_PKG_VERSION"));
+
     Command::cargo_bin("mads")
         .expect("binary should build")
         .arg("--version")
         .assert()
         .success()
-        .stdout(contains("mads 0.6.0"));
-}
-
-#[test]
-fn foundation_check_reports_available_boundaries() {
-    Command::cargo_bin("mads")
-        .expect("binary should build")
-        .arg("foundation")
-        .assert()
-        .success()
-        .stdout(contains("core: available"))
-        .stdout(contains("common contracts: available"))
-        .stdout(contains("common HTTP runtime: available"))
-        .stdout(contains("extra: reserved"));
+        .stdout(contains(expected));
 }
 
 #[test]
@@ -37,7 +26,41 @@ fn help_is_printed_when_no_command_is_given() {
         .assert()
         .success()
         .stdout(contains("Usage: mads <command>"))
-        .stdout(contains("foundation"));
+        .stdout(contains("run"))
+        .stdout(contains("dev"))
+        .stdout(contains("routes"))
+        .stdout(contains("graph"))
+        .stdout(contains("doctor"));
+}
+
+#[test]
+fn foundation_is_removed_with_usage_exit_two() {
+    Command::cargo_bin("mads")
+        .expect("binary should build")
+        .arg("foundation")
+        .assert()
+        .code(2)
+        .stderr(contains("unknown command: foundation"));
+}
+
+#[test]
+fn run_needs_no_selector_for_one_application_and_forwards_arguments() {
+    let fixture = fixture("single");
+
+    fixture_command("single")
+        .args(["run", "--", "--port", "4100", "two words"])
+        .assert()
+        .success()
+        .stdout(contains(format!("cwd={}", fixture.display())))
+        .stdout(contains("args=--port|4100|two words"));
+}
+
+#[test]
+fn run_preserves_the_application_exit_code() {
+    fixture_command("single")
+        .args(["run", "--", "--exit=23"])
+        .assert()
+        .code(23);
 }
 
 #[test]
@@ -47,7 +70,7 @@ fn unknown_arguments_are_rejected_with_help() {
         .args(["unknown", "extra"])
         .assert()
         .code(2)
-        .stderr(contains("error: unknown argument(s): unknown extra"))
+        .stderr(contains("error: unknown command: unknown"))
         .stderr(contains("Usage: mads <command>"));
 }
 
@@ -58,13 +81,16 @@ fn help_lists_database_commands() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(contains("db          Manage Diesel migrations"));
+        .stdout(contains("db        Manage PostgreSQL migrations"));
 
     Command::cargo_bin("mads")
         .expect("binary should build")
         .args(["db", "--help"])
         .assert()
         .success()
+        .stdout(contains(
+            "generate  Generate one complete schema diff as <timestamp>_schema_diff",
+        ))
         .stdout(contains("migrate"))
         .stdout(contains("rollback"))
         .stdout(contains("status"));
@@ -176,17 +202,6 @@ fn process_database_url_overrides_dotenv_before_migrations_validation() {
 }
 
 #[test]
-fn database_command_rejects_extra_arguments_with_exit_two() {
-    Command::cargo_bin("mads")
-        .expect("binary should build")
-        .args(["db", "migrate", "extra"])
-        .assert()
-        .code(2)
-        .stderr(contains("unknown argument(s): db migrate extra"))
-        .stderr(contains("Usage: mads db <command>"));
-}
-
-#[test]
 fn database_command_never_prints_configured_password() {
     let directory = tempdir().expect("temporary project should be created");
     write_toml(
@@ -203,6 +218,14 @@ fn database_command_never_prints_configured_password() {
 }
 
 fn database_command(root: &std::path::Path) -> Command {
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"database-cli-test\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("Cargo manifest should be written");
+    fs::create_dir_all(root.join("src")).expect("source directory should be created");
+    fs::write(root.join("src/lib.rs"), "").expect("library target should be written");
+
     let mut command = Command::cargo_bin("mads").expect("binary should build");
     command
         .current_dir(root)
@@ -214,4 +237,16 @@ fn database_command(root: &std::path::Path) -> Command {
 
 fn write_toml(root: &std::path::Path, contents: &str) {
     fs::write(root.join("mads.toml"), contents).expect("TOML should be written");
+}
+
+fn fixture_command(name: &str) -> Command {
+    let mut command = Command::cargo_bin("mads").expect("binary should build");
+    command.current_dir(fixture(name));
+    command
+}
+
+fn fixture(name: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/run")
+        .join(name)
 }

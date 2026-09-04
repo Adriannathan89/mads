@@ -1,0 +1,236 @@
+name: Publish stable
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crates-io-stable-publish
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify stable release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Install PostgreSQL client headers
+        run: sudo apt-get update && sudo apt-get install --yes libpq-dev
+      - name: Require a stable workspace version and release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Refusing to publish non-stable version: $version" >&2
+            exit 1
+          fi
+          notes="$(awk -v heading="## [${version}]" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md)"
+          if [[ -z "${notes//[[:space:]]/}" ]]; then
+            echo "CHANGELOG.md has no release notes for ${version}." >&2
+            exit 1
+          fi
+          echo "Publishing stable workspace version $version"
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Test
+        run: cargo test --locked --workspace --all-features
+      - name: Test documentation
+        run: cargo test --locked --workspace --all-features --doc
+      - name: Build documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --workspace --all-features --no-deps
+      - name: Build distributable crate archives
+        run: cargo package --locked --workspace --no-verify
+
+  msrv:
+    name: Verify Rust 1.85.0
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Install PostgreSQL client headers
+        run: sudo apt-get update && sudo apt-get install --yes libpq-dev
+      - name: Test minimum supported Rust version
+        run: cargo test --locked --workspace --all-features
+
+  postgres:
+    name: Verify PostgreSQL integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mads_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d mads_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MADS_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/mads_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install PostgreSQL client headers
+        run: sudo apt-get update && sudo apt-get install --yes libpq-dev
+      - run: cargo test --locked -p mads-common --test database_postgres -- --ignored --test-threads=1
+      - run: cargo test --locked -p mads-common server::tests::database_migration_failure_prevents_listener_binding -- --ignored --test-threads=1
+      - run: cargo test --locked -p mads-cli --test database_cli -- --ignored --test-threads=1
+      - run: cargo test --locked -p mads-cli --test database_generate_postgres -- --ignored --test-threads=1
+      - run: cargo test --locked -p mads --test postgres_crud -- --ignored --test-threads=1
+
+  publish:
+    name: Publish crates to crates.io
+    needs:
+      - verify
+      - msrv
+      - postgres
+    runs-on: ubuntu-latest
+    environment: stable
+    permissions:
+      contents: write
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish workspace crates in dependency order
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
+            echo "Repository or stable environment secret CRATES_IO_TOKEN is not configured." >&2
+            exit 1
+          fi
+
+          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
+          packages=(
+            mads-core-macros
+            mads-common-macros
+            mads-core
+            mads-extra
+            mads-common
+            mads
+            mads-cli
+          )
+
+          publication_status() {
+            local package="$1"
+            local endpoint="https://crates.io/api/v1/crates/${package}/${version}"
+            local status
+
+            if ! status="$(
+              curl --silent --show-error --location \
+                --retry 3 --retry-all-errors \
+                --connect-timeout 10 --max-time 30 \
+                --output /dev/null --write-out '%{http_code}' \
+                --user-agent "mads-stable-publish/${version} (${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY})" \
+                "$endpoint"
+            )"; then
+              echo "Failed to check ${package} ${version} on crates.io." >&2
+              return 2
+            fi
+
+            case "$status" in
+              200) return 0 ;;
+              404) return 1 ;;
+              *)
+                echo "Unexpected crates.io status ${status} while checking ${package} ${version}." >&2
+                return 2
+                ;;
+            esac
+          }
+
+          publish_with_retry() {
+            local package="$1"
+            local attempt
+            local status
+
+            for attempt in {1..6}; do
+              echo "Publishing ${package} ${version} (attempt ${attempt}/6)"
+              if cargo publish --locked --package "$package"; then
+                return 0
+              fi
+
+              if publication_status "$package"; then
+                echo "${package} ${version} reached crates.io despite the publish error."
+                return 0
+              else
+                status=$?
+              fi
+              if [[ "$status" -ne 1 || "$attempt" -eq 6 ]]; then
+                return 1
+              fi
+
+              sleep $((attempt * 5))
+            done
+          }
+
+          for package in "${packages[@]}"; do
+            echo "Checking ${package} ${version} on crates.io."
+            if publication_status "$package"; then
+              echo "Skipping ${package} ${version}: already published."
+              continue
+            else
+              status=$?
+            fi
+
+            if [[ "$status" -ne 1 ]]; then
+              exit "$status"
+            fi
+
+            publish_with_retry "$package"
+          done
+      - name: Create GitHub stable release and tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
+          tag="v${version}"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Skipping ${tag}: GitHub release already exists."
+            exit 0
+          fi
+
+          notes_file="$(mktemp)"
+          trap 'rm -f "$notes_file"' EXIT
+          awk -v heading="## [${version}]" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > "$notes_file"
+          if [[ ! -s "$notes_file" ]]; then
+            echo "CHANGELOG.md has no release notes for ${version}." >&2
+            exit 1
+          fi
+          gh release create "$tag" \
+            --target "$GITHUB_SHA" \
+            --title "MADS.rs ${version}" \
+            --latest \
+            --notes-file "$notes_file"

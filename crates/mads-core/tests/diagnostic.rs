@@ -38,6 +38,21 @@ fn renders_a_structured_diagnostic() {
     .with_suggestion("remove one provider declaration");
     let error = Error::new(diagnostic);
 
+    assert_eq!(error.diagnostic().title(), "duplicate provider");
+    assert_eq!(
+        error.diagnostic().message(),
+        "UserService is registered twice"
+    );
+    assert_eq!(error.diagnostic().subject(), Some("UserService"));
+    assert_eq!(
+        error.diagnostic().location(),
+        Some(SourceLocation::new("src/users.rs", 12, 3))
+    );
+    assert_eq!(
+        error.diagnostic().suggestions(),
+        ["remove one provider declaration"]
+    );
+
     assert_eq!(error.code(), MADS001);
     assert!(
         error
