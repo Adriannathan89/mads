@@ -113,6 +113,15 @@ fn operational_database_failures_are_redacted_and_exit_one() {
 }
 
 #[test]
+fn workflow_has_cli_platform_matrix() {
+    let workflow = fs::read_to_string(workspace_root().join(".github/workflows/ci.yml")).unwrap();
+    for runner in ["ubuntu-latest", "macos-latest", "windows-latest"] {
+        assert!(workflow.contains(runner), "missing runner {runner}");
+    }
+    assert!(workflow.contains("cargo test --locked -p mads-cli"));
+}
+
+#[test]
 fn dev_starts_an_application_and_can_be_terminated() {
     let fixture = copied_single_fixture();
     let address = available_localhost_address().unwrap();
