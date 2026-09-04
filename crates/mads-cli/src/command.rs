@@ -77,6 +77,8 @@ pub(crate) enum ParseError {
     NonUnicodeValue(&'static str),
     /// An option was supplied more than once.
     DuplicateOption(&'static str),
+    /// Application arguments were supplied to an inspection command.
+    ApplicationArgumentsNotAccepted,
     /// `db` was not followed by a database command.
     MissingDatabaseCommand,
     /// A database subcommand was not recognized.
@@ -112,6 +114,10 @@ fn parse_inspection_command(
     let mut index = 0;
 
     while let Some(argument) = arguments.get(index) {
+        if argument == OsStr::new("--") {
+            return Err(ParseError::ApplicationArgumentsNotAccepted);
+        }
+
         match argument.to_str() {
             Some("--package" | "-p") => {
                 parse_selector(arguments, &mut index, "--package", &mut target.package)?;
@@ -224,7 +230,8 @@ impl ParseError {
             | Self::UnknownArgument(_)
             | Self::MissingValue(_)
             | Self::NonUnicodeValue(_)
-            | Self::DuplicateOption(_) => false,
+            | Self::DuplicateOption(_)
+            | Self::ApplicationArgumentsNotAccepted => false,
         }
     }
 }
@@ -247,6 +254,12 @@ impl std::fmt::Display for ParseError {
                 write!(formatter, "value for {option} is not valid Unicode")
             }
             Self::DuplicateOption(option) => write!(formatter, "duplicate option: {option}"),
+            Self::ApplicationArgumentsNotAccepted => {
+                write!(
+                    formatter,
+                    "inspection command does not accept application arguments"
+                )
+            }
             Self::MissingDatabaseCommand => write!(formatter, "missing database command"),
             Self::UnknownDatabaseCommand(command) => {
                 write!(
