@@ -91,44 +91,12 @@ jobs:
       - run: cargo test --locked -p mads-cli --test database_generate_postgres -- --ignored --test-threads=1
       - run: cargo test --locked -p mads --test postgres_crud -- --ignored --test-threads=1
 
-  cli-platform:
-    name: CLI (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - name: Install libpq (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install libpq
-          echo "LIBRARY_PATH=$(brew --prefix libpq)/lib" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$(brew --prefix libpq)/lib/pkgconfig" >> "$GITHUB_ENV"
-      - name: Install PostgreSQL client (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          choco install postgresql16 --no-progress -y
-          $pg = Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory |
-            Sort-Object Name -Descending | Select-Object -First 1
-          "PQ_LIB_DIR=$($pg.FullName)\lib" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "$($pg.FullName)\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-      - name: Test CLI processes and watcher
-        run: cargo test --locked -p mads-cli --test cli --test command_matrix -- --test-threads=1
-
   publish:
     name: Publish crates to crates.io
     needs:
       - verify
       - msrv
       - postgres
-      - cli-platform
     runs-on: ubuntu-latest
     environment: beta
     permissions:

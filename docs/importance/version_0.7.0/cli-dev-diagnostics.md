@@ -97,12 +97,13 @@ cargo test --workspace --all-features --doc
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 ```
 
-The cross-platform workflow evidence is the `cli-platform` matrix in
-`.github/workflows/ci.yml`, `.github/workflows/beta-publish.yml`, and
-`.github/workflows/stable-publish.yml`, running the focused CLI smoke suite on
-`macos-latest` and `windows-latest`; Linux receives complete verification in
-the primary jobs. Real database evidence remains in the PostgreSQL 16 service
-job:
+The v0.7 release workflows use Linux as the sole verification platform.
+Complete workspace, CLI, PostgreSQL, MSRV, coverage, and package evidence runs
+in the Linux jobs in `.github/workflows/ci.yml`,
+`.github/workflows/beta-publish.yml`, and
+`.github/workflows/stable-publish.yml`. macOS and Windows are intentionally
+outside the v0.7 release gate. Real database evidence remains in the
+PostgreSQL 16 service job:
 
 ```bash
 cargo test -p mads-common --test database_postgres -- --ignored --test-threads=1

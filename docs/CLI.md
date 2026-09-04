@@ -209,11 +209,11 @@ not appear in normal command output.
 
 ## Platform and standard-entry-point limits
 
-The process and watcher contract is supported on Linux, macOS, and Windows.
-Linux runs the complete workspace verification; the CI platform matrix runs
-the focused CLI smoke suite on macOS and Windows. The PostgreSQL client is
-installed there only because the PostgreSQL-enabled CLI must link successfully;
-real PostgreSQL round trips remain in the Linux PostgreSQL service job.
+The primary v0.7 release gate runs on Linux. It performs complete workspace,
+PostgreSQL, coverage, MSRV, and packaging verification. macOS and Windows are
+not release-gate platforms in v0.7; users on those systems should run the
+documented CLI commands locally. This keeps the release gate focused on one
+reproducible machine while preserving the runtime's portable code paths.
 
 App-aware `routes`, `graph`, and `doctor` inspection is intentionally limited
 to the standard `Mads::run::<AppModule>()` entry point. MADS builds the

@@ -12,7 +12,7 @@ Complete beta of the MADS.rs CLI, development loop, and framework diagnostics.
 - `mads routes`, `mads graph`, and `mads doctor` compiled application inspection.
 - `mads db generate` with automatic naming and recursive split-schema loading.
 - `mads db migrate`, `mads db rollback`, and `mads db status` database operations.
-- Human-readable diagnostics, stable exit classes, redaction, and Linux/macOS/Windows CLI coverage.
+- Human-readable diagnostics, stable exit classes, redaction, and Linux CI coverage.
 - Bounded PostgreSQL schema diff generation with review-required reversible SQL.
 
 ### Beta limitations
