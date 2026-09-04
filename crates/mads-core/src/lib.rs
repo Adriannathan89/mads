@@ -56,6 +56,12 @@ pub use graph::{
     ModuleGraph, ModuleImportEdge, ModuleNode, ProviderNode, ProviderOrigin, ProviderOwnership,
     ProviderState,
 };
+#[doc(hidden)]
+pub use graph::{
+    AutoConfigurationInspectionSnapshot, DependencyInspectionSnapshot, GraphInspectionSnapshot,
+    ModuleImportInspectionSnapshot, ModuleInspectionSnapshot, OwnedSourceLocation,
+    ProviderInspectionSnapshot,
+};
 pub use lifecycle::{LifecycleFuture, LifecycleHook, LifecycleManager, LifecycleState};
 pub use registry::{ErasedProvider, ProviderRegistry};
 

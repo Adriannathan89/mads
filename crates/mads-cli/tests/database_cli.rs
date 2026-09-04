@@ -16,6 +16,44 @@ static TEST_LOCK: Mutex<()> = Mutex::new(());
 const OVERRIDE_URL: &str = "postgres://user:cli-secret@127.0.0.1:1/mads";
 
 #[test]
+fn database_command_rejects_extra_arguments_with_exit_two() {
+    Command::cargo_bin("mads")
+        .expect("binary should build")
+        .args(["db", "migrate", "extra"])
+        .assert()
+        .code(2)
+        .stderr(contains("unknown argument: extra"))
+        .stderr(contains("Usage: mads db <command>"));
+}
+
+#[test]
+fn database_option_errors_print_database_help() {
+    for arguments in [
+        &["db", "status", "--bin", "server"][..],
+        &["db", "status", "--package", "api", "-p", "web"][..],
+        &["db", "status", "--package"][..],
+    ] {
+        Command::cargo_bin("mads")
+            .expect("binary should build")
+            .args(arguments)
+            .assert()
+            .code(2)
+            .stderr(contains("Usage: mads db <command>"));
+    }
+}
+
+#[test]
+fn database_command_uses_the_selected_package_root() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/run/multiple");
+    let expected = workspace.join("api/mads.toml");
+
+    project_command(&workspace, ["db", "status", "--package", "api"])
+        .assert()
+        .code(1)
+        .stderr(contains(expected.display().to_string()));
+}
+
+#[test]
 #[ignore = "requires PostgreSQL through MADS_TEST_DATABASE_URL"]
 fn database_migration_commands_are_real_and_redact_overrides() {
     let _lock = TEST_LOCK
@@ -70,6 +108,13 @@ fn database_migration_commands_are_real_and_redact_overrides() {
 
 fn temporary_project() -> TempDir {
     let project = tempdir().expect("temporary project should be created");
+    fs::write(
+        project.path().join("Cargo.toml"),
+        "[package]\nname = \"database-cli-postgres-test\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("Cargo manifest should be written");
+    fs::create_dir(project.path().join("src")).expect("source directory should be created");
+    fs::write(project.path().join("src/lib.rs"), "").expect("library target should be written");
     fs::write(
         project.path().join("mads.toml"),
         "[database]\nurl = \"${MADS_TEST_DATABASE_URL}\"\npool_size = 2\nmigrate = false\n",

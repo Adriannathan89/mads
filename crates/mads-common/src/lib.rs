@@ -21,6 +21,8 @@ mod extract;
 #[cfg(feature = "http")]
 mod http_scope;
 #[cfg(feature = "http")]
+mod inspection;
+#[cfg(feature = "http")]
 mod response;
 #[cfg(feature = "http")]
 mod route;
@@ -110,6 +112,9 @@ pub use response::{Created, HttpError, HttpResult, NoContent};
 #[cfg(feature = "http")]
 pub use router::{build_router, configure_router};
 
+/// Invalid or failed private application-inspection request.
+#[cfg(feature = "http")]
+pub use inspection::MADS032;
 /// Runs validated applications and raw composed routers on the Axum HTTP runtime.
 #[cfg(feature = "http")]
 pub use server::{HttpRuntimeError, MADS031, MadsRunExt, serve, serve_router};
@@ -168,6 +173,10 @@ pub use route::{
 #[doc(hidden)]
 #[cfg(feature = "http")]
 pub mod __private {
+    /// Environment variable used by the development supervisor for graceful shutdown.
+    #[doc(hidden)]
+    pub const DEV_SHUTDOWN_ENV: &str = "MADS_INTERNAL_DEV_SHUTDOWN_PATH";
+
     pub use axum::Router;
     pub use axum::routing::{delete, get, patch, post, put};
 
@@ -214,4 +223,13 @@ pub mod __private {
         crate::passport::PassportStrategyCatalog::preflight_scoped(module_graph, scope.guards())
     }
     pub use crate::route::{RouterBuildContext, ValidatedRouteIter, validate_descriptors};
+
+    #[doc(hidden)]
+    pub use crate::inspection::{
+        AutoConfigurationReport, ConfigurationEvidenceReport, DependencyReport, DiagnosticReport,
+        DoctorCheck, DoctorStatus, GraphReport, INSPECTION_ACK_ENV, INSPECTION_KIND_ENV,
+        INSPECTION_PROTOCOL_VERSION, INSPECTION_RESPONSE_ENV, INSPECTION_TOKEN_ENV,
+        INSPECTION_VERSION_ENV, InspectionEnvelope, InspectionKind, InspectionReport, MADS032,
+        ModuleImportReport, ModuleReport, ProviderReport, RouteReport, SourceReport,
+    };
 }

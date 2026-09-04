@@ -8,7 +8,8 @@
 use std::error::Error as StdError;
 use std::fmt;
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use mads_core::{Diagnostic, DiagnosticCode, Error, MADS020, Mads, Module};
 use tokio::net::TcpListener;
@@ -94,7 +95,11 @@ impl MadsRunExt for Mads {
     {
         async move {
             let root = std::env::current_dir().map_err(config_directory_error)?;
+            if let Some(result) = crate::inspection::try_run_inspection::<M>(&root) {
+                return result;
+            }
             let prepared = prepare_standard_run::<M>(&root).await?;
+            println!("{}", prepared.startup_summary());
             serve_prepared(prepared, TcpListener::bind, shutdown_signal()).await
         }
     }
@@ -104,6 +109,43 @@ struct PreparedStandardRun {
     application: Mads,
     router: axum::Router,
     binding: std::sync::Arc<ServerBinding>,
+    route_count: usize,
+}
+
+struct StartupSummary {
+    host: String,
+    port: u16,
+    route_count: usize,
+}
+
+impl StartupSummary {
+    const fn new(host: String, port: u16, route_count: usize) -> Self {
+        Self {
+            host,
+            port,
+            route_count,
+        }
+    }
+}
+
+impl fmt::Display for StartupSummary {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "MADS application ready\nserver: http://{}:{}\nroutes: {}",
+            self.host, self.port, self.route_count
+        )
+    }
+}
+
+impl PreparedStandardRun {
+    fn startup_summary(&self) -> StartupSummary {
+        StartupSummary::new(
+            self.binding.host().to_owned(),
+            self.binding.port(),
+            self.route_count,
+        )
+    }
 }
 
 async fn prepare_standard_run<M: Module>(
@@ -126,12 +168,12 @@ async fn prepare_standard_run<M: Module>(
 fn prepare_standard_application(
     application: Mads,
 ) -> Result<PreparedStandardRun, HttpRuntimeError> {
-    if !HttpApplicationScope::for_application(&application)
-        .map_err(HttpRuntimeError::Bootstrap)?
-        .has_routes()
-    {
+    let scope =
+        HttpApplicationScope::for_application(&application).map_err(HttpRuntimeError::Bootstrap)?;
+    if !scope.has_routes() {
         return Err(HttpRuntimeError::Bootstrap(no_runnable_route_error()));
     }
+    let route_count = scope.route_records().count();
 
     let router = build_router(&application).map_err(HttpRuntimeError::Bootstrap)?;
     let router = configure_router(&application, router).map_err(HttpRuntimeError::Bootstrap)?;
@@ -144,6 +186,7 @@ fn prepare_standard_application(
         application,
         router,
         binding,
+        route_count,
     })
 }
 
@@ -161,6 +204,7 @@ where
         application,
         router,
         binding,
+        route_count: _,
     } = prepared;
     let address = (binding.host().to_owned(), binding.port());
     serve_configured_router_with(application, router, address, binder, shutdown).await
@@ -347,7 +391,27 @@ async fn finish_after_error(
 }
 
 async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
+    let Some(path) = std::env::var_os(crate::__private::DEV_SHUTDOWN_ENV).map(PathBuf::from) else {
+        let _ = tokio::signal::ctrl_c().await;
+        return;
+    };
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = wait_for_dev_shutdown(path) => {}
+    }
+}
+
+async fn wait_for_dev_shutdown(path: PathBuf) {
+    loop {
+        if tokio::fs::metadata(&path)
+            .await
+            .is_ok_and(|metadata| metadata.is_file())
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 #[cfg(test)]
@@ -359,6 +423,7 @@ mod tests {
     use std::net::{Ipv4Addr, SocketAddr};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use mads_core::{
         ApplicationContext, AutoConfigurationStatus, ConfigBuilder, Diagnostic, Error,
@@ -367,8 +432,8 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::{
-        HttpRuntimeError, MADS031, prepare_standard_application, prepare_standard_run,
-        serve_prepared, serve_router_with, serve_with,
+        HttpRuntimeError, MADS031, StartupSummary, prepare_standard_application,
+        prepare_standard_run, serve_prepared, serve_router_with, serve_with, wait_for_dev_shutdown,
     };
     use crate::cors::CORS_AUTO_CONFIGURATION_ID;
     use crate::server_config::{HttpRuntimeMode, SERVER_AUTO_CONFIGURATION_ID, ServerBinding};
@@ -383,6 +448,25 @@ mod tests {
     static STARTS: AtomicUsize = AtomicUsize::new(0);
     static BINDS: AtomicUsize = AtomicUsize::new(0);
     static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test]
+    async fn private_shutdown_file_completes_the_standard_shutdown_signal() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("shutdown");
+        let mut waiting = tokio::spawn(wait_for_dev_shutdown(path.clone()));
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(110), &mut waiting)
+                .await
+                .is_err()
+        );
+
+        tokio::fs::write(&path, b"stop").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("shutdown file should be observed")
+            .unwrap();
+    }
 
     #[mads_core::module]
     struct ServerTestApp;
@@ -666,6 +750,17 @@ mod tests {
         assert_eq!(
             automatic_report(&prepared.application, SERVER_AUTO_CONFIGURATION_ID).status(),
             AutoConfigurationStatus::Active,
+        );
+        assert_eq!(prepared.route_count, 1);
+    }
+
+    #[test]
+    fn startup_summary_formats_owned_binding_and_validated_route_count() {
+        let summary = StartupSummary::new("api.internal".into(), 4321, 7);
+
+        assert_eq!(
+            summary.to_string(),
+            "MADS application ready\nserver: http://api.internal:4321\nroutes: 7"
         );
     }
 
