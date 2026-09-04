@@ -1,5 +1,10 @@
 # v0.6.0 Modules, CORS, and HTTP Runtime
 
+> **Superseded scope note (2026-09-01):** v0.7 now owns the Cargo-native CLI,
+> app-aware inspection, development supervision, and bounded schema-diff
+> generation. This document remains the historical v0.6 architecture record;
+> see [the v0.7 decision record](../version_0.7.0/cli-dev-diagnostics.md).
+
 ## Standard application boundary
 
 MADS v0.6.0 makes a root module and conventional startup the standard

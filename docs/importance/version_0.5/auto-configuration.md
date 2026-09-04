@@ -5,6 +5,10 @@ full llvm-cov gate passed against an isolated test cluster; total line coverage
 was 91.54%, above the 85% requirement. This document records the approved
 requirements and compatibility boundary.
 
+> **Superseded scope note (2026-09-01):** The earlier v0.7 diagnostics and
+> `mads doctor` deferrals in this historical v0.5 record were moved into the
+> implemented v0.7 CLI milestone. See [the v0.7 decision record](../version_0.7.0/cli-dev-diagnostics.md).
+
 The authoritative design is
 [`docs/superpowers/specs/2026-08-23-v0.5-auto-configuration-design.md`](../../superpowers/specs/2026-08-23-v0.5-auto-configuration-design.md).
 The task-by-task implementation plan is
