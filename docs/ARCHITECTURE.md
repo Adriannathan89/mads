@@ -1,9 +1,10 @@
-# MADS.rs 0.6.0 Architecture
+# MADS.rs 0.7.0 Architecture
 
 MADS.rs separates framework-neutral application semantics from HTTP delivery and
-PostgreSQL persistence. Version 0.6.0 introduces rooted Rust-module scope,
-conventional startup, automatic HTTP binding, and strict application-wide CORS
-without adding HTTP, database, or cryptography dependencies to mads-core.
+PostgreSQL persistence. Version 0.7.0 adds a Cargo-native execution and
+inspection boundary around the v0.6 rooted runtime, plus a development
+supervisor and bounded PostgreSQL schema-diff generation. It does not add input
+validation or machine-readable CLI output.
 
 ~~~text
 Application modules, providers, route traits, and controllers
@@ -109,6 +110,46 @@ context. One visible custom jwt strategy overrides the built-in fallback;
 multiple visible custom strategies with the same name are ambiguous, while
 same-named strategies may coexist where no guard can see both.
 
+## CLI parent and inspection child
+
+Normal execution uses the standard parent process directly:
+
+~~~text
+mads run/dev parent
+  -> Cargo resolves and builds one selected package/binary
+  -> application enters Mads::run::<AppModule>()
+  -> normal providers, lifecycle, configuration, and HTTP behavior run
+~~~
+
+App-aware inspection has a separate side-effect boundary:
+
+~~~text
+mads routes/graph/doctor parent
+  -> Cargo resolves and builds the selected application
+  -> private inspection child enters the standard Mads::run path
+  -> compiled graph/report metadata crosses the private protocol
+  -> child exits; parent renders human-readable output
+~~~
+
+The inspection child reports before normal application startup. It does not
+construct providers, start lifecycle hooks, connect to PostgreSQL, run
+migrations, bind a socket, or serve traffic. Code and build-script effects
+before the standard MADS entry point remain Cargo/application responsibilities.
+Low-level builder-only applications are outside the app-aware inspection
+contract.
+
+## Development supervisor
+
+`mads dev` owns a Cargo build task, a selected application child, and a file
+watcher. The watcher includes reachable local package sources, Cargo manifests
+and lockfiles, migrations, and selected-package `.env`/`mads.toml`; generated
+targets, editor files, `.git`, and unreachable nested packages are excluded.
+Events are debounced for 150 ms. Source/Cargo/migration changes rebuild;
+selected-package configuration changes restart. A batch containing both kinds
+of change is a rebuild. Failed rebuilds keep the last good process and continue
+watching. This is process replacement, not hot module replacement. Ctrl-C
+cancels a build, stops the child, and performs cleanup.
+
 ## Configuration, server, and router composition
 
 Only Mads::run loads conventional configuration. It reads, from the process
@@ -151,8 +192,10 @@ defaults to false.
 Embedded migrations remain an explicit low-level builder registration. When
 database.migrate = true, one embedded source is required; pending migrations run
 after database readiness, while no pending migration is a successful no-op.
-MADS does not generate migrations, derive schema changes, or auto-load a
-migration directory. Reports retain stable reasons and source labels, never
+Normal startup does not generate, auto-load, or auto-apply file migrations.
+The explicit v0.7 `mads db generate` command can recursively load split Diesel
+schema sources and produce one automatically named, review-required migration.
+Reports retain stable reasons and source labels, never
 resolved URLs, ports, origins, credentials, tokens, or keys.
 
 Database::run is the boundary for synchronous native Diesel queries. It checks
@@ -194,11 +237,17 @@ dependency or an explicit value.
 
 ## Deliberately deferred
 
-Version 0.6.0 is PostgreSQL-only and does not add trait or interface bindings,
+Version 0.7.0 remains PostgreSQL-only and does not add trait or interface bindings,
 Inject<dyn Trait>, request-validation derives or schemas, login or credential
 validation, refresh endpoints or persistence/rotation/revocation, password
 hashing, CSRF, remote JWKS, JWE, MySQL/SQLite, generic typed configuration,
-third-party auto-configuration registration, migration generation, proactive
-schema validation, mads doctor, multiple listeners, TLS, or HTTP/2-specific
-server configuration. Database errors remain application delivery-policy
-decisions.
+third-party auto-configuration registration, proactive schema validation,
+multiple listeners, TLS, or HTTP/2-specific server configuration. Database
+errors remain application delivery-policy decisions. Request input validation,
+expanded standard HTTP errors, generic typed configuration,
+compiler-diagnostic rewriting, and machine-readable CLI output are deferred to
+v0.8; v0.7 CLI inspection and bounded generation are implemented now.
+
+The v0.6 record's migration-generation and `mads doctor` deferrals were
+superseded by the v0.7 CLI decision record on 2026-09-01; the historical v0.6
+architecture remains otherwise unchanged.

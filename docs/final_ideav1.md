@@ -705,10 +705,16 @@ mads run
 mads routes
 mads graph
 mads doctor
+mads db generate
 mads db migrate
 mads db rollback
 mads db status
 ```
+
+The v0.7 beta implements this command surface as human-readable CLI behavior.
+`mads db generate` has no positional name: it creates one automatically named,
+review-required schema diff from the loaded Diesel schema. Input validation,
+structured errors, and machine-readable CLI output remain v0.8 directions.
 
 `mads graph` future:
 

@@ -122,6 +122,26 @@ fn workflow_has_cli_platform_matrix() {
 }
 
 #[test]
+fn cli_documentation_lists_the_exact_surface() {
+    let documentation = fs::read_to_string(workspace_root().join("docs/CLI.md")).unwrap();
+    for command in [
+        "mads run",
+        "mads dev",
+        "mads routes",
+        "mads graph",
+        "mads doctor",
+        "mads db generate",
+        "mads db migrate",
+        "mads db rollback",
+        "mads db status",
+    ] {
+        assert!(documentation.contains(command), "missing {command}");
+    }
+    assert!(!documentation.contains("mads db generate <name>"));
+    assert!(!documentation.contains("mads foundation"));
+}
+
+#[test]
 fn dev_starts_an_application_and_can_be_terminated() {
     let fixture = copied_single_fixture();
     let address = available_localhost_address().unwrap();

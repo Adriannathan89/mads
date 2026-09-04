@@ -1,5 +1,66 @@
 # MADS.rs 0.4 PostgreSQL User Slice
 
+> The first section below preserves the historical v0.4 low-level example.
+> The v0.7 CLI workflow and split-schema layout are shown here so the example
+> remains useful with the current beta.
+
+## v0.7 CLI workflow and split schema
+
+From the application root, inspect and run the standard entry point directly:
+
+```bash
+mads doctor
+mads routes
+mads run
+mads dev
+```
+
+The desired Diesel schema can be split into ordinary Rust files and loaded
+recursively:
+
+```text
+src/
+├── main.rs
+└── schema/
+    ├── comment.rs
+    └── user.rs
+```
+
+`src/schema/user.rs`:
+
+```rust,ignore
+diesel::table! {
+    users (id) {
+        id -> Int8,
+        name -> Varchar,
+    }
+}
+```
+
+`src/schema/comment.rs`:
+
+```rust,ignore
+diesel::table! {
+    comments (id) {
+        id -> Int8,
+        body -> Text,
+    }
+}
+```
+
+Generate a complete current diff with an automatic migration name, review the
+files, and only then apply them:
+
+```bash
+mads db generate
+# review migrations/<automatic_name>/up.sql and down.sql
+mads db migrate
+```
+
+There is no named generation form. Defaults, indexes, checks, triggers, and a
+complete foreign-key policy remain explicit migration-SQL review items in the
+v0.7 bounded schema planner.
+
 This v0.4 example keeps persistence explicit: the composition root loads
 configuration, registers one `DatabaseBootstrap`, and a repository uses native
 Diesel through `Database::run`. Database errors below are deliberately mapped
