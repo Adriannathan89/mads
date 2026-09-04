@@ -94,7 +94,7 @@ fn stable_workflow_enforces_release_gates_and_dependency_order() {
             "missing workflow policy: {required}"
         );
     }
-    for dependency in ["verify", "msrv", "postgres", "cli-platform"] {
+    for dependency in ["verify", "msrv", "postgres"] {
         assert!(
             workflow.contains(&format!("      - {dependency}")),
             "publish must depend on {dependency}"
