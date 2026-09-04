@@ -145,19 +145,7 @@ where
             publication_error("the completed migration could not be published", error)
         })?;
         if let Err(error) = sync(&migrations) {
-            let cleanup = fs::remove_dir_all(&final_path);
-            if let Err(cleanup_error) = cleanup {
-                return Err(publication_error(
-                    "the migrations directory could not be synchronized and the newly published migration could not be removed",
-                    io::Error::other(format!(
-                        "sync error: {error}; cleanup error: {cleanup_error}"
-                    )),
-                ));
-            }
-            return Err(publication_error(
-                "the migrations directory could not be synchronized",
-                error,
-            ));
+            return Err(publication_uncertain_error(root, &final_path, error));
         }
         Ok(final_path)
     })();
@@ -250,6 +238,25 @@ fn publication_error(
     error: impl std::error::Error + Send + Sync + 'static,
 ) -> CliError {
     publication_message(message).with_source(error)
+}
+
+fn publication_uncertain_error(
+    root: &Path,
+    final_path: &Path,
+    error: impl std::error::Error + Send + Sync + 'static,
+) -> CliError {
+    let published_path = final_path.strip_prefix(root).map_or_else(
+        |_| final_path.display().to_string(),
+        |path| path.display().to_string(),
+    );
+    CliError::new(
+        MADS213,
+        "Migration publication durability is uncertain",
+        format!(
+            "migration was published at {published_path}, but the migrations directory could not be synchronized; inspect the generated files before retrying"
+        ),
+    )
+    .with_source(error)
 }
 
 struct PublishGuard {
@@ -402,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn atomic_publication_removes_the_published_migration_after_parent_sync_failure() {
+    fn atomic_publication_reports_published_path_after_parent_sync_failure() {
         let root = tempdir().expect("temporary project should be created");
         let migrations = root.path().join("migrations");
         let mut synchronized = Vec::new();
@@ -422,6 +429,11 @@ mod tests {
         .expect_err("a parent sync failure must be reported after publication");
 
         assert_eq!(error.code(), crate::diagnostic::MADS213);
+        assert!(
+            error
+                .to_string()
+                .contains("migration was published at migrations/01788200000123456789_schema_diff")
+        );
         assert_eq!(
             synchronized,
             vec![
@@ -429,7 +441,11 @@ mod tests {
                 migrations.clone(),
             ]
         );
-        assert!(!migrations.exists());
+        assert!(
+            migrations
+                .join("01788200000123456789_schema_diff/up.sql")
+                .exists()
+        );
     }
 
     fn publish_with_second_file_failure(
