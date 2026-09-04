@@ -1,13 +1,10 @@
 # MADS.rs
 
-MADS.rs 0.7.0-beta.1 is a beta Rust application framework with a framework-neutral core,
+MADS.rs 0.7.0 is a Rust application framework with a framework-neutral core,
 a scoped Axum HTTP runtime, and explainable PostgreSQL/Diesel conditional
 defaults. A root module selects one application; startup validates its scoped
 graph and routes before it starts lifecycle hooks, checks a database, or binds
 a socket.
-
-> This prerelease is intended for adopter feedback. Public APIs may change in
-> later `0.7.0-beta.*` releases before `0.7.0` becomes stable.
 
 ## CLI quick start
 
@@ -65,7 +62,7 @@ strategies, and official auto-configurations reachable through that graph.
 
 ```toml
 [dependencies]
-mads = "0.7.0-beta.1"
+mads = "0.7.0"
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
@@ -476,7 +473,7 @@ limitations, resource measurements, and interpretation guidance.
 
 ## Current scope
 
-Version 0.7.0-beta.1 provides root-module scope, Rust-namespace ownership, direct
+Version 0.7.0 provides root-module scope, Rust-namespace ownership, direct
 public cross-module access, scoped providers/controllers/routes/guards/
 strategies/auto-configuration, conventional configuration, automatic one-listener
 HTTP startup, strict application-wide CORS, raw native-router composition, the

@@ -2,9 +2,9 @@
 
 > **Version scope:** The module declarations, standard
 > `Mads::run::<AppModule>()` startup, and CLI workflow shown here are the MADS
-> v0.7.0-beta.1 API. Trait bindings, `Inject<dyn Trait>`, and validation
+> v0.7.0 API. Trait bindings, `Inject<dyn Trait>`, and validation
 > annotations later in this document are deferred v0.8/v1 concepts and are
-> not part of the current beta.
+> not part of the current release.
 
 ## v0.7 CLI workflow
 

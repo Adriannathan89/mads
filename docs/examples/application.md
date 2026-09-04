@@ -2,7 +2,7 @@
 
 > The first section below preserves the historical v0.4 low-level example.
 > The v0.7 CLI workflow and split-schema layout are shown here so the example
-> remains useful with the current beta.
+> remains useful with the current 0.7 release.
 
 ## v0.7 CLI workflow and split schema
 

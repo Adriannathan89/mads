@@ -1,6 +1,6 @@
 # MADS CLI
 
-MADS v0.7.0-beta.1 provides a Cargo-native command line for running one MADS
+MADS v0.7.0 provides a Cargo-native command line for running one MADS
 application, supervising it during development, inspecting its compiled
 metadata, and managing PostgreSQL migrations. Output is deterministic and
 human-readable. There is no JSON or other machine-readable output contract in
