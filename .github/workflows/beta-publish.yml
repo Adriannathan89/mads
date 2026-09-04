@@ -88,6 +88,7 @@ jobs:
       - run: cargo test --locked -p mads-common --test database_postgres -- --ignored --test-threads=1
       - run: cargo test --locked -p mads-common server::tests::database_migration_failure_prevents_listener_binding -- --ignored --test-threads=1
       - run: cargo test --locked -p mads-cli --test database_cli -- --ignored --test-threads=1
+      - run: cargo test --locked -p mads-cli --test database_generate_postgres -- --ignored --test-threads=1
       - run: cargo test --locked -p mads --test postgres_crud -- --ignored --test-threads=1
 
   publish:
