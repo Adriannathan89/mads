@@ -144,9 +144,21 @@ where
         publish_without_replacement(&temporary_path, &final_path).map_err(|error| {
             publication_error("the completed migration could not be published", error)
         })?;
-        sync(&migrations).map_err(|error| {
-            publication_error("the migrations directory could not be synchronized", error)
-        })?;
+        if let Err(error) = sync(&migrations) {
+            let cleanup = fs::remove_dir_all(&final_path);
+            if let Err(cleanup_error) = cleanup {
+                return Err(publication_error(
+                    "the migrations directory could not be synchronized and the newly published migration could not be removed",
+                    io::Error::other(format!(
+                        "sync error: {error}; cleanup error: {cleanup_error}"
+                    )),
+                ));
+            }
+            return Err(publication_error(
+                "the migrations directory could not be synchronized",
+                error,
+            ));
+        }
         Ok(final_path)
     })();
 
@@ -390,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn atomic_publication_syncs_the_parent_after_rename_and_surfaces_parent_sync_errors() {
+    fn atomic_publication_removes_the_published_migration_after_parent_sync_failure() {
         let root = tempdir().expect("temporary project should be created");
         let migrations = root.path().join("migrations");
         let mut synchronized = Vec::new();
@@ -417,11 +429,7 @@ mod tests {
                 migrations.clone(),
             ]
         );
-        assert!(
-            migrations
-                .join("01788200000123456789_schema_diff/up.sql")
-                .is_file()
-        );
+        assert!(!migrations.exists());
     }
 
     fn publish_with_second_file_failure(
