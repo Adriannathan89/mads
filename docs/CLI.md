@@ -210,8 +210,10 @@ not appear in normal command output.
 ## Platform and standard-entry-point limits
 
 The process and watcher contract is supported on Linux, macOS, and Windows.
-The beta CI matrix runs the CLI process suite serially on all three platforms;
-real PostgreSQL round trips remain in the PostgreSQL service job.
+Linux runs the complete workspace verification; the CI platform matrix runs
+the focused CLI smoke suite on macOS and Windows. The PostgreSQL client is
+installed there only because the PostgreSQL-enabled CLI must link successfully;
+real PostgreSQL round trips remain in the Linux PostgreSQL service job.
 
 App-aware `routes`, `graph`, and `doctor` inspection is intentionally limited
 to the standard `Mads::run::<AppModule>()` entry point. MADS builds the

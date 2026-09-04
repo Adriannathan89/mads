@@ -98,9 +98,10 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 ```
 
 The cross-platform workflow evidence is the `cli-platform` matrix in
-`.github/workflows/ci.yml` and `.github/workflows/beta-publish.yml`, running
-`cargo test --locked -p mads-cli` on `ubuntu-latest`, `macos-latest`, and
-`windows-latest`. Real database evidence remains in the PostgreSQL 16 service
+`.github/workflows/ci.yml`, `.github/workflows/beta-publish.yml`, and
+`.github/workflows/stable-publish.yml`, running the focused CLI smoke suite on
+`macos-latest` and `windows-latest`; Linux receives complete verification in
+the primary jobs. Real database evidence remains in the PostgreSQL 16 service
 job:
 
 ```bash
