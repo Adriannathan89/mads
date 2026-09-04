@@ -113,33 +113,18 @@ fn operational_database_failures_are_redacted_and_exit_one() {
 }
 
 #[test]
-fn workflow_has_cli_platform_matrix() {
-    let workflow = fs::read_to_string(workspace_root().join(".github/workflows/ci.yml")).unwrap();
-    for runner in ["macos-latest", "windows-latest"] {
-        assert!(workflow.contains(runner), "missing runner {runner}");
-    }
-    assert!(workflow.contains(
-        "cargo test --locked -p mads-cli --test cli --test command_matrix -- --test-threads=1"
-    ));
-}
-
-#[test]
-fn publish_workflows_use_linux_for_full_tests_and_platform_smoke_only() {
+fn release_workflows_use_linux_as_the_only_verification_platform() {
     for workflow_path in [
         ".github/workflows/ci.yml",
         ".github/workflows/beta-publish.yml",
         ".github/workflows/stable-publish.yml",
     ] {
         let workflow = fs::read_to_string(workspace_root().join(workflow_path)).unwrap();
-        let smoke_command =
-            "cargo test --locked -p mads-cli --test cli --test command_matrix -- --test-threads=1";
+        assert!(!workflow.contains("cli-platform"), "{workflow_path}");
+        assert!(!workflow.contains("macos-latest"), "{workflow_path}");
+        assert!(!workflow.contains("windows-latest"), "{workflow_path}");
         assert!(
-            workflow.contains("os: [macos-latest, windows-latest]"),
-            "{workflow_path}"
-        );
-        assert!(workflow.contains(smoke_command), "{workflow_path}");
-        assert!(
-            !workflow.contains("cargo test --locked -p mads-cli -- --test-threads=1"),
+            workflow.contains("runs-on: ubuntu-latest"),
             "{workflow_path}"
         );
     }
