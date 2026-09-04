@@ -3,7 +3,10 @@
 use std::{fs, path::Path};
 
 use assert_cmd::Command;
-use predicates::{prelude::PredicateBooleanExt, str::contains};
+use predicates::{
+    prelude::PredicateBooleanExt,
+    str::{contains, is_match},
+};
 use tempfile::{TempDir, tempdir};
 
 #[test]
@@ -107,6 +110,20 @@ fn generate_redacts_an_unreachable_database_url_and_password() {
 }
 
 #[test]
+fn generate_discovers_a_project_with_an_empty_path_and_absolute_cargo() {
+    let project = project_without_schema();
+
+    generate_command(project.path())
+        .env("CARGO", absolute_cargo())
+        .env("RUSTC", absolute_rustc())
+        .env("PATH", "")
+        .assert()
+        .code(1)
+        .stderr(contains("MADS210"))
+        .stderr(contains("MADS201").not());
+}
+
+#[test]
 #[ignore = "requires PostgreSQL through MADS_TEST_DATABASE_URL; Task 7 runs database round-trip coverage"]
 fn generate_no_diff_reports_up_to_date_without_creating_migrations() {
     let project = project_with_schema_source("// an intentionally empty desired schema\n");
@@ -128,10 +145,12 @@ fn generate_with_path_removed_never_needs_an_external_diesel_executable() {
 
     generate_command(project.path())
         .env("MADS_TEST_DATABASE_URL", test_database_url())
+        .env("CARGO", absolute_cargo())
+        .env("RUSTC", absolute_rustc())
         .env("PATH", "")
         .assert()
         .success()
-        .stdout(contains("generated migrations/"));
+        .stdout(is_match(r"(?m)^generated migrations/[0-9]{20}_schema_diff$").unwrap());
 }
 
 #[test]
@@ -144,7 +163,7 @@ fn generate_success_only_names_the_migration_and_review_requirement() {
         .env("MADS_TEST_DATABASE_URL", test_database_url())
         .assert()
         .success()
-        .stdout(contains("generated migrations/"))
+        .stdout(is_match(r"(?m)^generated migrations/[0-9]{20}_schema_diff$").unwrap())
         .stdout(contains("review up.sql and down.sql before applying"))
         .stdout(contains("postgres://").not());
 }
@@ -197,4 +216,25 @@ fn write_test_database_toml(root: &Path) {
 fn test_database_url() -> String {
     std::env::var("MADS_TEST_DATABASE_URL")
         .expect("MADS_TEST_DATABASE_URL is required for ignored PostgreSQL tests")
+}
+
+fn absolute_cargo() -> &'static Path {
+    let cargo = Path::new(env!("CARGO"));
+    assert!(
+        cargo.is_absolute(),
+        "Cargo must provide an absolute executable path"
+    );
+    cargo
+}
+
+fn absolute_rustc() -> std::path::PathBuf {
+    let rustc = absolute_cargo()
+        .parent()
+        .expect("Cargo executable should have a parent directory")
+        .join("rustc");
+    assert!(
+        rustc.is_file(),
+        "Cargo toolchain should provide rustc next to cargo"
+    );
+    rustc
 }

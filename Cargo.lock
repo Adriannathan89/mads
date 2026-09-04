@@ -996,6 +996,7 @@ dependencies = [
  "mads-common",
  "notify",
  "predicates",
+ "rustix",
  "semver",
  "serde",
  "serde_json",

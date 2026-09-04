@@ -222,9 +222,24 @@ pub(crate) async fn generate(root: &Path) -> Result<Vec<String>, CliError> {
         .iter()
         .map(|warning| format!("warning: {warning}"))
         .collect::<Vec<_>>();
-    lines.push(format!("generated {}", path.display()));
+    lines.push(format!("generated {}", format_generated_path(root, &path)?));
     lines.push("review up.sql and down.sql before applying".to_owned());
     Ok(lines)
+}
+
+fn format_generated_path(root: &Path, path: &Path) -> Result<String, CliError> {
+    path.strip_prefix(root)
+        .map(|relative| relative.display().to_string())
+        .map_err(|error| {
+            CliError::diagnostic(
+                crate::diagnostic::CliError::new(
+                    crate::diagnostic::MADS213,
+                    "Migration publication failed",
+                    "the generated migration path is outside the selected package root",
+                )
+                .with_source(error),
+            )
+        })
 }
 
 fn contains_no_migration(error: &DatabaseError) -> bool {
@@ -247,7 +262,7 @@ mod tests {
 
     use tempfile::{TempDir, tempdir};
 
-    use super::load_project;
+    use super::{format_generated_path, load_project};
 
     #[test]
     fn loading_a_database_project_does_not_require_a_migrations_directory() {
@@ -256,6 +271,19 @@ mod tests {
 
         assert_eq!(project.root(), root.path());
         assert!(project.migrations().is_err());
+    }
+
+    #[test]
+    fn generated_migration_path_is_relative_to_the_selected_package_root() {
+        let root = tempdir().expect("temporary project should be created");
+        let generated = root
+            .path()
+            .join("migrations/01788200000123456789_schema_diff");
+
+        assert_eq!(
+            format_generated_path(root.path(), &generated).unwrap(),
+            "migrations/01788200000123456789_schema_diff"
+        );
     }
 
     fn database_project_without_migrations() -> TempDir {

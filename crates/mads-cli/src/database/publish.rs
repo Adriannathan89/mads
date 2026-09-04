@@ -36,7 +36,14 @@ pub(crate) fn publish_migration(
     rendered: &RenderedMigration,
     clock: &dyn MigrationClock,
 ) -> Result<PathBuf, CliError> {
-    publish_migration_with_writer(root, rendered, clock, write_new_file)
+    publish_migration_with_operations(
+        root,
+        rendered,
+        clock,
+        write_new_file,
+        |_| Ok(()),
+        sync_directory,
+    )
 }
 
 fn timestamp_from_nanos(nanos: u128) -> Result<String, CliError> {
@@ -49,14 +56,38 @@ fn timestamp_from_nanos(nanos: u128) -> Result<String, CliError> {
     Ok(format!("{nanos:020}"))
 }
 
+#[cfg(test)]
 fn publish_migration_with_writer<F>(
     root: &Path,
     rendered: &RenderedMigration,
     clock: &dyn MigrationClock,
-    mut write_file: F,
+    write_file: F,
 ) -> Result<PathBuf, CliError>
 where
     F: FnMut(&Path, &[u8]) -> io::Result<()>,
+{
+    publish_migration_with_operations(
+        root,
+        rendered,
+        clock,
+        write_file,
+        |_| Ok(()),
+        sync_directory,
+    )
+}
+
+fn publish_migration_with_operations<F, H, S>(
+    root: &Path,
+    rendered: &RenderedMigration,
+    clock: &dyn MigrationClock,
+    mut write_file: F,
+    mut before_publish: H,
+    mut sync: S,
+) -> Result<PathBuf, CliError>
+where
+    F: FnMut(&Path, &[u8]) -> io::Result<()>,
+    H: FnMut(&Path) -> io::Result<()>,
+    S: FnMut(&Path) -> io::Result<()>,
 {
     let timestamp = clock.timestamp()?;
     if timestamp.len() != 20 || !timestamp.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -68,16 +99,6 @@ where
     let migrations = root.join("migrations");
     let final_path = migrations.join(format!("{timestamp}_schema_diff"));
     let temporary_path = migrations.join(format!(".mads-{timestamp}-schema-diff.tmp"));
-    if final_path.exists() {
-        return Err(publication_message(
-            "the destination migration directory already exists",
-        ));
-    }
-    if temporary_path.exists() {
-        return Err(publication_message(
-            "the private migration staging directory already exists",
-        ));
-    }
 
     let parent_created = match fs::create_dir(&migrations) {
         Ok(()) => true,
@@ -89,15 +110,18 @@ where
             ));
         }
     };
+    if let Err(error) = fs::create_dir(&temporary_path) {
+        if parent_created {
+            let _ = fs::remove_dir(&migrations);
+        }
+        return Err(publication_error(
+            "the private migration staging directory could not be created",
+            error,
+        ));
+    }
     let mut guard = PublishGuard::new(temporary_path.clone(), migrations.clone(), parent_created);
 
     let result = (|| {
-        fs::create_dir(&temporary_path).map_err(|error| {
-            publication_error(
-                "the private migration staging directory could not be created",
-                error,
-            )
-        })?;
         write_file(&temporary_path.join("up.sql"), rendered.up_sql.as_bytes())
             .map_err(|error| publication_error("up.sql could not be written", error))?;
         write_file(
@@ -105,9 +129,23 @@ where
             rendered.down_sql.as_bytes(),
         )
         .map_err(|error| publication_error("down.sql could not be written", error))?;
-        sync_directory(&temporary_path)?;
-        fs::rename(&temporary_path, &final_path).map_err(|error| {
+        sync(&temporary_path).map_err(|error| {
+            publication_error(
+                "the private migration staging directory could not be synchronized",
+                error,
+            )
+        })?;
+        before_publish(&final_path).map_err(|error| {
+            publication_error(
+                "the completed migration could not be prepared for publication",
+                error,
+            )
+        })?;
+        publish_without_replacement(&temporary_path, &final_path).map_err(|error| {
             publication_error("the completed migration could not be published", error)
+        })?;
+        sync(&migrations).map_err(|error| {
+            publication_error("the migrations directory could not be synchronized", error)
         })?;
         Ok(final_path)
     })();
@@ -118,13 +156,39 @@ where
     result
 }
 
+#[cfg(test)]
+fn publish_migration_with_hook<H>(
+    root: &Path,
+    rendered: &RenderedMigration,
+    clock: &dyn MigrationClock,
+    hook: H,
+) -> Result<PathBuf, CliError>
+where
+    H: FnMut(&Path) -> io::Result<()>,
+{
+    publish_migration_with_operations(root, rendered, clock, write_new_file, hook, sync_directory)
+}
+
+#[cfg(test)]
+fn publish_migration_with_sync_observer<S>(
+    root: &Path,
+    rendered: &RenderedMigration,
+    clock: &dyn MigrationClock,
+    sync: S,
+) -> Result<PathBuf, CliError>
+where
+    S: FnMut(&Path) -> io::Result<()>,
+{
+    publish_migration_with_operations(root, rendered, clock, write_new_file, |_| Ok(()), sync)
+}
+
 fn write_new_file(path: &Path, contents: &[u8]) -> io::Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
     file.write_all(contents)?;
     file.sync_all()
 }
 
-fn sync_directory(path: &Path) -> Result<(), CliError> {
+fn sync_directory(path: &Path) -> io::Result<()> {
     match File::open(path).and_then(|file| file.sync_all()) {
         Ok(()) => Ok(()),
         Err(error)
@@ -135,11 +199,34 @@ fn sync_directory(path: &Path) -> Result<(), CliError> {
         {
             Ok(())
         }
-        Err(error) => Err(publication_error(
-            "a migration directory could not be synchronized",
-            error,
-        )),
+        Err(error) => Err(error),
     }
+}
+
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "redox",
+    target_vendor = "apple"
+))]
+fn publish_without_replacement(temporary_path: &Path, final_path: &Path) -> io::Result<()> {
+    use rustix::fs::{CWD, RenameFlags, renameat_with};
+
+    renameat_with(CWD, temporary_path, CWD, final_path, RenameFlags::NOREPLACE)
+        .map_err(io::Error::from)
+}
+
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "redox",
+    target_vendor = "apple"
+)))]
+fn publish_without_replacement(_temporary_path: &Path, _final_path: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "atomic no-replace directory publication is unavailable on this platform",
+    ))
 }
 
 fn publication_message(message: &'static str) -> CliError {
@@ -273,6 +360,68 @@ mod tests {
 
         assert_eq!(error.code(), crate::diagnostic::MADS213);
         assert!(!root.path().join("migrations").exists());
+    }
+
+    #[test]
+    fn atomic_publication_preserves_a_final_directory_created_before_no_replace_publish() {
+        let root = tempdir().expect("temporary project should be created");
+        let final_path = root
+            .path()
+            .join("migrations/01788200000123456789_schema_diff");
+
+        let error =
+            super::publish_migration_with_hook(root.path(), &rendered(), &FixedClock, |path| {
+                fs::create_dir(path)?;
+                fs::write(path.join("sentinel"), "preserved")
+            })
+            .expect_err("a concurrently created final directory must prevent publication");
+
+        assert_eq!(error.code(), crate::diagnostic::MADS213);
+        assert_eq!(
+            fs::read_to_string(final_path.join("sentinel")).unwrap(),
+            "preserved"
+        );
+        assert!(
+            !root
+                .path()
+                .join("migrations/.mads-01788200000123456789-schema-diff.tmp")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn atomic_publication_syncs_the_parent_after_rename_and_surfaces_parent_sync_errors() {
+        let root = tempdir().expect("temporary project should be created");
+        let migrations = root.path().join("migrations");
+        let mut synchronized = Vec::new();
+
+        let error = super::publish_migration_with_sync_observer(
+            root.path(),
+            &rendered(),
+            &FixedClock,
+            |path| {
+                synchronized.push(path.to_path_buf());
+                if path == migrations {
+                    return Err(std::io::Error::other("simulated parent sync failure"));
+                }
+                Ok(())
+            },
+        )
+        .expect_err("a parent sync failure must be reported after publication");
+
+        assert_eq!(error.code(), crate::diagnostic::MADS213);
+        assert_eq!(
+            synchronized,
+            vec![
+                migrations.join(".mads-01788200000123456789-schema-diff.tmp"),
+                migrations.clone(),
+            ]
+        );
+        assert!(
+            migrations
+                .join("01788200000123456789_schema_diff/up.sql")
+                .is_file()
+        );
     }
 
     fn publish_with_second_file_failure(
